@@ -1,19 +1,27 @@
 #include <errno.h>
 #include <stdio.h>
 
-#include "xfuse_endianess.h"
+#include "xfuse_end.h"
 #include "xfuse_sb.h"
 
 int xfuse_sb_is_valid(xfuse_sb *sb) {
   if (sb->sb_magicnum != XFS_SB_MAGIC) {
+    errno = EINVAL;
     fprintf(stderr,
             "xfuse_sb_is_valid -> Superblock magic number is invalid: %d\n",
-            EINVAL);
-    errno = EINVAL;
+            errno);
     return -1;
   }
 
   return 0;
+}
+
+bool xfuse_sb_has_file_type_field(xfuse_sb *sb) {
+  return sb->sb_features2 & XFS_SB_VERSION2_FTYPE;
+}
+
+uint8_t xfuse_sb_get_ag_ino_bits(xfuse_sb *sb) {
+  return sb->sb_agblklog + sb->sb_inopblog;
 }
 
 void xfuse_sb_swap_ends(xfuse_sb *sb) {

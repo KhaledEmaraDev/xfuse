@@ -1,11 +1,17 @@
-#ifndef _XFUSE_TYPES_H
-#define _XFUSE_TYPES_H
+#ifndef _XFUSE_DEF_H
+#define _XFUSE_DEF_H
 
 #include <stdbool.h>
 #include <stdint.h>
 #include <uuid/uuid.h>
 
+#define DATA_FORK_OFFSET 0x64
+
 #define XFS_SB_MAGIC 0x58465342
+#define XFS_DINODE_MAGIC 0x494e
+
+typedef uint16_t xfs_dir2_data_off_t;
+typedef uint32_t xfs_dir2_dataptr_t;
 
 typedef uint64_t xfs_ino_t;      // absolute inode number
 typedef int64_t xfs_off_t;       // file offset
@@ -26,4 +32,4 @@ typedef uint64_t xfs_fileoff_t;  // block offset into a file
 typedef uint64_t xfs_filblks_t;  // block count for a file
 typedef int64_t xfs_fsize_t;     // byte size of a file
 
-#endif /* defined _XFUSE_TYPES_H */
+#endif /* defined _XFUSE_DEF_H */

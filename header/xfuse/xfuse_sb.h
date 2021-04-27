@@ -1,7 +1,10 @@
 #ifndef _XFUSE_SB_H
 #define _XFUSE_SB_H
 
-#include "xfuse_types.h"
+#include "xfuse_def.h"
+
+#define BASICBLOCKLOG 9
+#define BASICBLOCKSIZE (1 << BASICBLOCKLOG)
 
 #define XFS_SB_VERSION_ATTRBIT 0x0010
 #define XFS_SB_VERSION_NLINKBIT 0x0020
@@ -86,6 +89,8 @@ typedef struct {
 } __attribute__((packed)) xfuse_sb;
 
 extern int xfuse_sb_is_valid(xfuse_sb *sb);
+extern bool xfuse_sb_has_file_type_field(xfuse_sb *sb);
+extern uint8_t xfuse_sb_get_ag_ino_bits(xfuse_sb *sb);
 extern void xfuse_sb_swap_ends(xfuse_sb *sb);
 
 #endif /* defined _XFUSE_SB_H */

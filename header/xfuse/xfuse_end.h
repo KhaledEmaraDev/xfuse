@@ -1,8 +1,10 @@
-#ifndef _XFUSE_ENDIANNESS_H
-#define _XFUSE_ENDIANNESS_H
+#ifndef _XFUSE_END_H
+#define _XFUSE_END_H
 
 #include <byteswap.h>
 #include <endian.h>
+#include <inttypes.h>
+#include <stdlib.h>
 
 #if __BYTE_ORDER == __LITTLE_ENDIAN
 
@@ -22,4 +24,4 @@
 #define be32_to_host(x) (uint32_t) __be32_to_host((uint32_t)(x))
 #define be64_to_host(x) (uint64_t) __be64_to_host((uint64_t)(x))
 
-#endif /* defined _XFUSE_ENDIANNESS_H */
+#endif /* defined _XFUSE_END_H */
