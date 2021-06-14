@@ -5,9 +5,6 @@ use libxfuse::volume::Volume;
 
 use fuse::mount;
 
-extern crate fuse;
-extern crate time;
-
 fn main() {
     let device = match std::env::args().nth(1) {
         Some(path) => path,
