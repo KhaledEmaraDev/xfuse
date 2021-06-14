@@ -17,7 +17,7 @@ task:
       env:
         VERSION: nightly
   setup_script:
-    - pkg install -y fusefs-libs
+    - pkg install -y fusefs-libs pkgconf
     - fetch https://sh.rustup.rs -o rustup.sh
     - sh rustup.sh -y --profile=minimal
     - $HOME/.cargo/bin/rustup toolchain install $VERSION
