@@ -1,0 +1,148 @@
+use std::io::BufRead;
+
+use super::definitions::*;
+
+use byteorder::{BigEndian, ReadBytesExt};
+
+pub enum XfsDinodeFmt {
+    XfsDinodeFmtDev,
+    XfsDinodeFmtLocal,
+    XfsDinodeFmtExtents,
+    XfsDinodeFmtBtree,
+    XfsDinodeFmtUuid,
+    XfsDinodeFmtRmap,
+}
+
+#[derive(Debug)]
+pub struct XfsTimestamp {
+    pub t_sec: i32,
+    pub t_nsec: i32,
+}
+
+pub const XFS_DIFLAG_REALTIME: u16 = 1 << 0;
+pub const XFS_DIFLAG_PREALLOC: u16 = 1 << 1;
+pub const XFS_DIFLAG_NEWRTBM: u16 = 1 << 2;
+pub const XFS_DIFLAG_IMMUTABLE: u16 = 1 << 3;
+pub const XFS_DIFLAG_APPEND: u16 = 1 << 4;
+pub const XFS_DIFLAG_SYNC: u16 = 1 << 5;
+pub const XFS_DIFLAG_NOATIME: u16 = 1 << 6;
+pub const XFS_DIFLAG_NODUMP: u16 = 1 << 7;
+pub const XFS_DIFLAG_RTINHERIT: u16 = 1 << 8;
+pub const XFS_DIFLAG_PROJINHERIT: u16 = 1 << 9;
+pub const XFS_DIFLAG_NOSYMLINKS: u16 = 1 << 10;
+pub const XFS_DIFLAG_EXTSIZE: u16 = 1 << 11;
+pub const XFS_DIFLAG_EXTSZINHERIT: u16 = 1 << 12;
+pub const XFS_DIFLAG_NODEFRAG: u16 = 1 << 13;
+pub const XFS_DIFLAG_FILESTREAMS: u16 = 1 << 14;
+
+#[derive(Debug)]
+pub struct DinodeCore {
+    pub di_magic: u16,
+    pub di_mode: u16,
+    pub di_version: i8,
+    pub di_format: i8,
+    pub di_onlink: u16,
+    pub di_uid: u32,
+    pub di_gid: u32,
+    pub di_nlink: u32,
+    pub di_projid: u16,
+    pub di_projid_hi: u16,
+    pub di_pad: [u8; 6],
+    pub di_flushiter: u16,
+    pub di_atime: XfsTimestamp,
+    pub di_mtime: XfsTimestamp,
+    pub di_ctime: XfsTimestamp,
+    pub di_size: XfsFsize,
+    pub di_nblocks: XfsRfsblock,
+    pub di_extsize: XfsExtlen,
+    pub di_nextents: XfsExtnum,
+    pub di_anextents: XfsAextnum,
+    pub di_forkoff: u8,
+    pub di_aformat: i8,
+    pub di_dmevmask: u32,
+    pub di_dmstate: u16,
+    pub di_flags: u16,
+    pub di_gen: u32,
+    pub di_next_unlinked: u32,
+}
+
+impl DinodeCore {
+    pub fn from<T: BufRead>(buf_reader: &mut T) -> DinodeCore {
+        let di_magic = buf_reader.read_u16::<BigEndian>().unwrap();
+        if di_magic != XFS_DINODE_MAGIC {
+            panic!("Agi magic number is invalid");
+        }
+
+        let di_mode = buf_reader.read_u16::<BigEndian>().unwrap();
+        let di_version = buf_reader.read_i8().unwrap();
+        let di_format = buf_reader.read_i8().unwrap();
+        let di_onlink = buf_reader.read_u16::<BigEndian>().unwrap();
+        let di_uid = buf_reader.read_u32::<BigEndian>().unwrap();
+        let di_gid = buf_reader.read_u32::<BigEndian>().unwrap();
+        let di_nlink = buf_reader.read_u32::<BigEndian>().unwrap();
+        let di_projid = buf_reader.read_u16::<BigEndian>().unwrap();
+        let di_projid_hi = buf_reader.read_u16::<BigEndian>().unwrap();
+
+        let mut buf_pad = [0u8; 6];
+        buf_reader.read_exact(&mut buf_pad[..]).unwrap();
+        let di_pad = buf_pad;
+
+        let di_flushiter = buf_reader.read_u16::<BigEndian>().unwrap();
+
+        let di_atime = XfsTimestamp {
+            t_sec: buf_reader.read_i32::<BigEndian>().unwrap(),
+            t_nsec: buf_reader.read_i32::<BigEndian>().unwrap(),
+        };
+        let di_mtime = XfsTimestamp {
+            t_sec: buf_reader.read_i32::<BigEndian>().unwrap(),
+            t_nsec: buf_reader.read_i32::<BigEndian>().unwrap(),
+        };
+        let di_ctime = XfsTimestamp {
+            t_sec: buf_reader.read_i32::<BigEndian>().unwrap(),
+            t_nsec: buf_reader.read_i32::<BigEndian>().unwrap(),
+        };
+
+        let di_size = buf_reader.read_i64::<BigEndian>().unwrap();
+        let di_nblocks = buf_reader.read_u64::<BigEndian>().unwrap();
+        let di_extsize = buf_reader.read_u32::<BigEndian>().unwrap();
+        let di_nextents = buf_reader.read_i32::<BigEndian>().unwrap();
+        let di_anextents = buf_reader.read_i16::<BigEndian>().unwrap();
+        let di_forkoff = buf_reader.read_u8().unwrap();
+        let di_aformat = buf_reader.read_i8().unwrap();
+        let di_dmevmask = buf_reader.read_u32::<BigEndian>().unwrap();
+        let di_dmstate = buf_reader.read_u16::<BigEndian>().unwrap();
+        let di_flags = buf_reader.read_u16::<BigEndian>().unwrap();
+        let di_gen = buf_reader.read_u32::<BigEndian>().unwrap();
+        let di_next_unlinked = buf_reader.read_u32::<BigEndian>().unwrap();
+
+        DinodeCore {
+            di_magic,
+            di_mode,
+            di_version,
+            di_format,
+            di_onlink,
+            di_uid,
+            di_gid,
+            di_nlink,
+            di_projid,
+            di_projid_hi,
+            di_pad,
+            di_flushiter,
+            di_atime,
+            di_mtime,
+            di_ctime,
+            di_size,
+            di_nblocks,
+            di_extsize,
+            di_nextents,
+            di_anextents,
+            di_forkoff,
+            di_aformat,
+            di_dmevmask,
+            di_dmstate,
+            di_flags,
+            di_gen,
+            di_next_unlinked,
+        }
+    }
+}

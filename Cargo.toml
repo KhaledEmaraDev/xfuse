@@ -1,5 +1,5 @@
 [package]
-name = "xfuse"
+name = "xfs-fuse"
 description = "Read-only FUSE server implementing XFS"
 version = "0.1.0"
 edition = "2018"
@@ -13,3 +13,6 @@ exclude = [
 
 [dependencies]
 fuse = "0.3.1"
+byteorder = "1.4.3"
+libc = "0.2.97"
+time = "0.1.44"
