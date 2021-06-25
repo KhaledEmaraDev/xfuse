@@ -1,7 +1,12 @@
 pub mod agi;
+pub mod bmbt_rec;
+pub mod btree;
+pub mod da_btree;
 pub mod definitions;
 pub mod dinode;
 pub mod dinode_core;
+pub mod dir2;
+pub mod dir2_block;
 pub mod dir2_sf;
 pub mod sb;
 pub mod volume;

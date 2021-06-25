@@ -1,20 +1,21 @@
-use std::io::BufRead;
+use std::{
+    io::{BufRead, Seek, SeekFrom},
+    mem,
+};
+
+use super::{
+    definitions::*,
+    dinode::Dinode,
+    dir2::{Dir2, XFS_DIR3_FT_DIR, XFS_DIR3_FT_REG_FILE},
+    sb::Sb,
+};
 
 use byteorder::{BigEndian, ReadBytesExt};
+use fuse::{FileAttr, FileType};
+use libc::{c_int, mode_t, ENOENT, S_IFDIR, S_IFMT, S_IFREG};
+use time::Timespec;
 
-pub type XfsDir2DataOff = u64;
-pub type XfsDir2Dataptr = u32;
 // pub type XfsDir2SfOff = [u8; 2];
-
-pub const XFS_DIR3_FT_UNKNOWN: u8 = 0;
-pub const XFS_DIR3_FT_REG_FILE: u8 = 1;
-pub const XFS_DIR3_FT_DIR: u8 = 2;
-pub const XFS_DIR3_FT_CHRDEV: u8 = 3;
-pub const XFS_DIR3_FT_BLKDEV: u8 = 4;
-pub const XFS_DIR3_FT_FIFO: u8 = 5;
-pub const XFS_DIR3_FT_SOCK: u8 = 6;
-pub const XFS_DIR3_FT_SYMLINK: u8 = 7;
-pub const XFS_DIR3_FT_WHT: u8 = 8;
 
 #[derive(Debug)]
 pub enum XfsDir2Inou {
@@ -93,7 +94,7 @@ pub struct Dir2Sf {
 }
 
 impl Dir2Sf {
-    pub fn from<T: BufRead>(buf_reader: &mut T) -> Dir2Sf {
+    pub fn from<T: BufRead + Seek>(buf_reader: &mut T) -> Dir2Sf {
         let hdr = Dir2SfHdr::from(buf_reader.by_ref());
 
         let mut list = Vec::<Dir2SfEntry>::new();
@@ -102,5 +103,98 @@ impl Dir2Sf {
         }
 
         Dir2Sf { hdr, list }
+    }
+}
+
+impl Dir2 for Dir2Sf {
+    fn lookup<T: BufRead + Seek>(
+        &self,
+        buf_reader: &mut T,
+        super_block: &Sb,
+        name: &str,
+    ) -> Result<(FileAttr, u64), c_int> {
+        let mut inode: Option<XfsIno> = None;
+
+        for entry in self.list.iter() {
+            if entry.name == name {
+                inode = match entry.inumber {
+                    XfsDir2Inou::XfsDir2Ino8(inumber) => Some(inumber),
+                    XfsDir2Inou::XfsDir2Ino4(inumber) => Some(inumber as u64),
+                };
+            }
+        }
+
+        if let Some(ino) = inode {
+            let dinode = Dinode::from(buf_reader.by_ref(), &super_block, ino);
+
+            let kind = match (dinode.di_core.di_mode as mode_t) & S_IFMT {
+                S_IFREG => FileType::RegularFile,
+                S_IFDIR => FileType::Directory,
+                _ => {
+                    return Err(ENOENT);
+                }
+            };
+
+            let attr = FileAttr {
+                ino,
+                size: dinode.di_core.di_size as u64,
+                blocks: dinode.di_core.di_nblocks,
+                atime: Timespec {
+                    sec: dinode.di_core.di_atime.t_sec as i64,
+                    nsec: dinode.di_core.di_atime.t_nsec,
+                },
+                mtime: Timespec {
+                    sec: dinode.di_core.di_mtime.t_sec as i64,
+                    nsec: dinode.di_core.di_mtime.t_nsec,
+                },
+                ctime: Timespec {
+                    sec: dinode.di_core.di_ctime.t_sec as i64,
+                    nsec: dinode.di_core.di_ctime.t_nsec,
+                },
+                crtime: Timespec { sec: 0, nsec: 0 },
+                kind,
+                perm: dinode.di_core.di_mode & (!(S_IFMT as u16)),
+                nlink: dinode.di_core.di_nlink,
+                uid: dinode.di_core.di_uid,
+                gid: dinode.di_core.di_gid,
+                rdev: 0,
+                flags: 0,
+            };
+
+            Ok((attr, dinode.di_core.di_gen.into()))
+        } else {
+            return Err(ENOENT);
+        }
+    }
+
+    fn iterate<T: BufRead + Seek>(
+        &self,
+        _buf_reader: &mut T,
+        offset: i64,
+    ) -> Result<(XfsIno, i64, FileType, String), c_int> {
+        for entry in self.list.iter() {
+            if i64::from(entry.offset) <= offset {
+                continue;
+            }
+
+            let ino = match entry.inumber {
+                XfsDir2Inou::XfsDir2Ino8(inumber) => inumber,
+                XfsDir2Inou::XfsDir2Ino4(inumber) => inumber as u64,
+            };
+
+            let kind = match entry.ftype {
+                XFS_DIR3_FT_REG_FILE => FileType::RegularFile,
+                XFS_DIR3_FT_DIR => FileType::Directory,
+                _ => {
+                    panic!("Unknown file type.")
+                }
+            };
+
+            let name = String::from(entry.name.to_owned());
+
+            return Ok((ino, entry.offset as i64, kind, name));
+        }
+
+        return Err(-1);
     }
 }

@@ -2,18 +2,18 @@ use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 
+use crate::libxfuse::dir2::Dir2;
+
 use super::agi::Agi;
 use super::definitions::XfsIno;
-use super::dinode::{DiU, Dinode};
-use super::dir2_sf::XfsDir2Inou;
-use super::dir2_sf::{XFS_DIR3_FT_DIR, XFS_DIR3_FT_REG_FILE};
+use super::dinode::{Dinode, InodeType};
 use super::sb::Sb;
 
 use fuse::{
     FileAttr, FileType, Filesystem, ReplyAttr, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen,
     ReplyStatfs, Request, FUSE_ROOT_ID,
 };
-use libc::{ENOENT, S_IFDIR, S_IFMT, S_IFREG};
+use libc::{mode_t, S_IFDIR, S_IFMT, S_IFREG};
 use time::Timespec;
 
 #[derive(Debug)]
@@ -66,71 +66,31 @@ impl Filesystem for Volume {
             nsec: 0,
         };
 
-        let mut inode: Option<XfsIno> = None;
-
-        match dinode.di_u {
-            DiU::DiDir2Sf(dir) => {
-                for entry in dir.list.into_iter() {
-                    if entry.name == name.to_string_lossy().into_owned() {
-                        inode = match entry.inumber {
-                            XfsDir2Inou::XfsDir2Ino8(inumber) => Some(inumber),
-                            XfsDir2Inou::XfsDir2Ino4(inumber) => Some(inumber as u64),
-                        };
+        match dinode.inode_type {
+            InodeType::Dir2Sf(dir) => {
+                match dir.lookup(
+                    BufReader::new(&self.device).by_ref(),
+                    &self.sb,
+                    &name.to_string_lossy().to_owned(),
+                ) {
+                    Ok((attr, generation)) => {
+                        reply.entry(&ttl, &attr, generation);
                     }
+                    Err(err) => reply.error(err),
                 }
             }
-        }
-
-        if let Some(ino) = inode {
-            let dinode = Dinode::from(
-                BufReader::new(&self.device).by_ref(),
-                &self.sb,
-                if ino == FUSE_ROOT_ID {
-                    self.sb.sb_rootino
-                } else {
-                    ino as XfsIno
-                },
-            );
-
-            let kind = match (dinode.di_core.di_mode as u32) & S_IFMT {
-                S_IFREG => FileType::RegularFile,
-                S_IFDIR => FileType::Directory,
-                _ => {
-                    reply.error(ENOENT);
-                    return;
+            InodeType::Dir2Block(dir) => {
+                match dir.lookup(
+                    BufReader::new(&self.device).by_ref(),
+                    &self.sb,
+                    &name.to_string_lossy().to_owned(),
+                ) {
+                    Ok((attr, generation)) => {
+                        reply.entry(&ttl, &attr, generation);
+                    }
+                    Err(err) => reply.error(err),
                 }
-            };
-
-            let attr = FileAttr {
-                ino,
-                size: dinode.di_core.di_size as u64,
-                blocks: dinode.di_core.di_nblocks,
-                atime: Timespec {
-                    sec: dinode.di_core.di_atime.t_sec as i64,
-                    nsec: dinode.di_core.di_atime.t_nsec,
-                },
-                mtime: Timespec {
-                    sec: dinode.di_core.di_mtime.t_sec as i64,
-                    nsec: dinode.di_core.di_mtime.t_nsec,
-                },
-                ctime: Timespec {
-                    sec: dinode.di_core.di_ctime.t_sec as i64,
-                    nsec: dinode.di_core.di_ctime.t_nsec,
-                },
-                crtime: Timespec { sec: 0, nsec: 0 },
-                kind,
-                perm: dinode.di_core.di_mode & (!(S_IFMT as u16)),
-                nlink: dinode.di_core.di_nlink,
-                uid: dinode.di_core.di_uid,
-                gid: dinode.di_core.di_gid,
-                rdev: 0,
-                flags: 0,
-            };
-
-            reply.entry(&ttl, &attr, dinode.di_core.di_gen as u64);
-        } else {
-            reply.error(ENOENT);
-            return;
+            }
         }
     }
 
@@ -151,7 +111,7 @@ impl Filesystem for Volume {
             nsec: 0,
         };
 
-        let kind = match (dinode.di_core.di_mode as u32) & S_IFMT {
+        let kind = match (dinode.di_core.di_mode as mode_t) & S_IFMT {
             S_IFREG => FileType::RegularFile,
             S_IFDIR => FileType::Directory,
             _ => {
@@ -212,29 +172,45 @@ impl Filesystem for Volume {
             },
         );
 
-        match dinode.di_u {
-            DiU::DiDir2Sf(dir) => {
-                for entry in dir.list.into_iter() {
-                    if i64::from(entry.offset) <= offset {
-                        continue;
-                    }
-
-                    let ino = match entry.inumber {
-                        XfsDir2Inou::XfsDir2Ino8(inumber) => inumber,
-                        XfsDir2Inou::XfsDir2Ino4(inumber) => inumber as u64,
-                    };
-
-                    let kind = match entry.ftype {
-                        XFS_DIR3_FT_REG_FILE => FileType::RegularFile,
-                        XFS_DIR3_FT_DIR => FileType::Directory,
-                        _ => {
-                            panic!("Unknown file type.")
+        match dinode.inode_type {
+            InodeType::Dir2Sf(dir) => {
+                let mut off = offset;
+                loop {
+                    let res = dir.iterate(BufReader::new(&self.device).by_ref(), off);
+                    match res {
+                        Ok((ino, offset, kind, name)) => {
+                            let res = reply.add(ino, offset, kind, name);
+                            if res {
+                                reply.ok();
+                                return;
+                            }
+                            off = offset;
                         }
-                    };
-
-                    reply.add(ino, entry.offset as i64, kind, entry.name);
+                        Err(_) => {
+                            reply.ok();
+                            return;
+                        }
+                    }
                 }
-                reply.ok();
+            }
+            InodeType::Dir2Block(dir) => {
+                let mut off = offset;
+                loop {
+                    let res = dir.iterate(BufReader::new(&self.device).by_ref(), off);
+                    match res {
+                        Ok((ino, offset, kind, name)) => {
+                            if reply.add(ino, offset, kind, name) {
+                                reply.ok();
+                                return;
+                            }
+                            off = offset;
+                        }
+                        Err(_) => {
+                            reply.ok();
+                            return;
+                        }
+                    }
+                }
             }
         }
     }

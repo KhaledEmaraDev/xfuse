@@ -2,8 +2,12 @@ use std::io::BufRead;
 
 use super::definitions::*;
 
-use byteorder::{BigEndian, ReadBytesExt};
+use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
+use num_derive::FromPrimitive;
+use num_traits::FromPrimitive;
+use uuid::Uuid;
 
+#[derive(Debug, FromPrimitive)]
 pub enum XfsDinodeFmt {
     XfsDinodeFmtDev,
     XfsDinodeFmtLocal,
@@ -40,7 +44,7 @@ pub struct DinodeCore {
     pub di_magic: u16,
     pub di_mode: u16,
     pub di_version: i8,
-    pub di_format: i8,
+    pub di_format: XfsDinodeFmt,
     pub di_onlink: u16,
     pub di_uid: u32,
     pub di_gid: u32,
@@ -64,6 +68,16 @@ pub struct DinodeCore {
     pub di_flags: u16,
     pub di_gen: u32,
     pub di_next_unlinked: u32,
+
+    pub di_crc: u32,
+    pub di_changecount: u64,
+    pub di_lsn: u64,
+    pub di_flags2: u64,
+    pub di_cowextsize: u32,
+    pub di_pad2: [u8; 12],
+    pub di_crtime: XfsTimestamp,
+    pub di_ino: u64,
+    pub di_uuid: Uuid,
 }
 
 impl DinodeCore {
@@ -75,7 +89,7 @@ impl DinodeCore {
 
         let di_mode = buf_reader.read_u16::<BigEndian>().unwrap();
         let di_version = buf_reader.read_i8().unwrap();
-        let di_format = buf_reader.read_i8().unwrap();
+        let di_format = XfsDinodeFmt::from_u8(buf_reader.read_u8().unwrap()).unwrap();
         let di_onlink = buf_reader.read_u16::<BigEndian>().unwrap();
         let di_uid = buf_reader.read_u32::<BigEndian>().unwrap();
         let di_gid = buf_reader.read_u32::<BigEndian>().unwrap();
@@ -115,6 +129,24 @@ impl DinodeCore {
         let di_gen = buf_reader.read_u32::<BigEndian>().unwrap();
         let di_next_unlinked = buf_reader.read_u32::<BigEndian>().unwrap();
 
+        let di_crc = buf_reader.read_u32::<LittleEndian>().unwrap();
+        let di_changecount = buf_reader.read_u64::<BigEndian>().unwrap();
+        let di_lsn = buf_reader.read_u64::<BigEndian>().unwrap();
+        let di_flags2 = buf_reader.read_u64::<BigEndian>().unwrap();
+        let di_cowextsize = buf_reader.read_u32::<BigEndian>().unwrap();
+
+        let mut buf_pad2 = [0u8; 12];
+        buf_reader.read_exact(&mut buf_pad2[..]).unwrap();
+        let di_pad2 = buf_pad2;
+
+        let di_crtime = XfsTimestamp {
+            t_sec: buf_reader.read_i32::<BigEndian>().unwrap(),
+            t_nsec: buf_reader.read_i32::<BigEndian>().unwrap(),
+        };
+
+        let di_ino = buf_reader.read_u64::<BigEndian>().unwrap();
+        let di_uuid = Uuid::from_u128(buf_reader.read_u128::<BigEndian>().unwrap());
+
         DinodeCore {
             di_magic,
             di_mode,
@@ -143,6 +175,15 @@ impl DinodeCore {
             di_flags,
             di_gen,
             di_next_unlinked,
+            di_crc,
+            di_changecount,
+            di_lsn,
+            di_flags2,
+            di_cowextsize,
+            di_pad2,
+            di_crtime,
+            di_ino,
+            di_uuid,
         }
     }
 }

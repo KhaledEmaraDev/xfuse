@@ -3,6 +3,7 @@ use std::io::prelude::*;
 use super::definitions::*;
 
 use byteorder::{BigEndian, ReadBytesExt};
+use uuid::Uuid;
 
 pub const XFS_SB_VERSION_ATTRBIT: u16 = 0x0010;
 pub const XFS_SB_VERSION_NLINKBIT: u16 = 0x0020;
@@ -98,11 +99,7 @@ impl Sb {
         let sb_dblocks = buf_reader.read_u64::<BigEndian>().unwrap();
         let sb_rblocks = buf_reader.read_u64::<BigEndian>().unwrap();
         let sb_rextents = buf_reader.read_u64::<BigEndian>().unwrap();
-
-        let mut buf_uuid = [0u8; 16];
-        buf_reader.read_exact(&mut buf_uuid[..]).unwrap();
-        let sb_uuid = buf_uuid;
-
+        let sb_uuid = Uuid::from_u128(buf_reader.read_u128::<BigEndian>().unwrap());
         let sb_logstart = buf_reader.read_u64::<BigEndian>().unwrap();
         let sb_rootino = buf_reader.read_u64::<BigEndian>().unwrap();
         let sb_rbmino = buf_reader.read_u64::<BigEndian>().unwrap();
