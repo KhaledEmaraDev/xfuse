@@ -19,7 +19,7 @@ task:
   setup_script:
     - pkg install -y fusefs-libs pkgconf
     - fetch https://sh.rustup.rs -o rustup.sh
-    - sh rustup.sh -y --profile=minimal
+    - sh rustup.sh -y
     - $HOME/.cargo/bin/rustup toolchain install $VERSION
   cargo_cache:
     folder: $HOME/.cargo/registry
