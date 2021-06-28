@@ -1,12 +1,9 @@
-use std::{
-    io::{BufRead, Seek, SeekFrom},
-    mem,
-};
+use std::io::{BufRead, Seek};
 
 use super::{
     definitions::*,
     dinode::Dinode,
-    dir2::{Dir2, XFS_DIR3_FT_DIR, XFS_DIR3_FT_REG_FILE},
+    dir3::{Dir3, XFS_DIR3_FT_DIR, XFS_DIR3_FT_REG_FILE},
     sb::Sb,
 };
 
@@ -17,13 +14,13 @@ use time::Timespec;
 
 // pub type XfsDir2SfOff = [u8; 2];
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum XfsDir2Inou {
     XfsDir2Ino8(u64),
     XfsDir2Ino4(u32),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Dir2SfHdr {
     pub count: u8,
     pub i8count: u8,
@@ -49,7 +46,7 @@ impl Dir2SfHdr {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Dir2SfEntry {
     pub namelen: u8,
     pub offset: u16,
@@ -87,14 +84,14 @@ impl Dir2SfEntry {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Dir2Sf {
     pub hdr: Dir2SfHdr,
     pub list: Vec<Dir2SfEntry>,
 }
 
 impl Dir2Sf {
-    pub fn from<T: BufRead + Seek>(buf_reader: &mut T) -> Dir2Sf {
+    pub fn from<T: BufRead>(buf_reader: &mut T) -> Dir2Sf {
         let hdr = Dir2SfHdr::from(buf_reader.by_ref());
 
         let mut list = Vec::<Dir2SfEntry>::new();
@@ -106,7 +103,7 @@ impl Dir2Sf {
     }
 }
 
-impl Dir2 for Dir2Sf {
+impl Dir3 for Dir2Sf {
     fn lookup<T: BufRead + Seek>(
         &self,
         buf_reader: &mut T,
@@ -167,7 +164,7 @@ impl Dir2 for Dir2Sf {
         }
     }
 
-    fn iterate<T: BufRead + Seek>(
+    fn next<T: BufRead + Seek>(
         &self,
         _buf_reader: &mut T,
         offset: i64,

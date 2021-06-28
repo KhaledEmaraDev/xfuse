@@ -2,7 +2,7 @@ use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 
-use crate::libxfuse::dir2::Dir2;
+use crate::libxfuse::dir3::Dir3;
 
 use super::agi::Agi;
 use super::definitions::XfsIno;
@@ -66,7 +66,7 @@ impl Filesystem for Volume {
             nsec: 0,
         };
 
-        match dinode.inode_type {
+        match dinode.get_data(BufReader::new(&self.device).by_ref(), &self.sb) {
             InodeType::Dir2Sf(dir) => {
                 match dir.lookup(
                     BufReader::new(&self.device).by_ref(),
@@ -80,6 +80,18 @@ impl Filesystem for Volume {
                 }
             }
             InodeType::Dir2Block(dir) => {
+                match dir.lookup(
+                    BufReader::new(&self.device).by_ref(),
+                    &self.sb,
+                    &name.to_string_lossy().to_owned(),
+                ) {
+                    Ok((attr, generation)) => {
+                        reply.entry(&ttl, &attr, generation);
+                    }
+                    Err(err) => reply.error(err),
+                }
+            }
+            InodeType::Dir2Leaf(dir) => {
                 match dir.lookup(
                     BufReader::new(&self.device).by_ref(),
                     &self.sb,
@@ -172,11 +184,11 @@ impl Filesystem for Volume {
             },
         );
 
-        match dinode.inode_type {
+        match dinode.get_data(BufReader::new(&self.device).by_ref(), &self.sb) {
             InodeType::Dir2Sf(dir) => {
                 let mut off = offset;
                 loop {
-                    let res = dir.iterate(BufReader::new(&self.device).by_ref(), off);
+                    let res = dir.next(BufReader::new(&self.device).by_ref(), off);
                     match res {
                         Ok((ino, offset, kind, name)) => {
                             let res = reply.add(ino, offset, kind, name);
@@ -196,7 +208,26 @@ impl Filesystem for Volume {
             InodeType::Dir2Block(dir) => {
                 let mut off = offset;
                 loop {
-                    let res = dir.iterate(BufReader::new(&self.device).by_ref(), off);
+                    let res = dir.next(BufReader::new(&self.device).by_ref(), off);
+                    match res {
+                        Ok((ino, offset, kind, name)) => {
+                            if reply.add(ino, offset, kind, name) {
+                                reply.ok();
+                                return;
+                            }
+                            off = offset;
+                        }
+                        Err(_) => {
+                            reply.ok();
+                            return;
+                        }
+                    }
+                }
+            }
+            InodeType::Dir2Leaf(dir) => {
+                let mut off = offset;
+                loop {
+                    let res = dir.next(BufReader::new(&self.device).by_ref(), off);
                     match res {
                         Ok((ino, offset, kind, name)) => {
                             if reply.add(ino, offset, kind, name) {

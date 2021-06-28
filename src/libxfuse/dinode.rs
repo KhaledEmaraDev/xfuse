@@ -3,8 +3,9 @@ use std::io::{BufRead, Seek, SeekFrom};
 use super::bmbt_rec::BmbtRec;
 use super::definitions::*;
 use super::dinode_core::{DinodeCore, XfsDinodeFmt};
-use super::dir2_block::Dir2Block;
-use super::dir2_sf::Dir2Sf;
+use super::dir3_block::Dir2Block;
+use super::dir3_leaf::Dir2Leaf;
+use super::dir3_sf::Dir2Sf;
 use super::sb::Sb;
 
 use libc::{mode_t, S_IFDIR, S_IFMT};
@@ -19,13 +20,13 @@ pub enum DiU {
 pub enum InodeType {
     Dir2Sf(Dir2Sf),
     Dir2Block(Dir2Block),
+    Dir2Leaf(Dir2Leaf),
 }
 
 #[derive(Debug)]
 pub struct Dinode {
     pub di_core: DinodeCore,
-
-    pub inode_type: InodeType,
+    pub di_u: DiU,
 }
 
 impl Dinode {
@@ -51,26 +52,19 @@ impl Dinode {
         buf_reader.seek(SeekFrom::Start(off as u64)).unwrap();
         let di_core = DinodeCore::from(buf_reader);
 
-        let inode_type: Option<InodeType>;
+        let di_u: Option<DiU>;
         if (di_core.di_mode as mode_t) & S_IFMT == S_IFDIR {
             match di_core.di_format {
                 XfsDinodeFmt::XfsDinodeFmtLocal => {
                     let dir_sf = Dir2Sf::from(buf_reader.by_ref());
-                    inode_type = Some(InodeType::Dir2Sf(dir_sf));
+                    di_u = Some(DiU::DiDir2Sf(dir_sf));
                 }
                 XfsDinodeFmt::XfsDinodeFmtExtents => {
                     let mut bmx = Vec::<BmbtRec>::new();
                     for _i in 0..di_core.di_nextents {
                         bmx.push(BmbtRec::from(buf_reader.by_ref()))
                     }
-
-                    if bmx.len() == 1 {
-                        let dir_blk =
-                            Dir2Block::from(buf_reader.by_ref(), superblock, bmx[0].br_startblock);
-                        inode_type = Some(InodeType::Dir2Block(dir_blk));
-                    } else {
-                        panic!("Directory format not yet supported.");
-                    }
+                    di_u = Some(DiU::DiBmx(bmx));
                 }
                 _ => {
                     panic!("Directory format not yet supported.");
@@ -82,7 +76,25 @@ impl Dinode {
 
         Dinode {
             di_core,
-            inode_type: inode_type.unwrap(),
+            di_u: di_u.unwrap(),
+        }
+    }
+
+    pub fn get_data<T: BufRead + Seek>(&self, buf_reader: &mut T, superblock: &Sb) -> InodeType {
+        match &self.di_u {
+            DiU::DiDir2Sf(dir) => {
+                return InodeType::Dir2Sf(dir.clone());
+            }
+            DiU::DiBmx(bmx) => {
+                if bmx.len() == 1 {
+                    let dir_blk =
+                        Dir2Block::from(buf_reader.by_ref(), superblock, bmx[0].br_startblock);
+                    return InodeType::Dir2Block(dir_blk);
+                } else {
+                    let dir_leaf = Dir2Leaf::from(buf_reader.by_ref(), superblock, &bmx);
+                    return InodeType::Dir2Leaf(dir_leaf);
+                }
+            }
         }
     }
 }
