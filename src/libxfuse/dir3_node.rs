@@ -3,12 +3,12 @@ use std::io::{BufRead, Seek, SeekFrom};
 use std::mem;
 
 use super::bmbt_rec::BmbtRec;
-use super::da_btree::hashname;
+use super::da_btree::{hashname, XfsDa3Intnode};
 use super::definitions::*;
 use super::dinode::Dinode;
 use super::dir3::{
-    Dir2Data, Dir2DataEntry, Dir2DataUnused, Dir2LeafDisk, Dir3, Dir3DataHdr, XfsDir2Dataptr,
-    XFS_DIR3_FT_DIR, XFS_DIR3_FT_REG_FILE,
+    Dir2Data, Dir2DataEntry, Dir2DataUnused, Dir2LeafDisk, Dir3, Dir3BlkHdr, Dir3DataHdr,
+    XfsDir2Dataptr, XFS_DIR3_FT_DIR, XFS_DIR3_FT_REG_FILE,
 };
 use super::sb::Sb;
 
@@ -18,44 +18,134 @@ use libc::{c_int, mode_t, ENOENT, S_IFDIR, S_IFMT, S_IFREG};
 use time::Timespec;
 
 #[derive(Debug)]
-pub struct Dir2Leaf {
-    pub entries: Vec<Dir2Data>,
-    pub hashes: HashMap<XfsDahash, XfsDir2Dataptr>,
-    pub entry_size: u32,
+pub struct Dir3FreeHdr {
+    pub hdr: Dir3BlkHdr,
+    pub firstdb: i32,
+    pub nvalid: i32,
+    pub nused: i32,
+    pub pad: i32,
 }
 
-impl Dir2Leaf {
-    pub fn from<T: BufRead + Seek>(
-        buf_reader: &mut T,
-        superblock: &Sb,
-        bmx: &Vec<BmbtRec>,
-    ) -> Dir2Leaf {
-        let mut entries = Vec::<Dir2Data>::new();
-        for i in 0..bmx.len() - 1 {
-            let entry = Dir2Data::from(buf_reader.by_ref(), &superblock, bmx[i].br_startblock);
-            entries.push(entry);
-        }
+impl Dir3FreeHdr {
+    pub fn from<T: BufRead>(buf_reader: &mut T) -> Dir3FreeHdr {
+        let hdr = Dir3BlkHdr::from(buf_reader);
+        let firstdb = buf_reader.read_i32::<BigEndian>().unwrap();
+        let nvalid = buf_reader.read_i32::<BigEndian>().unwrap();
+        let nused = buf_reader.read_i32::<BigEndian>().unwrap();
+        let pad = buf_reader.read_i32::<BigEndian>().unwrap();
 
-        let leaf_extent = bmx.last().unwrap();
-        let offset = leaf_extent.br_startblock * (superblock.sb_blocksize as u64);
-        let entry_size = superblock.sb_blocksize * (1 << superblock.sb_dirblklog);
-
-        let dir_disk = Dir2LeafDisk::from(buf_reader, offset, entry_size);
-
-        let mut hashes = HashMap::new();
-        for leaf_entry in dir_disk.ents {
-            hashes.insert(leaf_entry.hashval, leaf_entry.address);
-        }
-
-        Dir2Leaf {
-            entries,
-            hashes,
-            entry_size,
+        Dir3FreeHdr {
+            hdr,
+            firstdb,
+            nvalid,
+            nused,
+            pad,
         }
     }
 }
 
-impl Dir3 for Dir2Leaf {
+#[derive(Debug)]
+pub struct Dir3Free {
+    pub hdr: Dir3FreeHdr,
+    pub bests: Vec<u16>,
+}
+
+impl Dir3Free {
+    pub fn from<T: BufRead + Seek>(buf_reader: &mut T, offset: u64, size: u32) -> Dir3Free {
+        buf_reader.seek(SeekFrom::Start(offset)).unwrap();
+
+        let hdr = Dir3FreeHdr::from(buf_reader);
+
+        let data_end =
+            offset + (size as u64) - ((mem::size_of::<u16>() as u64) * (hdr.nvalid as u64));
+        buf_reader.seek(SeekFrom::Start(data_end)).unwrap();
+
+        let mut bests = Vec::<u16>::new();
+        for _i in 0..hdr.nvalid {
+            bests.push(buf_reader.read_u16::<BigEndian>().unwrap());
+        }
+
+        Dir3Free { hdr, bests }
+    }
+}
+
+#[derive(Debug)]
+pub struct Dir2Node {
+    pub entries: Vec<Dir2Data>,
+    pub hashes: HashMap<XfsDahash, XfsDir2Dataptr>,
+    pub entry_size: u32,
+
+    pub node: XfsDa3Intnode,
+    pub free: Dir3Free,
+}
+
+impl Dir2Node {
+    pub fn from<T: BufRead + Seek>(
+        buf_reader: &mut T,
+        superblock: &Sb,
+        bmx: &Vec<BmbtRec>,
+    ) -> Dir2Node {
+        let mut i: usize = 0;
+        let mut entries = Vec::<Dir2Data>::new();
+        while i < bmx.len() && bmx[i].br_startoff < superblock.get_dir3_leaf_offset() {
+            let entry = Dir2Data::from(buf_reader.by_ref(), &superblock, bmx[i].br_startblock);
+            entries.push(entry);
+
+            i += 1;
+        }
+
+        let entry_size = superblock.sb_blocksize * (1 << superblock.sb_dirblklog);
+        let mut node: Option<XfsDa3Intnode> = None;
+
+        let mut hashes = HashMap::new();
+
+        while i < bmx.len() && bmx[i].br_startoff < superblock.get_dir3_free_offset() {
+            let offset = bmx[i].br_startblock * (superblock.sb_blocksize as u64);
+            buf_reader.seek(SeekFrom::Start(offset as u64)).unwrap();
+
+            buf_reader.seek(SeekFrom::Current(8)).unwrap();
+            let magic = buf_reader.read_u16::<BigEndian>().unwrap();
+            buf_reader.seek(SeekFrom::Current(-8)).unwrap();
+
+            match magic {
+                XFS_DA3_NODE_MAGIC => {
+                    node = Some(XfsDa3Intnode::from(buf_reader));
+                }
+                XFS_DIR3_LEAFN_MAGIC => {
+                    let leaf = Dir2LeafDisk::from(buf_reader, offset, entry_size);
+
+                    for leaf_entry in leaf.ents {
+                        hashes.insert(leaf_entry.hashval, leaf_entry.address);
+                    }
+                }
+                _ => {
+                    panic!("Magic number is invalid");
+                }
+            }
+
+            i += 1;
+        }
+
+        let mut free: Option<Dir3Free> = None;
+
+        if i < bmx.len() {
+            let offset = bmx[i].br_startblock * (superblock.sb_blocksize as u64);
+            buf_reader.seek(SeekFrom::Start(offset as u64)).unwrap();
+
+            free = Some(Dir3Free::from(buf_reader, offset, entry_size));
+        }
+
+        Dir2Node {
+            entries,
+            hashes,
+            entry_size,
+            node: node.unwrap(),
+            free: free.unwrap(),
+        }
+    }
+}
+
+impl Dir3 for Dir2Node {
     fn lookup<T: BufRead + Seek>(
         &self,
         buf_reader: &mut T,

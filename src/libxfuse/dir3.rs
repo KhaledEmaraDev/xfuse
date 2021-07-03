@@ -1,5 +1,7 @@
 use std::io::{BufRead, Seek, SeekFrom};
+use std::mem;
 
+use super::da_btree::XfsDa3Blkinfo;
 use super::definitions::*;
 use super::sb::Sb;
 
@@ -79,6 +81,28 @@ impl Dir3DataHdr {
             best_free,
             pad,
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct Dir2Data {
+    pub hdr: Dir3DataHdr,
+
+    pub offset: u64,
+}
+
+impl Dir2Data {
+    pub fn from<T: BufRead + Seek>(
+        buf_reader: &mut T,
+        superblock: &Sb,
+        start_block: u64,
+    ) -> Dir2Data {
+        let offset = start_block * (superblock.sb_blocksize as u64);
+        buf_reader.seek(SeekFrom::Start(offset as u64)).unwrap();
+
+        let hdr = Dir3DataHdr::from(buf_reader.by_ref());
+
+        Dir2Data { hdr, offset }
     }
 }
 
@@ -178,6 +202,90 @@ impl Dir2LeafEntry {
         let address = buf_reader.read_u32::<BigEndian>().unwrap();
 
         Dir2LeafEntry { hashval, address }
+    }
+}
+
+#[derive(Debug)]
+pub struct Dir3LeafHdr {
+    pub info: XfsDa3Blkinfo,
+    pub count: u16,
+    pub stale: u16,
+    pub pad: u32,
+}
+
+impl Dir3LeafHdr {
+    pub fn from<T: BufRead>(buf_reader: &mut T) -> Dir3LeafHdr {
+        let info = XfsDa3Blkinfo::from(buf_reader);
+        let count = buf_reader.read_u16::<BigEndian>().unwrap();
+        let stale = buf_reader.read_u16::<BigEndian>().unwrap();
+        let pad = buf_reader.read_u32::<BigEndian>().unwrap();
+
+        Dir3LeafHdr {
+            info,
+            count,
+            stale,
+            pad,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Dir2LeafTail {
+    pub bestcount: u32,
+}
+
+impl Dir2LeafTail {
+    pub fn from<T: BufRead>(buf_reader: &mut T) -> Dir2LeafTail {
+        let bestcount = buf_reader.read_u32::<BigEndian>().unwrap();
+
+        Dir2LeafTail { bestcount }
+    }
+}
+
+#[derive(Debug)]
+pub struct Dir2LeafDisk {
+    pub hdr: Dir3LeafHdr,
+    pub ents: Vec<Dir2LeafEntry>,
+    pub bests: Vec<XfsDir2DataOff>,
+    pub tail: Dir2LeafTail,
+}
+
+impl Dir2LeafDisk {
+    pub fn from<T: BufRead + Seek>(buf_reader: &mut T, offset: u64, size: u32) -> Dir2LeafDisk {
+        buf_reader.seek(SeekFrom::Start(offset)).unwrap();
+
+        let hdr = Dir3LeafHdr::from(buf_reader.by_ref());
+
+        let mut ents = Vec::<Dir2LeafEntry>::new();
+        for _i in 0..hdr.count {
+            let leaf_entry = Dir2LeafEntry::from(buf_reader.by_ref());
+            ents.push(leaf_entry);
+        }
+
+        buf_reader
+            .seek(SeekFrom::Start(
+                offset + (size as u64) - (mem::size_of::<Dir2LeafTail>() as u64),
+            ))
+            .unwrap();
+
+        let tail = Dir2LeafTail::from(buf_reader.by_ref());
+
+        let data_end = offset + (size as u64)
+            - (mem::size_of::<Dir2LeafTail>() as u64)
+            - ((mem::size_of::<XfsDir2DataOff>() as u64) * (tail.bestcount as u64));
+        buf_reader.seek(SeekFrom::Start(data_end)).unwrap();
+
+        let mut bests = Vec::<XfsDir2DataOff>::new();
+        for _i in 0..tail.bestcount {
+            bests.push(buf_reader.read_u16::<BigEndian>().unwrap());
+        }
+
+        Dir2LeafDisk {
+            hdr,
+            ents,
+            bests,
+            tail,
+        }
     }
 }
 

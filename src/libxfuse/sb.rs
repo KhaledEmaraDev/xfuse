@@ -194,4 +194,14 @@ impl Sb {
             sb_bad_features2,
         }
     }
+
+    #[inline]
+    pub fn get_dir3_leaf_offset(&self) -> u64 {
+        (32 * 1024 * 1024 * 1024) / (self.sb_blocksize as u64)
+    }
+
+    #[inline]
+    pub fn get_dir3_free_offset(&self) -> u64 {
+        (64 * 1024 * 1024 * 1024) / (self.sb_blocksize as u64)
+    }
 }

@@ -8,6 +8,7 @@ pub mod dinode_core;
 pub mod dir3;
 pub mod dir3_block;
 pub mod dir3_leaf;
+pub mod dir3_node;
 pub mod dir3_sf;
 pub mod sb;
 pub mod volume;
