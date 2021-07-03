@@ -244,10 +244,8 @@ impl Dir3 for Dir2Node {
                 if freetag == 0xffff {
                     Dir2DataUnused::from(buf_reader.by_ref());
                 } else {
-                    let entry = Dir2DataEntry::from(buf_reader.by_ref());
-
                     if next {
-                        let tag = ((idx << (64 - 5)) as u64) | (entry.tag as u64);
+                        let entry = Dir2DataEntry::from(buf_reader.by_ref());
 
                         let kind = match entry.ftype {
                             XFS_DIR3_FT_REG_FILE => FileType::RegularFile,
@@ -260,8 +258,11 @@ impl Dir3 for Dir2Node {
 
                         let name = entry.name;
 
-                        return Ok((entry.inumber, tag as i64, kind, name));
+                        return Ok((entry.inumber, entry.tag.into(), kind, name));
                     } else {
+                        let length = Dir2DataEntry::get_length(buf_reader.by_ref());
+                        buf_reader.seek(SeekFrom::Current(length)).unwrap();
+
                         next = true;
                     }
                 }

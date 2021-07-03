@@ -190,9 +190,9 @@ impl Dir3 for Dir2Block {
             if freetag == 0xffff {
                 Dir2DataUnused::from(buf_reader.by_ref());
             } else {
-                let entry = Dir2DataEntry::from(buf_reader.by_ref());
-
                 if next {
+                    let entry = Dir2DataEntry::from(buf_reader.by_ref());
+
                     let kind = match entry.ftype {
                         XFS_DIR3_FT_REG_FILE => FileType::RegularFile,
                         XFS_DIR3_FT_DIR => FileType::Directory,
@@ -206,6 +206,9 @@ impl Dir3 for Dir2Block {
 
                     return Ok((entry.inumber, entry.tag.into(), kind, name));
                 } else {
+                    let length = Dir2DataEntry::get_length(buf_reader.by_ref());
+                    buf_reader.seek(SeekFrom::Current(length)).unwrap();
+
                     next = true;
                 }
             }
