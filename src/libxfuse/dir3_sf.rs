@@ -160,7 +160,7 @@ impl Dir3 for Dir2Sf {
 
             Ok((attr, dinode.di_core.di_gen.into()))
         } else {
-            return Err(ENOENT);
+            Err(ENOENT)
         }
     }
 
@@ -187,11 +187,11 @@ impl Dir3 for Dir2Sf {
                 }
             };
 
-            let name = String::from(entry.name.to_owned());
+            let name = entry.name.to_owned();
 
             return Ok((ino, entry.offset as i64, kind, name));
         }
 
-        return Err(-1);
+        Err(-1)
     }
 }

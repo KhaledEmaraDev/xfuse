@@ -83,7 +83,7 @@ impl Dir2Node {
     pub fn from<T: BufRead + Seek>(
         buf_reader: &mut T,
         superblock: &Sb,
-        bmx: &Vec<BmbtRec>,
+        bmx: &[BmbtRec],
     ) -> Dir2Node {
         let mut i: usize = 0;
         let mut entries = Vec::<Dir2Data>::new();
@@ -206,7 +206,7 @@ impl Dir3 for Dir2Node {
 
             Ok((attr, dinode.di_core.di_gen.into()))
         } else {
-            return Err(ENOENT);
+            Err(ENOENT)
         }
     }
 
@@ -258,7 +258,7 @@ impl Dir3 for Dir2Node {
                             }
                         };
 
-                        let name = String::from(entry.name);
+                        let name = entry.name;
 
                         return Ok((entry.inumber, tag as i64, kind, name));
                     } else {
@@ -281,6 +281,6 @@ impl Dir3 for Dir2Node {
                 .unwrap();
         }
 
-        return Err(ENOENT);
+        Err(ENOENT)
     }
 }

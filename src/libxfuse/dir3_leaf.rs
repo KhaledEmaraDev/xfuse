@@ -28,11 +28,11 @@ impl Dir2Leaf {
     pub fn from<T: BufRead + Seek>(
         buf_reader: &mut T,
         superblock: &Sb,
-        bmx: &Vec<BmbtRec>,
+        bmx: &[BmbtRec],
     ) -> Dir2Leaf {
         let mut entries = Vec::<Dir2Data>::new();
-        for i in 0..bmx.len() - 1 {
-            let entry = Dir2Data::from(buf_reader.by_ref(), &superblock, bmx[i].br_startblock);
+        for record in bmx.iter().take(bmx.len() - 1) {
+            let entry = Dir2Data::from(buf_reader.by_ref(), &superblock, record.br_startblock);
             entries.push(entry);
         }
 
@@ -116,7 +116,7 @@ impl Dir3 for Dir2Leaf {
 
             Ok((attr, dinode.di_core.di_gen.into()))
         } else {
-            return Err(ENOENT);
+            Err(ENOENT)
         }
     }
 
@@ -168,7 +168,7 @@ impl Dir3 for Dir2Leaf {
                             }
                         };
 
-                        let name = String::from(entry.name);
+                        let name = entry.name;
 
                         return Ok((entry.inumber, tag as i64, kind, name));
                     } else {
@@ -191,6 +191,6 @@ impl Dir3 for Dir2Leaf {
                 .unwrap();
         }
 
-        return Err(ENOENT);
+        Err(ENOENT)
     }
 }

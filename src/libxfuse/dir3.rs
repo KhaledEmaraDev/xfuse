@@ -70,8 +70,8 @@ impl Dir3DataHdr {
             offset: 0,
             length: 0,
         }; XFS_DIR2_DATA_FD_COUNT];
-        for i in 0..XFS_DIR2_DATA_FD_COUNT {
-            best_free[i] = Dir2DataFree::from(buf_reader.by_ref());
+        for entry in best_free.iter_mut().take(XFS_DIR2_DATA_FD_COUNT) {
+            *entry = Dir2DataFree::from(buf_reader.by_ref());
         }
 
         let pad = buf_reader.read_u32::<BigEndian>().unwrap();

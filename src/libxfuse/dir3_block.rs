@@ -71,9 +71,9 @@ impl Dir2BlockDisk {
     }
 
     pub fn get_data_end(&self, offset: u64, directory_block_size: u32) -> u64 {
-        return offset + (directory_block_size as u64)
+        offset + (directory_block_size as u64)
             - (mem::size_of::<Dir2BlockTail>() as u64)
-            - ((mem::size_of::<Dir2LeafEntry>() as u64) * (self.tail.count as u64));
+            - ((mem::size_of::<Dir2LeafEntry>() as u64) * (self.tail.count as u64))
     }
 }
 
@@ -164,7 +164,7 @@ impl Dir3 for Dir2Block {
 
             Ok((attr, dinode.di_core.di_gen.into()))
         } else {
-            return Err(ENOENT);
+            Err(ENOENT)
         }
     }
 
@@ -202,7 +202,7 @@ impl Dir3 for Dir2Block {
                         }
                     };
 
-                    let name = String::from(entry.name);
+                    let name = entry.name;
 
                     return Ok((entry.inumber, entry.tag.into(), kind, name));
                 } else {
@@ -211,6 +211,6 @@ impl Dir3 for Dir2Block {
             }
         }
 
-        return Err(ENOENT);
+        Err(ENOENT)
     }
 }

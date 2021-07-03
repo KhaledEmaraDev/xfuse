@@ -18,27 +18,27 @@ pub fn hashname(name: &str) -> XfsDahash {
 
     let mut i: usize = 0;
     while namelen >= 4 {
-        hash = ((name[i + 0] as u32) << 21)
+        hash = ((name[i] as u32) << 21)
             ^ ((name[i + 1] as u32) << 14)
             ^ ((name[i + 2] as u32) << 7)
-            ^ ((name[i + 3] as u32) << 0)
+            ^ (name[i + 3] as u32)
             ^ rol32!(hash, 7 * 4);
 
         namelen -= 4;
         i += 4;
     }
 
-    return match namelen {
+    match namelen {
         3 => {
-            ((name[i + 0] as u32) << 14)
+            ((name[i] as u32) << 14)
                 ^ ((name[i + 1] as u32) << 7)
-                ^ ((name[i + 2] as u32) << 0)
+                ^ (name[i + 2] as u32)
                 ^ rol32!(hash, 7 * 3)
         }
-        2 => ((name[i + 0] as u32) << 7) ^ ((name[i + 1] as u32) << 0) ^ rol32!(hash, 7 * 2),
-        1 => ((name[i + 0] as u32) << 0) ^ rol32!(hash, 7 * 1),
+        2 => ((name[i] as u32) << 7) ^ (name[i + 1] as u32) ^ rol32!(hash, 7 * 2),
+        1 => (name[i] as u32) ^ rol32!(hash, 7),
         _ => hash,
-    };
+    }
 }
 
 #[derive(Debug)]

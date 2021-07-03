@@ -82,17 +82,15 @@ impl Dinode {
 
     pub fn get_data<T: BufRead + Seek>(&self, buf_reader: &mut T, superblock: &Sb) -> InodeType {
         match &self.di_u {
-            DiU::DiDir2Sf(dir) => {
-                return InodeType::Dir2Sf(dir.clone());
-            }
+            DiU::DiDir2Sf(dir) => InodeType::Dir2Sf(dir.clone()),
             DiU::DiBmx(bmx) => {
                 if bmx.len() == 1 {
                     let dir_blk =
                         Dir2Block::from(buf_reader.by_ref(), superblock, bmx[0].br_startblock);
-                    return InodeType::Dir2Block(dir_blk);
+                    InodeType::Dir2Block(dir_blk)
                 } else {
                     let dir_leaf = Dir2Leaf::from(buf_reader.by_ref(), superblock, &bmx);
-                    return InodeType::Dir2Leaf(dir_leaf);
+                    InodeType::Dir2Leaf(dir_leaf)
                 }
             }
         }
