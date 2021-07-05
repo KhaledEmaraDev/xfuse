@@ -4,16 +4,23 @@ use super::bmbt_rec::BmbtRec;
 use super::definitions::*;
 use super::dinode_core::{DinodeCore, XfsDinodeFmt};
 use super::dir3_block::Dir2Block;
+use super::dir3_bptree::BmbtKey;
+use super::dir3_bptree::BmdrBlock;
+use super::dir3_bptree::Dir2Btree;
+use super::dir3_bptree::XfsBmbtPtr;
 use super::dir3_leaf::Dir2Leaf;
 use super::dir3_sf::Dir2Sf;
 use super::sb::Sb;
 
+use byteorder::BigEndian;
+use byteorder::ReadBytesExt;
 use libc::{mode_t, S_IFDIR, S_IFMT};
 
 #[derive(Debug)]
 pub enum DiU {
     DiDir2Sf(Dir2Sf),
     DiBmx(Vec<BmbtRec>),
+    DiBmbt((BmdrBlock, Vec<BmbtKey>, Vec<XfsBmbtPtr>)),
 }
 
 #[derive(Debug)]
@@ -21,6 +28,7 @@ pub enum InodeType {
     Dir2Sf(Dir2Sf),
     Dir2Block(Dir2Block),
     Dir2Leaf(Dir2Leaf),
+    Dir2Btree(Dir2Btree),
 }
 
 #[derive(Debug)]
@@ -66,6 +74,22 @@ impl Dinode {
                     }
                     di_u = Some(DiU::DiBmx(bmx));
                 }
+                XfsDinodeFmt::XfsDinodeFmtBtree => {
+                    let bmbt = BmdrBlock::from(buf_reader.by_ref());
+
+                    let mut keys = Vec::<BmbtKey>::new();
+                    for _i in 0..bmbt.bb_numrecs {
+                        keys.push(BmbtKey::from(buf_reader.by_ref()))
+                    }
+
+                    let mut pointers = Vec::<XfsBmbtPtr>::new();
+                    for _i in 0..bmbt.bb_numrecs {
+                        let pointer = buf_reader.read_u64::<BigEndian>().unwrap();
+                        pointers.push(pointer)
+                    }
+
+                    di_u = Some(DiU::DiBmbt((bmbt, keys, pointers)));
+                }
                 _ => {
                     panic!("Directory format not yet supported.");
                 }
@@ -93,6 +117,12 @@ impl Dinode {
                     InodeType::Dir2Leaf(dir_leaf)
                 }
             }
+            DiU::DiBmbt((bmbt, keys, pointers)) => InodeType::Dir2Btree(Dir2Btree::from(
+                bmbt.clone(),
+                keys.clone(),
+                pointers.clone(),
+                superblock.sb_blocksize,
+            )),
         }
     }
 }
