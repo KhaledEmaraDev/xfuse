@@ -103,6 +103,18 @@ impl Filesystem for Volume {
                     Err(err) => reply.error(err),
                 }
             }
+            InodeType::Dir2Node(dir) => {
+                match dir.lookup(
+                    BufReader::new(&self.device).by_ref(),
+                    &self.sb,
+                    &name.to_string_lossy().to_owned(),
+                ) {
+                    Ok((attr, generation)) => {
+                        reply.entry(&ttl, &attr, generation);
+                    }
+                    Err(err) => reply.error(err),
+                }
+            }
             InodeType::Dir2Btree(dir) => {
                 match dir.lookup(
                     BufReader::new(&self.device).by_ref(),
@@ -237,6 +249,25 @@ impl Filesystem for Volume {
                 }
             }
             InodeType::Dir2Leaf(dir) => {
+                let mut off = offset;
+                loop {
+                    let res = dir.next(BufReader::new(&self.device).by_ref(), off);
+                    match res {
+                        Ok((ino, offset, kind, name)) => {
+                            if reply.add(ino, offset, kind, name) {
+                                reply.ok();
+                                return;
+                            }
+                            off = offset;
+                        }
+                        Err(_) => {
+                            reply.ok();
+                            return;
+                        }
+                    }
+                }
+            }
+            InodeType::Dir2Node(dir) => {
                 let mut off = offset;
                 loop {
                     let res = dir.next(BufReader::new(&self.device).by_ref(), off);

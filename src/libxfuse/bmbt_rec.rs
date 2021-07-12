@@ -6,14 +6,14 @@ use byteorder::{BigEndian, ReadBytesExt};
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 
-#[derive(Debug, FromPrimitive)]
+#[derive(Debug, FromPrimitive, Clone)]
 pub enum XfsExntst {
     XfsExtNorm,
     XfsExtUnwritten,
     XfsExtInvalid,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BmbtRec {
     pub br_startoff: XfsFileoff,
     pub br_startblock: XfsFsblock,

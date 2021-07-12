@@ -9,6 +9,7 @@ use super::dir3_bptree::BmdrBlock;
 use super::dir3_bptree::Dir2Btree;
 use super::dir3_bptree::XfsBmbtPtr;
 use super::dir3_leaf::Dir2Leaf;
+use super::dir3_node::Dir2Node;
 use super::dir3_sf::Dir2Sf;
 use super::sb::Sb;
 
@@ -28,6 +29,7 @@ pub enum InodeType {
     Dir2Sf(Dir2Sf),
     Dir2Block(Dir2Block),
     Dir2Leaf(Dir2Leaf),
+    Dir2Node(Dir2Node),
     Dir2Btree(Dir2Btree),
 }
 
@@ -112,6 +114,9 @@ impl Dinode {
                     let dir_blk =
                         Dir2Block::from(buf_reader.by_ref(), superblock, bmx[0].br_startblock);
                     InodeType::Dir2Block(dir_blk)
+                } else if bmx.len() > 4 {
+                    let dir_node = Dir2Node::from(bmx.clone(), superblock.sb_blocksize);
+                    InodeType::Dir2Node(dir_node)
                 } else {
                     let dir_leaf = Dir2Leaf::from(buf_reader.by_ref(), superblock, &bmx);
                     InodeType::Dir2Leaf(dir_leaf)
