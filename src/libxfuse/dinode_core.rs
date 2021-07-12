@@ -9,12 +9,12 @@ use uuid::Uuid;
 
 #[derive(Debug, FromPrimitive)]
 pub enum XfsDinodeFmt {
-    XfsDinodeFmtDev,
-    XfsDinodeFmtLocal,
-    XfsDinodeFmtExtents,
-    XfsDinodeFmtBtree,
-    XfsDinodeFmtUuid,
-    XfsDinodeFmtRmap,
+    Dev,
+    Local,
+    Extents,
+    Btree,
+    Uuid,
+    Rmap,
 }
 
 #[derive(Debug)]

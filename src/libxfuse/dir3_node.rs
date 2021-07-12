@@ -170,7 +170,7 @@ impl Dir3 for Dir2Node {
 
                     let entry = Dir2DataEntry::from(buf_reader.by_ref());
 
-                    let dinode = Dinode::from(buf_reader.by_ref(), &super_block, entry.inumber);
+                    let dinode = Dinode::from(buf_reader.by_ref(), super_block, entry.inumber);
 
                     let kind = match (dinode.di_core.di_mode as mode_t) & S_IFMT {
                         S_IFREG => FileType::RegularFile,
@@ -233,7 +233,7 @@ impl Dir3 for Dir2Node {
         };
 
         let mut bmbt_rec = self.map_dblock(idx as u32);
-        let mut bmbt_rec_idx = 0;
+        let mut bmbt_rec_idx;
 
         if let Some(bmbt_rec_some) = &bmbt_rec {
             bmbt_rec_idx = idx - bmbt_rec_some.br_startoff;

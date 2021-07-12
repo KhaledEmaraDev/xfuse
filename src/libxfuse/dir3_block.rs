@@ -126,7 +126,7 @@ impl Dir3 for Dir2Block {
                 .unwrap();
             let entry = Dir2DataEntry::from(buf_reader.by_ref());
 
-            let dinode = Dinode::from(buf_reader.by_ref(), &super_block, entry.inumber);
+            let dinode = Dinode::from(buf_reader.by_ref(), super_block, entry.inumber);
 
             let kind = match (dinode.di_core.di_mode as mode_t) & S_IFMT {
                 S_IFREG => FileType::RegularFile,

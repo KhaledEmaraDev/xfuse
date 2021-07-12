@@ -15,7 +15,7 @@ use super::sb::Sb;
 
 use byteorder::{BigEndian, ReadBytesExt};
 use fuse::{FileAttr, FileType};
-use libc::{c_int, mode_t, ENOENT, S_IFMT};
+use libc::{c_int, mode_t, ENOENT, S_IFDIR, S_IFMT, S_IFREG};
 use time::Timespec;
 
 #[derive(Debug, Clone)]
@@ -189,7 +189,7 @@ impl Dir2Btree {
             bmbt_rec = Some(BmbtRec::from(buf_reader.by_ref()));
         }
 
-        return (bmbt, bmbt_rec);
+        (bmbt, bmbt_rec)
     }
 }
 
@@ -204,7 +204,7 @@ impl Dir3 for Dir2Btree {
         let hash = hashname(name);
 
         let (_, bmbt_rec) = self.map_dblock(buf_reader.by_ref(), idx as u32);
-        let mut hdr: Option<XfsDa3NodeHdr> = None;
+        let mut hdr: Option<XfsDa3NodeHdr>;
 
         if let Some(bmbt_rec_some) = &bmbt_rec {
             buf_reader
@@ -268,7 +268,7 @@ impl Dir3 for Dir2Btree {
 
                     let entry = Dir2DataEntry::from(buf_reader.by_ref());
 
-                    let dinode = Dinode::from(buf_reader.by_ref(), &super_block, entry.inumber);
+                    let dinode = Dinode::from(buf_reader.by_ref(), super_block, entry.inumber);
 
                     let kind = match (dinode.di_core.di_mode as mode_t) & S_IFMT {
                         S_IFREG => FileType::RegularFile,
@@ -331,8 +331,8 @@ impl Dir3 for Dir2Btree {
         };
 
         let (mut bmbt, mut bmbt_rec) = self.map_dblock(buf_reader.by_ref(), idx as u32);
-        let mut bmbt_block_offset = 0;
-        let mut bmbt_rec_idx = 0;
+        let mut bmbt_block_offset;
+        let mut bmbt_rec_idx;
 
         if let Some(bmbt_rec_some) = &bmbt_rec {
             bmbt_block_offset = buf_reader.stream_position().unwrap();

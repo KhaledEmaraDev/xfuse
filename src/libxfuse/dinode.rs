@@ -65,18 +65,18 @@ impl Dinode {
         let di_u: Option<DiU>;
         if (di_core.di_mode as mode_t) & S_IFMT == S_IFDIR {
             match di_core.di_format {
-                XfsDinodeFmt::XfsDinodeFmtLocal => {
+                XfsDinodeFmt::Local => {
                     let dir_sf = Dir2Sf::from(buf_reader.by_ref());
                     di_u = Some(DiU::DiDir2Sf(dir_sf));
                 }
-                XfsDinodeFmt::XfsDinodeFmtExtents => {
+                XfsDinodeFmt::Extents => {
                     let mut bmx = Vec::<BmbtRec>::new();
                     for _i in 0..di_core.di_nextents {
                         bmx.push(BmbtRec::from(buf_reader.by_ref()))
                     }
                     di_u = Some(DiU::DiBmx(bmx));
                 }
-                XfsDinodeFmt::XfsDinodeFmtBtree => {
+                XfsDinodeFmt::Btree => {
                     let bmbt = BmdrBlock::from(buf_reader.by_ref());
 
                     let mut keys = Vec::<BmbtKey>::new();
@@ -118,7 +118,7 @@ impl Dinode {
                     let dir_node = Dir2Node::from(bmx.clone(), superblock.sb_blocksize);
                     InodeType::Dir2Node(dir_node)
                 } else {
-                    let dir_leaf = Dir2Leaf::from(buf_reader.by_ref(), superblock, &bmx);
+                    let dir_leaf = Dir2Leaf::from(buf_reader.by_ref(), superblock, bmx);
                     InodeType::Dir2Leaf(dir_leaf)
                 }
             }

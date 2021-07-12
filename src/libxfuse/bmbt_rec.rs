@@ -8,9 +8,9 @@ use num_traits::FromPrimitive;
 
 #[derive(Debug, FromPrimitive, Clone)]
 pub enum XfsExntst {
-    XfsExtNorm,
-    XfsExtUnwritten,
-    XfsExtInvalid,
+    Norm,
+    Unwritten,
+    Invalid,
 }
 
 #[derive(Debug, Clone)]

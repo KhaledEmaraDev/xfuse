@@ -122,7 +122,7 @@ impl Dir3 for Dir2Sf {
         }
 
         if let Some(ino) = inode {
-            let dinode = Dinode::from(buf_reader.by_ref(), &super_block, ino);
+            let dinode = Dinode::from(buf_reader.by_ref(), super_block, ino);
 
             let kind = match (dinode.di_core.di_mode as mode_t) & S_IFMT {
                 S_IFREG => FileType::RegularFile,

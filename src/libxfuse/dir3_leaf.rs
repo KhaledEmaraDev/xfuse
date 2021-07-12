@@ -32,7 +32,7 @@ impl Dir2Leaf {
     ) -> Dir2Leaf {
         let mut entries = Vec::<Dir2Data>::new();
         for record in bmx.iter().take(bmx.len() - 1) {
-            let entry = Dir2Data::from(buf_reader.by_ref(), &superblock, record.br_startblock);
+            let entry = Dir2Data::from(buf_reader.by_ref(), superblock, record.br_startblock);
             entries.push(entry);
         }
 
@@ -78,7 +78,7 @@ impl Dir3 for Dir2Leaf {
                 .unwrap();
             let entry = Dir2DataEntry::from(buf_reader.by_ref());
 
-            let dinode = Dinode::from(buf_reader.by_ref(), &super_block, entry.inumber);
+            let dinode = Dinode::from(buf_reader.by_ref(), super_block, entry.inumber);
 
             let kind = match (dinode.di_core.di_mode as mode_t) & S_IFMT {
                 S_IFREG => FileType::RegularFile,
