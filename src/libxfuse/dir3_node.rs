@@ -7,13 +7,13 @@ use super::definitions::*;
 use super::dinode::Dinode;
 use super::dir3::{
     Dir2DataEntry, Dir2DataUnused, Dir2LeafEntry, Dir3, Dir3BlkHdr, Dir3DataHdr, Dir3LeafHdr,
-    XFS_DIR3_FT_DIR, XFS_DIR3_FT_REG_FILE,
 };
 use super::sb::Sb;
+use super::utils::{get_file_type, FileKind};
 
 use byteorder::{BigEndian, ReadBytesExt};
 use fuse::{FileAttr, FileType};
-use libc::{c_int, mode_t, ENOENT, S_IFDIR, S_IFMT, S_IFREG};
+use libc::{c_int, ENOENT, S_IFMT};
 use time::Timespec;
 
 #[derive(Debug)]
@@ -172,13 +172,7 @@ impl Dir3 for Dir2Node {
 
                     let dinode = Dinode::from(buf_reader.by_ref(), super_block, entry.inumber);
 
-                    let kind = match (dinode.di_core.di_mode as mode_t) & S_IFMT {
-                        S_IFREG => FileType::RegularFile,
-                        S_IFDIR => FileType::Directory,
-                        _ => {
-                            return Err(ENOENT);
-                        }
-                    };
+                    let kind = get_file_type(FileKind::Mode(dinode.di_core.di_mode))?;
 
                     let attr = FileAttr {
                         ino: entry.inumber,
@@ -262,14 +256,7 @@ impl Dir3 for Dir2Node {
                     } else if next {
                         let entry = Dir2DataEntry::from(buf_reader.by_ref());
 
-                        let kind = match entry.ftype {
-                            XFS_DIR3_FT_REG_FILE => FileType::RegularFile,
-                            XFS_DIR3_FT_DIR => FileType::Directory,
-                            _ => {
-                                println!("Type Error");
-                                return Err(ENOENT);
-                            }
-                        };
+                        let kind = get_file_type(FileKind::Type(entry.ftype))?;
 
                         let tag = ((bmbt_rec_some.br_startoff + bmbt_rec_idx) & 0xFFFFFFFFFFFF0000)
                             | (entry.tag as u64);

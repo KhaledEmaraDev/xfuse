@@ -127,6 +127,9 @@ impl Filesystem for Volume {
                     Err(err) => reply.error(err),
                 }
             }
+            _ => {
+                panic!("Not a directory.")
+            }
         }
     }
 
@@ -182,6 +185,28 @@ impl Filesystem for Volume {
         };
 
         reply.attr(&ttl, &attr)
+    }
+
+    fn readlink(&mut self, _req: &Request, ino: u64, reply: fuse::ReplyData) {
+        println!("readlink: {}", ino);
+        let dinode = Dinode::from(
+            BufReader::new(&self.device).by_ref(),
+            &self.sb,
+            if ino == FUSE_ROOT_ID {
+                self.sb.sb_rootino
+            } else {
+                ino as XfsIno
+            },
+        );
+
+        match dinode.get_data(BufReader::new(&self.device).by_ref(), &self.sb) {
+            InodeType::SymlinkSf(data) => {
+                reply.data(data.as_bytes_with_nul());
+            }
+            _ => {
+                panic!("Not a symlink.");
+            }
+        }
     }
 
     fn opendir(&mut self, _req: &Request, _ino: u64, _flags: u32, reply: ReplyOpen) {
@@ -304,6 +329,9 @@ impl Filesystem for Volume {
                         }
                     }
                 }
+            }
+            _ => {
+                panic!("Not a directory.")
             }
         }
     }

@@ -1,3 +1,4 @@
+use std::ffi::CString;
 use std::io::{BufRead, Seek, SeekFrom};
 
 use super::bmbt_rec::BmbtRec;
@@ -15,13 +16,14 @@ use super::sb::Sb;
 
 use byteorder::BigEndian;
 use byteorder::ReadBytesExt;
-use libc::{mode_t, S_IFDIR, S_IFMT};
+use libc::{mode_t, S_IFDIR, S_IFLNK, S_IFMT};
 
 #[derive(Debug)]
 pub enum DiU {
     DiDir2Sf(Dir2Sf),
     DiBmx(Vec<BmbtRec>),
     DiBmbt((BmdrBlock, Vec<BmbtKey>, Vec<XfsBmbtPtr>)),
+    DiSymlink(Vec<u8>),
 }
 
 #[derive(Debug)]
@@ -31,6 +33,7 @@ pub enum InodeType {
     Dir2Leaf(Dir2Leaf),
     Dir2Node(Dir2Node),
     Dir2Btree(Dir2Btree),
+    SymlinkSf(CString),
 }
 
 #[derive(Debug)]
@@ -63,8 +66,8 @@ impl Dinode {
         let di_core = DinodeCore::from(buf_reader);
 
         let di_u: Option<DiU>;
-        if (di_core.di_mode as mode_t) & S_IFMT == S_IFDIR {
-            match di_core.di_format {
+        match (di_core.di_mode as mode_t) & S_IFMT {
+            S_IFDIR => match di_core.di_format {
                 XfsDinodeFmt::Local => {
                     let dir_sf = Dir2Sf::from(buf_reader.by_ref());
                     di_u = Some(DiU::DiDir2Sf(dir_sf));
@@ -95,9 +98,17 @@ impl Dinode {
                 _ => {
                     panic!("Directory format not yet supported.");
                 }
+            },
+            S_IFLNK => {
+                let mut data = Vec::<u8>::with_capacity(di_core.di_size as usize);
+                for _i in 0..di_core.di_size {
+                    let byte = buf_reader.read_u8().unwrap();
+                    data.push(byte)
+                }
+
+                di_u = Some(DiU::DiSymlink(data))
             }
-        } else {
-            panic!("Inode type not yet supported.")
+            _ => panic!("Inode type not yet supported."),
         }
 
         Dinode {
@@ -128,6 +139,7 @@ impl Dinode {
                 pointers.clone(),
                 superblock.sb_blocksize,
             )),
+            DiU::DiSymlink(data) => InodeType::SymlinkSf(CString::new(data.clone()).unwrap()),
         }
     }
 }

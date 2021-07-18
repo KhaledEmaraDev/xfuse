@@ -12,4 +12,5 @@ pub mod dir3_leaf;
 pub mod dir3_node;
 pub mod dir3_sf;
 pub mod sb;
+pub mod utils;
 pub mod volume;

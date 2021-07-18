@@ -3,13 +3,14 @@ use std::io::{BufRead, Seek};
 use super::{
     definitions::*,
     dinode::Dinode,
-    dir3::{Dir3, XFS_DIR3_FT_DIR, XFS_DIR3_FT_REG_FILE},
+    dir3::Dir3,
     sb::Sb,
+    utils::{get_file_type, FileKind},
 };
 
 use byteorder::{BigEndian, ReadBytesExt};
 use fuse::{FileAttr, FileType};
-use libc::{c_int, mode_t, ENOENT, S_IFDIR, S_IFMT, S_IFREG};
+use libc::{c_int, ENOENT, S_IFMT};
 use time::Timespec;
 
 // pub type XfsDir2SfOff = [u8; 2];
@@ -124,13 +125,7 @@ impl Dir3 for Dir2Sf {
         if let Some(ino) = inode {
             let dinode = Dinode::from(buf_reader.by_ref(), super_block, ino);
 
-            let kind = match (dinode.di_core.di_mode as mode_t) & S_IFMT {
-                S_IFREG => FileType::RegularFile,
-                S_IFDIR => FileType::Directory,
-                _ => {
-                    return Err(ENOENT);
-                }
-            };
+            let kind = get_file_type(FileKind::Mode(dinode.di_core.di_mode))?;
 
             let attr = FileAttr {
                 ino,
@@ -179,13 +174,7 @@ impl Dir3 for Dir2Sf {
                 XfsDir2Inou::XfsDir2Ino4(inumber) => inumber as u64,
             };
 
-            let kind = match entry.ftype {
-                XFS_DIR3_FT_REG_FILE => FileType::RegularFile,
-                XFS_DIR3_FT_DIR => FileType::Directory,
-                _ => {
-                    panic!("Unknown file type.")
-                }
-            };
+            let kind = get_file_type(FileKind::Type(entry.ftype))?;
 
             let name = entry.name.to_owned();
 
