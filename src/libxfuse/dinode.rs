@@ -13,6 +13,7 @@ use super::dir3_leaf::Dir2Leaf;
 use super::dir3_node::Dir2Node;
 use super::dir3_sf::Dir2Sf;
 use super::sb::Sb;
+use super::symlink_extent::SymlinkExtents;
 
 use byteorder::BigEndian;
 use byteorder::ReadBytesExt;
@@ -34,6 +35,7 @@ pub enum InodeType {
     Dir2Node(Dir2Node),
     Dir2Btree(Dir2Btree),
     SymlinkSf(CString),
+    SymlinkExtents(CString),
 }
 
 #[derive(Debug)]
@@ -99,15 +101,26 @@ impl Dinode {
                     panic!("Directory format not yet supported.");
                 }
             },
-            S_IFLNK => {
-                let mut data = Vec::<u8>::with_capacity(di_core.di_size as usize);
-                for _i in 0..di_core.di_size {
-                    let byte = buf_reader.read_u8().unwrap();
-                    data.push(byte)
+            S_IFLNK => match di_core.di_format {
+                XfsDinodeFmt::Local => {
+                    let mut data = Vec::<u8>::with_capacity(di_core.di_size as usize);
+                    for _i in 0..di_core.di_size {
+                        let byte = buf_reader.read_u8().unwrap();
+                        data.push(byte)
+                    }
+                    di_u = Some(DiU::DiSymlink(data))
                 }
-
-                di_u = Some(DiU::DiSymlink(data))
-            }
+                XfsDinodeFmt::Extents => {
+                    let mut bmx = Vec::<BmbtRec>::new();
+                    for _i in 0..di_core.di_nextents {
+                        bmx.push(BmbtRec::from(buf_reader.by_ref()))
+                    }
+                    di_u = Some(DiU::DiBmx(bmx));
+                }
+                _ => {
+                    panic!("Unexpected format for symlink");
+                }
+            },
             _ => panic!("Inode type not yet supported."),
         }
 
@@ -120,19 +133,29 @@ impl Dinode {
     pub fn get_data<T: BufRead + Seek>(&self, buf_reader: &mut T, superblock: &Sb) -> InodeType {
         match &self.di_u {
             DiU::DiDir2Sf(dir) => InodeType::Dir2Sf(dir.clone()),
-            DiU::DiBmx(bmx) => {
-                if bmx.len() == 1 {
-                    let dir_blk =
-                        Dir2Block::from(buf_reader.by_ref(), superblock, bmx[0].br_startblock);
-                    InodeType::Dir2Block(dir_blk)
-                } else if bmx.len() > 4 {
-                    let dir_node = Dir2Node::from(bmx.clone(), superblock.sb_blocksize);
-                    InodeType::Dir2Node(dir_node)
-                } else {
-                    let dir_leaf = Dir2Leaf::from(buf_reader.by_ref(), superblock, bmx);
-                    InodeType::Dir2Leaf(dir_leaf)
+            DiU::DiBmx(bmx) => match (self.di_core.di_mode as mode_t) & S_IFMT {
+                S_IFDIR => {
+                    if bmx.len() == 1 {
+                        let dir_blk =
+                            Dir2Block::from(buf_reader.by_ref(), superblock, bmx[0].br_startblock);
+                        InodeType::Dir2Block(dir_blk)
+                    } else if bmx.len() > 4 {
+                        let dir_node = Dir2Node::from(bmx.clone(), superblock.sb_blocksize);
+                        InodeType::Dir2Node(dir_node)
+                    } else {
+                        let dir_leaf = Dir2Leaf::from(buf_reader.by_ref(), superblock, bmx);
+                        InodeType::Dir2Leaf(dir_leaf)
+                    }
                 }
-            }
+                S_IFLNK => InodeType::SymlinkExtents(SymlinkExtents::get_target(
+                    buf_reader.by_ref(),
+                    bmx,
+                    superblock,
+                )),
+                _ => {
+                    panic!("This shouldn't be reachable.");
+                }
+            },
             DiU::DiBmbt((bmbt, keys, pointers)) => InodeType::Dir2Btree(Dir2Btree::from(
                 bmbt.clone(),
                 keys.clone(),

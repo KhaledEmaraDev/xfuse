@@ -203,6 +203,9 @@ impl Filesystem for Volume {
             InodeType::SymlinkSf(data) => {
                 reply.data(data.as_bytes_with_nul());
             }
+            InodeType::SymlinkExtents(data) => {
+                reply.data(data.as_bytes_with_nul());
+            }
             _ => {
                 panic!("Not a symlink.");
             }
