@@ -96,3 +96,76 @@ impl<R: BufRead + Seek> Attr<R> for AttrLeaf {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use uuid::Uuid;
+
+    use crate::libxfuse::{
+        attr::{AttrLeafHdr, AttrLeafMap, AttrLeafblock},
+        attr_leaf::AttrLeaf,
+        bmbt_rec::BmbtRec,
+        da_btree::XfsDa3Blkinfo,
+    };
+
+    #[test]
+    fn attr_leaf_block_mapping() {
+        let bmx: Vec<BmbtRec> = vec![
+            BmbtRec {
+                br_startoff: 0,
+                br_startblock: 20,
+                br_blockcount: 2,
+                br_state: crate::libxfuse::bmbt_rec::XfsExntst::Norm,
+            },
+            BmbtRec {
+                br_startoff: 2,
+                br_startblock: 30,
+                br_blockcount: 3,
+                br_state: crate::libxfuse::bmbt_rec::XfsExntst::Norm,
+            },
+            BmbtRec {
+                br_startoff: 5,
+                br_startblock: 40,
+                br_blockcount: 2,
+                br_state: crate::libxfuse::bmbt_rec::XfsExntst::Norm,
+            },
+        ];
+
+        let leaf = AttrLeafblock {
+            hdr: AttrLeafHdr {
+                info: XfsDa3Blkinfo {
+                    forw: 0,
+                    back: 0,
+                    magic: 0,
+                    pad: 0,
+                    crc: 0,
+                    blkno: 0,
+                    lsn: 0,
+                    uuid: Uuid::nil(),
+                    owner: 0,
+                },
+                count: 0,
+                usedbytes: 0,
+                firstused: 0,
+                holes: 0,
+                pad1: 0,
+                freemap: [
+                    AttrLeafMap { base: 0, size: 0 },
+                    AttrLeafMap { base: 0, size: 0 },
+                    AttrLeafMap { base: 0, size: 0 },
+                ],
+                pad2: 0,
+            },
+            entries: vec![],
+        };
+
+        let attr = AttrLeaf {
+            bmx,
+            leaf,
+            leaf_offset: 0,
+            total_size: 0,
+        };
+
+        assert_eq!(attr.map_logical_block_to_actual_block(6), 41);
+    }
+}
