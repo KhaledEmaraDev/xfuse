@@ -299,7 +299,7 @@ impl Filesystem for Volume {
             InodeType::Dir2Sf(dir) => {
                 let mut off = offset;
                 loop {
-                    let res = dir.next(BufReader::new(&self.device).by_ref(), off);
+                    let res = dir.next(BufReader::new(&self.device).by_ref(), &self.sb, off);
                     match res {
                         Ok((ino, offset, kind, name)) => {
                             let res = reply.add(ino, offset, kind, name);
@@ -319,7 +319,7 @@ impl Filesystem for Volume {
             InodeType::Dir2Block(dir) => {
                 let mut off = offset;
                 loop {
-                    let res = dir.next(BufReader::new(&self.device).by_ref(), off);
+                    let res = dir.next(BufReader::new(&self.device).by_ref(), &self.sb, off);
                     match res {
                         Ok((ino, offset, kind, name)) => {
                             if reply.add(ino, offset, kind, name) {
@@ -338,7 +338,7 @@ impl Filesystem for Volume {
             InodeType::Dir2Leaf(dir) => {
                 let mut off = offset;
                 loop {
-                    let res = dir.next(BufReader::new(&self.device).by_ref(), off);
+                    let res = dir.next(BufReader::new(&self.device).by_ref(), &self.sb, off);
                     match res {
                         Ok((ino, offset, kind, name)) => {
                             if reply.add(ino, offset, kind, name) {
@@ -357,7 +357,7 @@ impl Filesystem for Volume {
             InodeType::Dir2Node(dir) => {
                 let mut off = offset;
                 loop {
-                    let res = dir.next(BufReader::new(&self.device).by_ref(), off);
+                    let res = dir.next(BufReader::new(&self.device).by_ref(), &self.sb, off);
                     match res {
                         Ok((ino, offset, kind, name)) => {
                             if reply.add(ino, offset, kind, name) {
@@ -376,7 +376,7 @@ impl Filesystem for Volume {
             InodeType::Dir2Btree(dir) => {
                 let mut off = offset;
                 loop {
-                    let res = dir.next(BufReader::new(&self.device).by_ref(), off);
+                    let res = dir.next(BufReader::new(&self.device).by_ref(), &self.sb, off);
                     match res {
                         Ok((ino, offset, kind, name)) => {
                             if reply.add(ino, offset, kind, name) {

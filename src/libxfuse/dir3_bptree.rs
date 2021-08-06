@@ -42,6 +42,7 @@ impl Dir2Btree {
     pub fn map_dblock<R: BufRead + Seek>(
         &self,
         buf_reader: &mut R,
+        super_block: &Sb,
         dblock: XfsDablk,
     ) -> (Option<XfsBmbtBlock>, Option<BmbtRec>) {
         let mut bmbt: Option<XfsBmbtBlock> = None;
@@ -53,7 +54,7 @@ impl Dir2Btree {
                 bmbt_block_offset = self.pointers[i] * (self.block_size as u64);
                 buf_reader.seek(SeekFrom::Start(bmbt_block_offset)).unwrap();
 
-                bmbt = Some(XfsBmbtBlock::from(buf_reader.by_ref()))
+                bmbt = Some(XfsBmbtBlock::from(buf_reader.by_ref(), super_block))
             }
         }
 
@@ -106,7 +107,7 @@ impl Dir2Btree {
 
             bmbt_block_offset = pointer * (self.block_size as u64);
             buf_reader.seek(SeekFrom::Start(bmbt_block_offset)).unwrap();
-            bmbt = Some(XfsBmbtBlock::from(buf_reader.by_ref()));
+            bmbt = Some(XfsBmbtBlock::from(buf_reader.by_ref(), super_block));
         }
 
         if let Some(bmbt_some) = &bmbt {
@@ -166,7 +167,7 @@ impl Dir3 for Dir2Btree {
         let idx = super_block.get_dir3_leaf_offset();
         let hash = hashname(name);
 
-        let (_, bmbt_rec) = self.map_dblock(buf_reader.by_ref(), idx as u32);
+        let (_, bmbt_rec) = self.map_dblock(buf_reader.by_ref(), super_block, idx as u32);
         let mut hdr: Option<XfsDa3NodeHdr>;
 
         if let Some(bmbt_rec_some) = &bmbt_rec {
@@ -176,13 +177,14 @@ impl Dir3 for Dir2Btree {
                 ))
                 .unwrap();
 
-            hdr = Some(XfsDa3NodeHdr::from(buf_reader.by_ref()));
+            hdr = Some(XfsDa3NodeHdr::from(buf_reader.by_ref(), super_block));
 
             while let Some(hdr_some) = &hdr {
                 loop {
                     let entry = XfsDa3NodeEntry::from(buf_reader.by_ref());
                     if entry.hashval > hash {
-                        let (_, bmbt_rec) = self.map_dblock(buf_reader.by_ref(), entry.before);
+                        let (_, bmbt_rec) =
+                            self.map_dblock(buf_reader.by_ref(), super_block, entry.before);
 
                         if let Some(bmbt_rec_some) = &bmbt_rec {
                             buf_reader
@@ -201,14 +203,14 @@ impl Dir3 for Dir2Btree {
                 if hdr_some.level == 1 {
                     break;
                 } else {
-                    hdr = Some(XfsDa3NodeHdr::from(buf_reader.by_ref()));
+                    hdr = Some(XfsDa3NodeHdr::from(buf_reader.by_ref(), super_block));
                 }
             }
         } else {
             return Err(ENOENT);
         }
 
-        let hdr = Dir3LeafHdr::from(buf_reader.by_ref());
+        let hdr = Dir3LeafHdr::from(buf_reader.by_ref(), super_block);
 
         for _i in 0..hdr.count {
             let entry = Dir2LeafEntry::from(buf_reader.by_ref());
@@ -218,7 +220,7 @@ impl Dir3 for Dir2Btree {
                 let idx = (address / (self.block_size as u64)) as usize;
                 let address = address % (self.block_size as u64);
 
-                let (_, bmbt_rec) = self.map_dblock(buf_reader.by_ref(), idx as u32);
+                let (_, bmbt_rec) = self.map_dblock(buf_reader.by_ref(), super_block, idx as u32);
 
                 if let Some(bmbt_rec_some) = &bmbt_rec {
                     buf_reader
@@ -274,6 +276,7 @@ impl Dir3 for Dir2Btree {
     fn next<T: BufRead + Seek>(
         &self,
         buf_reader: &mut T,
+        super_block: &Sb,
         offset: i64,
     ) -> Result<(XfsIno, i64, FileType, String), c_int> {
         let offset = offset as u64;
@@ -287,7 +290,8 @@ impl Dir3 for Dir2Btree {
             offset
         };
 
-        let (mut bmbt, mut bmbt_rec) = self.map_dblock(buf_reader.by_ref(), idx as u32);
+        let (mut bmbt, mut bmbt_rec) =
+            self.map_dblock(buf_reader.by_ref(), super_block, idx as u32);
         let mut bmbt_block_offset;
         let mut bmbt_rec_idx;
 
@@ -360,7 +364,7 @@ impl Dir3 for Dir2Btree {
             } else {
                 bmbt_block_offset = bmbt_some.bb_rightsib * (self.block_size as u64);
                 buf_reader.seek(SeekFrom::Start(bmbt_block_offset)).unwrap();
-                bmbt = Some(XfsBmbtBlock::from(buf_reader.by_ref()));
+                bmbt = Some(XfsBmbtBlock::from(buf_reader.by_ref(), super_block));
 
                 bmbt_rec = Some(BmbtRec::from(buf_reader.by_ref()));
 

@@ -40,7 +40,7 @@ impl Dir2Leaf {
         let offset = leaf_extent.br_startblock * (superblock.sb_blocksize as u64);
         let entry_size = superblock.sb_blocksize * (1 << superblock.sb_dirblklog);
 
-        let dir_disk = Dir2LeafDisk::from(buf_reader, offset, entry_size);
+        let dir_disk = Dir2LeafDisk::from(buf_reader, superblock, offset, entry_size);
 
         let mut hashes = HashMap::new();
         for leaf_entry in dir_disk.ents {
@@ -117,6 +117,7 @@ impl Dir3 for Dir2Leaf {
     fn next<T: BufRead + Seek>(
         &self,
         buf_reader: &mut T,
+        _super_block: &Sb,
         offset: i64,
     ) -> Result<(XfsIno, i64, FileType, String), c_int> {
         let offset = offset as u64;

@@ -222,8 +222,8 @@ pub struct Dir3LeafHdr {
 }
 
 impl Dir3LeafHdr {
-    pub fn from<T: BufRead>(buf_reader: &mut T) -> Dir3LeafHdr {
-        let info = XfsDa3Blkinfo::from(buf_reader);
+    pub fn from<T: BufRead + Seek>(buf_reader: &mut T, super_block: &Sb) -> Dir3LeafHdr {
+        let info = XfsDa3Blkinfo::from(buf_reader, super_block);
         let count = buf_reader.read_u16::<BigEndian>().unwrap();
         let stale = buf_reader.read_u16::<BigEndian>().unwrap();
         let pad = buf_reader.read_u32::<BigEndian>().unwrap();
@@ -259,10 +259,15 @@ pub struct Dir2LeafDisk {
 }
 
 impl Dir2LeafDisk {
-    pub fn from<T: BufRead + Seek>(buf_reader: &mut T, offset: u64, size: u32) -> Dir2LeafDisk {
+    pub fn from<T: BufRead + Seek>(
+        buf_reader: &mut T,
+        super_block: &Sb,
+        offset: u64,
+        size: u32,
+    ) -> Dir2LeafDisk {
         buf_reader.seek(SeekFrom::Start(offset)).unwrap();
 
-        let hdr = Dir3LeafHdr::from(buf_reader.by_ref());
+        let hdr = Dir3LeafHdr::from(buf_reader.by_ref(), super_block);
 
         let mut ents = Vec::<Dir2LeafEntry>::new();
         for _i in 0..hdr.count {
@@ -308,6 +313,7 @@ pub trait Dir3 {
     fn next<T: BufRead + Seek>(
         &self,
         buf_reader: &mut T,
+        super_block: &Sb,
         offset: i64,
     ) -> Result<(XfsIno, i64, FileType, String), c_int>;
 }

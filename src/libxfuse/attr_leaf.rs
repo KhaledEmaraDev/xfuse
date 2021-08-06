@@ -30,7 +30,7 @@ impl AttrLeaf {
             let leaf_offset = rec.br_startblock * u64::from(superblock.sb_blocksize);
             buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
 
-            let leaf = AttrLeafblock::from(buf_reader.by_ref());
+            let leaf = AttrLeafblock::from(buf_reader.by_ref(), superblock);
 
             AttrLeaf {
                 bmx,

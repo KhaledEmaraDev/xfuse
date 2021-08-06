@@ -162,6 +162,7 @@ impl Dir3 for Dir2Sf {
     fn next<T: BufRead + Seek>(
         &self,
         _buf_reader: &mut T,
+        _super_block: &Sb,
         offset: i64,
     ) -> Result<(XfsIno, i64, FileType, String), c_int> {
         for entry in self.list.iter() {

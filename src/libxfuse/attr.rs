@@ -75,8 +75,8 @@ pub struct AttrLeafHdr {
 }
 
 impl AttrLeafHdr {
-    pub fn from<R: BufRead>(buf_reader: &mut R) -> AttrLeafHdr {
-        let info = XfsDa3Blkinfo::from(buf_reader.by_ref());
+    pub fn from<R: BufRead + Seek>(buf_reader: &mut R, super_block: &Sb) -> AttrLeafHdr {
+        let info = XfsDa3Blkinfo::from(buf_reader.by_ref(), super_block);
         let count = buf_reader.read_u16::<BigEndian>().unwrap();
         let usedbytes = buf_reader.read_u16::<BigEndian>().unwrap();
         let firstused = buf_reader.read_u16::<BigEndian>().unwrap();
@@ -162,8 +162,8 @@ pub struct AttrLeafblock {
 }
 
 impl AttrLeafblock {
-    pub fn from<R: BufRead>(buf_reader: &mut R) -> AttrLeafblock {
-        let hdr = AttrLeafHdr::from(buf_reader.by_ref());
+    pub fn from<R: BufRead + Seek>(buf_reader: &mut R, super_block: &Sb) -> AttrLeafblock {
+        let hdr = AttrLeafHdr::from(buf_reader.by_ref(), super_block);
 
         let mut entries = Vec::<AttrLeafEntry>::with_capacity(hdr.count.into());
         for _i in 0..entries.capacity() {

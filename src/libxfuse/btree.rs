@@ -32,7 +32,7 @@ pub struct BtreeBlock<T: PrimInt + Unsigned> {
 }
 
 impl<T: PrimInt + Unsigned> BtreeBlock<T> {
-    pub fn from<R: BufRead>(buf_reader: &mut R) -> BtreeBlock<T> {
+    pub fn from<R: BufRead + Seek>(buf_reader: &mut R, super_block: &Sb) -> BtreeBlock<T> {
         let bb_magic = buf_reader.read_u32::<BigEndian>().unwrap();
         let bb_level = buf_reader.read_u16::<BigEndian>().unwrap();
         let bb_numrecs = buf_reader.read_u16::<BigEndian>().unwrap();
@@ -47,6 +47,16 @@ impl<T: PrimInt + Unsigned> BtreeBlock<T> {
         let bb_owner = buf_reader.read_u64::<BigEndian>().unwrap();
         let bb_crc = buf_reader.read_u32::<LittleEndian>().unwrap();
         let bb_pad = buf_reader.read_u32::<BigEndian>().unwrap();
+
+        if bb_uuid != super_block.sb_uuid {
+            panic!("UUID mismatch!");
+        }
+
+        let inferred_block_number =
+            buf_reader.stream_position().unwrap() / u64::from(super_block.sb_blocksize);
+        if inferred_block_number != bb_blkno {
+            panic!("Block number mismatch!");
+        }
 
         BtreeBlock {
             bb_magic,
@@ -144,7 +154,7 @@ impl Btree {
             ))
             .unwrap();
 
-        let mut bmbt_block = XfsBmbtBlock::from(buf_reader.by_ref());
+        let mut bmbt_block = XfsBmbtBlock::from(buf_reader.by_ref(), super_block);
         let mut keys_offset = buf_reader.stream_position().unwrap();
 
         loop {
@@ -195,7 +205,7 @@ impl Btree {
                     .seek(SeekFrom::Start(ptr * u64::from(super_block.sb_blocksize)))
                     .unwrap();
 
-                bmbt_block = XfsBmbtBlock::from(buf_reader.by_ref());
+                bmbt_block = XfsBmbtBlock::from(buf_reader.by_ref(), super_block);
                 keys_offset = buf_reader.stream_position().unwrap();
             }
         }

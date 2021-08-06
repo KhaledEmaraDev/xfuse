@@ -116,7 +116,7 @@ impl Dir3 for Dir2Node {
         buf_reader.seek(SeekFrom::Current(-8)).unwrap();
 
         if magic.unwrap() == XFS_DA3_NODE_MAGIC {
-            let mut hdr = XfsDa3NodeHdr::from(buf_reader.by_ref());
+            let mut hdr = XfsDa3NodeHdr::from(buf_reader.by_ref(), super_block);
 
             loop {
                 loop {
@@ -142,12 +142,12 @@ impl Dir3 for Dir2Node {
                 if hdr.level == 1 {
                     break;
                 } else {
-                    hdr = XfsDa3NodeHdr::from(buf_reader.by_ref());
+                    hdr = XfsDa3NodeHdr::from(buf_reader.by_ref(), super_block);
                 }
             }
         }
 
-        let hdr = Dir3LeafHdr::from(buf_reader.by_ref());
+        let hdr = Dir3LeafHdr::from(buf_reader.by_ref(), super_block);
 
         for _i in 0..hdr.count {
             let entry = Dir2LeafEntry::from(buf_reader.by_ref());
@@ -213,6 +213,7 @@ impl Dir3 for Dir2Node {
     fn next<T: BufRead + Seek>(
         &self,
         buf_reader: &mut T,
+        _super_block: &Sb,
         offset: i64,
     ) -> Result<(XfsIno, i64, FileType, String), c_int> {
         let offset = offset as u64;

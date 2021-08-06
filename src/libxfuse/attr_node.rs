@@ -32,7 +32,7 @@ impl AttrNode {
                 ))
                 .unwrap();
 
-            let node = XfsDa3Intnode::from(buf_reader.by_ref());
+            let node = XfsDa3Intnode::from(buf_reader.by_ref(), superblock);
 
             AttrNode {
                 bmx,
@@ -146,11 +146,11 @@ impl<R: BufRead + Seek> Attr<R> for AttrNode {
 
             buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
 
-            let mut node = AttrLeafblock::from(buf_reader.by_ref());
+            let mut node = AttrLeafblock::from(buf_reader.by_ref(), super_block);
             total_size += node.get_total_size(buf_reader.by_ref(), leaf_offset);
 
             while node.hdr.info.forw != 0 {
-                node = AttrLeafblock::from(buf_reader.by_ref());
+                node = AttrLeafblock::from(buf_reader.by_ref(), super_block);
                 total_size += node.get_total_size(buf_reader.by_ref(), leaf_offset);
             }
 
@@ -162,14 +162,14 @@ impl<R: BufRead + Seek> Attr<R> for AttrNode {
     fn get_size(&self, buf_reader: &mut R, super_block: &Sb, name: &str) -> u32 {
         let hash = hashname(name);
 
-        let node = XfsDa3Intnode::from(buf_reader.by_ref());
+        let node = XfsDa3Intnode::from(buf_reader.by_ref(), super_block);
         let blk = node.lookup(buf_reader.by_ref(), &super_block, hash, |block, _| {
             self.map_logical_block_to_fs_block(block.into())
         });
         let leaf_offset = blk * u64::from(super_block.sb_blocksize);
 
         buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-        let leaf = AttrLeafblock::from(buf_reader.by_ref());
+        let leaf = AttrLeafblock::from(buf_reader.by_ref(), super_block);
 
         leaf.get_size(buf_reader.by_ref(), hash, leaf_offset)
     }
@@ -187,11 +187,11 @@ impl<R: BufRead + Seek> Attr<R> for AttrNode {
 
         buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
 
-        let mut leaf = AttrLeafblock::from(buf_reader.by_ref());
+        let mut leaf = AttrLeafblock::from(buf_reader.by_ref(), super_block);
         leaf.list(buf_reader.by_ref(), &mut list, leaf_offset);
 
         while leaf.hdr.info.forw != 0 {
-            leaf = AttrLeafblock::from(buf_reader.by_ref());
+            leaf = AttrLeafblock::from(buf_reader.by_ref(), super_block);
             leaf.list(buf_reader.by_ref(), &mut list, leaf_offset);
         }
 
@@ -201,14 +201,14 @@ impl<R: BufRead + Seek> Attr<R> for AttrNode {
     fn get(&self, buf_reader: &mut R, super_block: &Sb, name: &str) -> Vec<u8> {
         let hash = hashname(name);
 
-        let node = XfsDa3Intnode::from(buf_reader.by_ref());
+        let node = XfsDa3Intnode::from(buf_reader.by_ref(), super_block);
         let blk = node.lookup(buf_reader.by_ref(), &super_block, hash, |block, _| {
             self.map_logical_block_to_fs_block(block.into())
         });
         let leaf_offset = blk * u64::from(super_block.sb_blocksize);
 
         buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-        let leaf = AttrLeafblock::from(buf_reader.by_ref());
+        let leaf = AttrLeafblock::from(buf_reader.by_ref(), super_block);
 
         leaf.get(
             buf_reader.by_ref(),

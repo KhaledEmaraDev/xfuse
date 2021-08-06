@@ -165,6 +165,7 @@ impl Dir3 for Dir2Block {
     fn next<T: BufRead + Seek>(
         &self,
         buf_reader: &mut T,
+        _super_block: &Sb,
         offset: i64,
     ) -> Result<(XfsIno, i64, FileType, String), c_int> {
         let mut next = offset == 0;

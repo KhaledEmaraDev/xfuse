@@ -59,7 +59,7 @@ pub struct XfsDa3Blkinfo {
 }
 
 impl XfsDa3Blkinfo {
-    pub fn from<R: BufRead>(buf_reader: &mut R) -> XfsDa3Blkinfo {
+    pub fn from<R: BufRead + Seek>(buf_reader: &mut R, super_block: &Sb) -> XfsDa3Blkinfo {
         let forw = buf_reader.read_u32::<BigEndian>().unwrap();
         let back = buf_reader.read_u32::<BigEndian>().unwrap();
         let magic = buf_reader.read_u16::<BigEndian>().unwrap();
@@ -70,6 +70,16 @@ impl XfsDa3Blkinfo {
         let lsn = buf_reader.read_u64::<BigEndian>().unwrap();
         let uuid = Uuid::from_u128(buf_reader.read_u128::<BigEndian>().unwrap());
         let owner = buf_reader.read_u64::<BigEndian>().unwrap();
+
+        if uuid != super_block.sb_uuid {
+            panic!("UUID mismatch!");
+        }
+
+        let inferred_block_number =
+            buf_reader.stream_position().unwrap() / u64::from(super_block.sb_blocksize);
+        if inferred_block_number != blkno {
+            panic!("Block number mismatch!");
+        }
 
         XfsDa3Blkinfo {
             forw,
@@ -94,8 +104,8 @@ pub struct XfsDa3NodeHdr {
 }
 
 impl XfsDa3NodeHdr {
-    pub fn from<R: BufRead>(buf_reader: &mut R) -> XfsDa3NodeHdr {
-        let info = XfsDa3Blkinfo::from(buf_reader.by_ref());
+    pub fn from<R: BufRead + Seek>(buf_reader: &mut R, super_block: &Sb) -> XfsDa3NodeHdr {
+        let info = XfsDa3Blkinfo::from(buf_reader.by_ref(), super_block);
         let count = buf_reader.read_u16::<BigEndian>().unwrap();
         let level = buf_reader.read_u16::<BigEndian>().unwrap();
         let pad32 = buf_reader.read_u32::<BigEndian>().unwrap();
@@ -136,8 +146,8 @@ pub struct XfsDa3Intnode {
 }
 
 impl XfsDa3Intnode {
-    pub fn from<R: BufRead>(buf_reader: &mut R) -> XfsDa3Intnode {
-        let hdr = XfsDa3NodeHdr::from(buf_reader.by_ref());
+    pub fn from<R: BufRead + Seek>(buf_reader: &mut R, super_block: &Sb) -> XfsDa3Intnode {
+        let hdr = XfsDa3NodeHdr::from(buf_reader.by_ref(), super_block);
 
         let mut btree = Vec::<XfsDa3NodeEntry>::new();
         for _i in 0..hdr.count {
@@ -190,7 +200,7 @@ impl XfsDa3Intnode {
                 .seek(SeekFrom::Start(blk * u64::from(super_block.sb_blocksize)))
                 .unwrap();
 
-            let node = XfsDa3Intnode::from(buf_reader.by_ref());
+            let node = XfsDa3Intnode::from(buf_reader.by_ref(), super_block);
             node.lookup(
                 buf_reader.by_ref(),
                 &super_block,
@@ -215,7 +225,7 @@ impl XfsDa3Intnode {
                 .seek(SeekFrom::Start(blk * u64::from(super_block.sb_blocksize)))
                 .unwrap();
 
-            let node = XfsDa3Intnode::from(buf_reader.by_ref());
+            let node = XfsDa3Intnode::from(buf_reader.by_ref(), super_block);
             node.first_block(buf_reader.by_ref(), &super_block, map_da_block_to_fs_block)
         }
     }
