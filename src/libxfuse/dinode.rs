@@ -14,12 +14,15 @@ use super::dir3_bptree::Dir2Btree;
 use super::dir3_leaf::Dir2Leaf;
 use super::dir3_node::Dir2Node;
 use super::dir3_sf::Dir2Sf;
+use super::file::File;
+use super::file_btree::FileBtree;
+use super::file_extent_list::FileExtentList;
 use super::sb::Sb;
 use super::symlink_extent::SymlinkExtents;
 
 use byteorder::BigEndian;
 use byteorder::ReadBytesExt;
-use libc::{mode_t, S_IFDIR, S_IFLNK, S_IFMT};
+use libc::{mode_t, S_IFDIR, S_IFLNK, S_IFMT, S_IFREG};
 
 pub const LITERAL_AREA_OFFSET: u8 = 0xb0;
 
@@ -81,6 +84,34 @@ impl Dinode {
 
         let di_u: Option<DiU>;
         match (di_core.di_mode as mode_t) & S_IFMT {
+            S_IFREG => match di_core.di_format {
+                XfsDinodeFmt::Extents => {
+                    let mut bmx = Vec::<BmbtRec>::new();
+                    for _i in 0..di_core.di_nextents {
+                        bmx.push(BmbtRec::from(buf_reader.by_ref()))
+                    }
+                    di_u = Some(DiU::DiBmx(bmx));
+                }
+                XfsDinodeFmt::Btree => {
+                    let bmbt = BmdrBlock::from(buf_reader.by_ref());
+
+                    let mut keys = Vec::<BmbtKey>::new();
+                    for _i in 0..bmbt.bb_numrecs {
+                        keys.push(BmbtKey::from(buf_reader.by_ref()))
+                    }
+
+                    let mut pointers = Vec::<XfsBmbtPtr>::new();
+                    for _i in 0..bmbt.bb_numrecs {
+                        let pointer = buf_reader.read_u64::<BigEndian>().unwrap();
+                        pointers.push(pointer)
+                    }
+
+                    di_u = Some(DiU::DiBmbt((bmbt, keys, pointers)));
+                }
+                _ => {
+                    panic!("Directory format not yet supported.");
+                }
+            },
             S_IFDIR => match di_core.di_format {
                 XfsDinodeFmt::Local => {
                     let dir_sf = Dir2Sf::from(buf_reader.by_ref());
@@ -188,6 +219,36 @@ impl Dinode {
         }
     }
 
+    pub fn get_file<R: BufRead + Seek>(
+        &self,
+        _buf_reader: &mut R,
+        superblock: &Sb,
+    ) -> Box<dyn File<R>> {
+        match &self.di_u {
+            DiU::DiBmx(bmx) => {
+                return Box::new(FileExtentList {
+                    bmx: bmx.clone(),
+                    size: self.di_core.di_size,
+                    block_size: superblock.sb_blocksize,
+                });
+            }
+            DiU::DiBmbt((bmdr, keys, pointers)) => {
+                return Box::new(FileBtree {
+                    btree: Btree {
+                        bmdr: bmdr.clone(),
+                        keys: keys.clone(),
+                        ptrs: pointers.clone(),
+                    },
+                    size: self.di_core.di_size,
+                    block_size: superblock.sb_blocksize,
+                });
+            }
+            _ => {
+                panic!("Unsupported file format!");
+            }
+        }
+    }
+
     pub fn get_data<R: BufRead + Seek>(&self, buf_reader: &mut R, superblock: &Sb) -> InodeType {
         match &self.di_u {
             DiU::DiDir2Sf(dir) => InodeType::Dir2Sf(dir.clone()),
@@ -232,26 +293,30 @@ impl Dinode {
         match &self.di_a {
             Some(DiA::DiAttrsf(attr)) => Some(Box::new(attr.clone())),
             Some(DiA::DiAbmx(bmx)) => {
-                buf_reader.seek(SeekFrom::Current(8)).unwrap();
-                let magic = buf_reader.read_u16::<BigEndian>().unwrap();
-                buf_reader.seek(SeekFrom::Current(-8)).unwrap();
+                if self.di_core.di_anextents > 0 {
+                    buf_reader.seek(SeekFrom::Current(8)).unwrap();
+                    let magic = buf_reader.read_u16::<BigEndian>().unwrap();
+                    buf_reader.seek(SeekFrom::Current(-8)).unwrap();
 
-                match magic {
-                    XFS_ATTR3_LEAF_MAGIC => {
-                        return Some(Box::new(AttrLeaf::from(
-                            buf_reader.by_ref(),
-                            superblock,
-                            bmx.clone(),
-                        )));
+                    match magic {
+                        XFS_ATTR3_LEAF_MAGIC => {
+                            return Some(Box::new(AttrLeaf::from(
+                                buf_reader.by_ref(),
+                                superblock,
+                                bmx.clone(),
+                            )));
+                        }
+                        XFS_DA3_NODE_MAGIC => {
+                            return Some(Box::new(AttrLeaf::from(
+                                buf_reader.by_ref(),
+                                superblock,
+                                bmx.clone(),
+                            )));
+                        }
+                        _ => panic!("Unkown magic number!"),
                     }
-                    XFS_DA3_NODE_MAGIC => {
-                        return Some(Box::new(AttrLeaf::from(
-                            buf_reader.by_ref(),
-                            superblock,
-                            bmx.clone(),
-                        )));
-                    }
-                    _ => panic!("Unkown magic number!"),
+                } else {
+                    return None;
                 }
             }
             Some(DiA::DiAbmbt((bmdr, keys, pointers))) => {

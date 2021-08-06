@@ -22,6 +22,7 @@ pub struct Volume {
     pub sb: Sb,
     pub agi: Agi,
     pub root_ino: Dinode,
+    pub open_files: Vec<Dinode>,
 }
 
 impl Volume {
@@ -43,6 +44,7 @@ impl Volume {
             sb: superblock,
             agi,
             root_ino,
+            open_files: Vec::new(),
         }
     }
 }
@@ -210,6 +212,63 @@ impl Filesystem for Volume {
                 panic!("Not a symlink.");
             }
         }
+    }
+
+    fn open(&mut self, _req: &Request, ino: u64, flags: u32, reply: ReplyOpen) {
+        println!("open: {}", ino);
+
+        let dinode = Dinode::from(
+            BufReader::new(&self.device).by_ref(),
+            &self.sb,
+            if ino == FUSE_ROOT_ID {
+                self.sb.sb_rootino
+            } else {
+                ino as XfsIno
+            },
+        );
+
+        self.open_files.push(dinode);
+
+        reply.opened((self.open_files.len() as u64) - 1, flags)
+    }
+
+    fn read(
+        &mut self,
+        _req: &Request,
+        _ino: u64,
+        fh: u64,
+        offset: i64,
+        size: u32,
+        reply: fuse::ReplyData,
+    ) {
+        println!("read: {}", _ino);
+
+        let dinode = &self.open_files[fh as usize];
+        let mut buf_reader = BufReader::new(&self.device);
+
+        let mut file = dinode.get_file(buf_reader.by_ref(), &self.sb);
+
+        reply.data(
+            file.read(buf_reader.by_ref(), &self.sb, offset, size)
+                .as_slice(),
+        );
+    }
+
+    fn release(
+        &mut self,
+        _req: &Request,
+        _ino: u64,
+        fh: u64,
+        _flags: u32,
+        _lock_owner: u64,
+        _flush: bool,
+        reply: ReplyEmpty,
+    ) {
+        println!("release: {}", _ino);
+
+        self.open_files.remove(fh as usize);
+
+        reply.ok();
     }
 
     fn opendir(&mut self, _req: &Request, _ino: u64, _flags: u32, reply: ReplyOpen) {
