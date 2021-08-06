@@ -1,4 +1,9 @@
 pub mod agi;
+pub mod attr;
+pub mod attr_bptree;
+pub mod attr_leaf;
+pub mod attr_node;
+pub mod attr_shortform;
 pub mod bmbt_rec;
 pub mod btree;
 pub mod da_btree;

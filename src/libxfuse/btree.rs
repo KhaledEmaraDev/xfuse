@@ -1,8 +1,20 @@
-use std::{io::prelude::*, mem};
+use std::{
+    cmp::Ordering,
+    io::{prelude::*, SeekFrom},
+    mem,
+};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use num_traits::{PrimInt, Unsigned};
 use uuid::Uuid;
+
+use super::{
+    bmbt_rec::BmbtRec,
+    definitions::{XfsFileoff, XfsFsblock},
+    sb::Sb,
+};
+
+pub const POINTERS_AREA_OFFSET: u16 = 0x808;
 
 #[derive(Debug)]
 pub struct BtreeBlock<T: PrimInt + Unsigned> {
@@ -49,5 +61,186 @@ impl<T: PrimInt + Unsigned> BtreeBlock<T> {
             bb_crc,
             bb_pad,
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BmdrBlock {
+    pub bb_level: u16,
+    pub bb_numrecs: u16,
+}
+
+impl BmdrBlock {
+    pub fn from<R: BufRead>(buf_reader: &mut R) -> BmdrBlock {
+        let bb_level = buf_reader.read_u16::<BigEndian>().unwrap();
+        let bb_numrecs = buf_reader.read_u16::<BigEndian>().unwrap();
+
+        BmdrBlock {
+            bb_level,
+            bb_numrecs,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BmbtKey {
+    pub br_startoff: XfsFileoff,
+}
+
+impl BmbtKey {
+    pub fn from<R: BufRead>(buf_reader: &mut R) -> BmbtKey {
+        let br_startoff = buf_reader.read_u64::<BigEndian>().unwrap();
+
+        BmbtKey { br_startoff }
+    }
+}
+
+pub type XfsBmbtPtr = XfsFsblock;
+pub type XfsBmdrPtr = XfsFsblock;
+pub type XfsBmbtBlock = BtreeBlock<u64>;
+
+#[derive(Debug, Clone)]
+pub struct Btree {
+    pub bmdr: BmdrBlock,
+    pub keys: Vec<BmbtKey>,
+    pub ptrs: Vec<XfsBmbtPtr>,
+}
+
+impl Btree {
+    pub fn map_block<R: BufRead + Seek>(
+        &self,
+        buf_reader: &mut R,
+        super_block: &Sb,
+        logical_block: XfsFileoff,
+    ) -> XfsFsblock {
+        let mut low: i64 = 0;
+        let mut high: i64 = (self.bmdr.bb_numrecs - 1) as i64;
+
+        let mut predecessor = 0;
+
+        while low <= high {
+            let mid = low + ((high - low) / 2);
+
+            let key = self.keys[mid as usize].br_startoff;
+
+            match key.cmp(&logical_block.into()) {
+                Ordering::Greater => {
+                    high = mid - 1;
+                }
+                Ordering::Less => {
+                    low = mid + 1;
+                    predecessor = mid;
+                }
+                Ordering::Equal => {
+                    predecessor = mid;
+                    break;
+                }
+            }
+        }
+
+        buf_reader
+            .seek(SeekFrom::Start(
+                self.ptrs[predecessor as usize] * u64::from(super_block.sb_blocksize),
+            ))
+            .unwrap();
+
+        let mut bmbt_block = XfsBmbtBlock::from(buf_reader.by_ref());
+        let mut keys_offset = buf_reader.stream_position().unwrap();
+
+        loop {
+            if bmbt_block.bb_level == 0 {
+                break;
+            } else {
+                let mut low: i64 = 0;
+                let mut high: i64 = (bmbt_block.bb_numrecs - 1) as i64;
+
+                let mut predecessor = 0;
+
+                while low <= high {
+                    let mid = low + ((high - low) / 2);
+
+                    buf_reader.seek(SeekFrom::Start(keys_offset)).unwrap();
+                    buf_reader
+                        .seek(SeekFrom::Current(mid * (mem::size_of::<BmbtKey>() as i64)))
+                        .unwrap();
+
+                    let key = BmbtKey::from(buf_reader.by_ref()).br_startoff;
+
+                    match key.cmp(&logical_block.into()) {
+                        Ordering::Greater => {
+                            high = mid - 1;
+                        }
+                        Ordering::Less => {
+                            low = mid + 1;
+                            predecessor = mid;
+                        }
+                        Ordering::Equal => {
+                            predecessor = mid;
+                            break;
+                        }
+                    }
+                }
+
+                buf_reader
+                    .seek(SeekFrom::Start(
+                        keys_offset - (mem::size_of::<XfsBmbtBlock>() as u64)
+                            + u64::from(POINTERS_AREA_OFFSET),
+                    ))
+                    .unwrap();
+                buf_reader.seek(SeekFrom::Current(predecessor * 8)).unwrap();
+
+                let ptr = buf_reader.read_u64::<BigEndian>().unwrap();
+
+                buf_reader
+                    .seek(SeekFrom::Start(ptr * u64::from(super_block.sb_blocksize)))
+                    .unwrap();
+
+                bmbt_block = XfsBmbtBlock::from(buf_reader.by_ref());
+                keys_offset = buf_reader.stream_position().unwrap();
+            }
+        }
+
+        let recs_offset = buf_reader.stream_position().unwrap();
+
+        let mut low: i64 = 0;
+        let mut high: i64 = (bmbt_block.bb_numrecs - 1) as i64;
+
+        let mut predecessor = 0;
+
+        while low <= high {
+            let mid = low + ((high - low) / 2);
+
+            buf_reader.seek(SeekFrom::Start(recs_offset)).unwrap();
+            buf_reader
+                .seek(SeekFrom::Current(mid * (mem::size_of::<BmbtRec>() as i64)))
+                .unwrap();
+
+            let key = BmbtRec::from(buf_reader.by_ref()).br_startoff;
+
+            match key.cmp(&logical_block.into()) {
+                Ordering::Greater => {
+                    high = mid - 1;
+                }
+                Ordering::Less => {
+                    low = mid + 1;
+                    predecessor = mid;
+                }
+                Ordering::Equal => {
+                    predecessor = mid;
+                    break;
+                }
+            }
+        }
+
+        buf_reader.seek(SeekFrom::Start(recs_offset)).unwrap();
+        buf_reader
+            .seek(SeekFrom::Current(
+                predecessor * (mem::size_of::<BmbtRec>() as i64),
+            ))
+            .unwrap();
+
+        let rec = BmbtRec::from(buf_reader.by_ref());
+
+        rec.br_startblock + (logical_block - rec.br_startoff)
     }
 }

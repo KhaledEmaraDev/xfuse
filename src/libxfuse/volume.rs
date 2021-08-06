@@ -11,9 +11,9 @@ use super::sb::Sb;
 
 use fuse::{
     FileAttr, FileType, Filesystem, ReplyAttr, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen,
-    ReplyStatfs, Request, FUSE_ROOT_ID,
+    ReplyStatfs, ReplyXattr, Request, FUSE_ROOT_ID,
 };
-use libc::{mode_t, S_IFDIR, S_IFMT, S_IFREG};
+use libc::{mode_t, ERANGE, S_IFDIR, S_IFMT, S_IFREG};
 use time::Timespec;
 
 #[derive(Debug)]
@@ -32,7 +32,7 @@ impl Volume {
         let superblock = Sb::from(buf_reader.by_ref());
 
         buf_reader
-            .seek(SeekFrom::Start((superblock.sb_sectsize as u64) * 2))
+            .seek(SeekFrom::Start(u64::from(superblock.sb_sectsize) * 2))
             .unwrap();
         let agi = Agi::from(buf_reader.by_ref());
 
@@ -356,6 +356,86 @@ impl Filesystem for Volume {
             255,
             self.sb.sb_blocksize,
         )
+    }
+
+    fn getxattr(&mut self, _req: &Request, ino: u64, name: &OsStr, size: u32, reply: ReplyXattr) {
+        println!("getxattr: {:?}", name);
+
+        let name = name.to_string_lossy();
+        let name: Vec<&str> = name.split('.').collect();
+        let name = name[1];
+
+        let mut buf_reader = BufReader::new(&self.device);
+        let inode_number = if ino == FUSE_ROOT_ID {
+            self.sb.sb_rootino
+        } else {
+            ino as XfsIno
+        };
+        let dinode = Dinode::from(buf_reader.by_ref(), &self.sb, inode_number);
+
+        let attrs = dinode.get_attrs(buf_reader.by_ref(), &self.sb);
+        match attrs {
+            Some(attrs) => {
+                let attrs_size = attrs.get_size(buf_reader.by_ref(), &self.sb, &name);
+
+                if size == 0 {
+                    reply.size(attrs_size);
+                    return;
+                }
+
+                if attrs_size > size {
+                    reply.error(ERANGE);
+                    return;
+                }
+
+                reply.data(attrs.get(buf_reader.by_ref(), &self.sb, &name).as_slice());
+            }
+            None => {
+                if size == 0 {
+                    reply.size(0);
+                } else {
+                    panic!("No attributes!");
+                }
+            }
+        }
+    }
+
+    fn listxattr(&mut self, _req: &Request, ino: u64, size: u32, reply: ReplyXattr) {
+        println!("listxattr: {}", ino);
+
+        let mut buf_reader = BufReader::new(&self.device);
+        let inode_number = if ino == FUSE_ROOT_ID {
+            self.sb.sb_rootino
+        } else {
+            ino as XfsIno
+        };
+        let dinode = Dinode::from(buf_reader.by_ref(), &self.sb, inode_number);
+
+        let attrs = dinode.get_attrs(buf_reader.by_ref(), &self.sb);
+        match attrs {
+            Some(mut attrs) => {
+                let attrs_size = attrs.get_total_size(buf_reader.by_ref(), &self.sb);
+
+                if size == 0 {
+                    reply.size(attrs_size);
+                    return;
+                }
+
+                if attrs_size > size {
+                    reply.error(ERANGE);
+                    return;
+                }
+
+                reply.data(attrs.list(buf_reader.by_ref(), &self.sb).as_slice());
+            }
+            None => {
+                if size == 0 {
+                    reply.size(0);
+                } else {
+                    panic!("No attributes!");
+                }
+            }
+        }
     }
 
     fn access(&mut self, _req: &Request, _ino: u64, _mask: u32, reply: ReplyEmpty) {

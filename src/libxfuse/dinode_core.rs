@@ -62,7 +62,7 @@ pub struct DinodeCore {
     pub di_nextents: XfsExtnum,
     pub di_anextents: XfsAextnum,
     pub di_forkoff: u8,
-    pub di_aformat: i8,
+    pub di_aformat: XfsDinodeFmt,
     pub di_dmevmask: u32,
     pub di_dmstate: u16,
     pub di_flags: u16,
@@ -81,7 +81,7 @@ pub struct DinodeCore {
 }
 
 impl DinodeCore {
-    pub fn from<T: BufRead>(buf_reader: &mut T) -> DinodeCore {
+    pub fn from<R: BufRead>(buf_reader: &mut R) -> DinodeCore {
         let di_magic = buf_reader.read_u16::<BigEndian>().unwrap();
         if di_magic != XFS_DINODE_MAGIC {
             panic!("Agi magic number is invalid");
@@ -122,7 +122,7 @@ impl DinodeCore {
         let di_nextents = buf_reader.read_i32::<BigEndian>().unwrap();
         let di_anextents = buf_reader.read_i16::<BigEndian>().unwrap();
         let di_forkoff = buf_reader.read_u8().unwrap();
-        let di_aformat = buf_reader.read_i8().unwrap();
+        let di_aformat = XfsDinodeFmt::from_u8(buf_reader.read_u8().unwrap()).unwrap();
         let di_dmevmask = buf_reader.read_u32::<BigEndian>().unwrap();
         let di_dmstate = buf_reader.read_u16::<BigEndian>().unwrap();
         let di_flags = buf_reader.read_u16::<BigEndian>().unwrap();

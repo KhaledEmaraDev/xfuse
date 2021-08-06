@@ -3,7 +3,7 @@ use std::io::{BufRead, Seek, SeekFrom};
 use std::mem;
 
 use super::bmbt_rec::BmbtRec;
-use super::btree::BtreeBlock;
+use super::btree::{BmbtKey, BmdrBlock, XfsBmbtBlock, XfsBmbtPtr};
 use super::da_btree::{hashname, XfsDa3NodeEntry, XfsDa3NodeHdr};
 use super::definitions::*;
 use super::dinode::Dinode;
@@ -15,41 +15,6 @@ use byteorder::{BigEndian, ReadBytesExt};
 use fuse::{FileAttr, FileType};
 use libc::{c_int, ENOENT, S_IFMT};
 use time::Timespec;
-
-#[derive(Debug, Clone)]
-pub struct BmdrBlock {
-    pub bb_level: u16,
-    pub bb_numrecs: u16,
-}
-
-impl BmdrBlock {
-    pub fn from<R: BufRead>(buf_reader: &mut R) -> BmdrBlock {
-        let bb_level = buf_reader.read_u16::<BigEndian>().unwrap();
-        let bb_numrecs = buf_reader.read_u16::<BigEndian>().unwrap();
-
-        BmdrBlock {
-            bb_level,
-            bb_numrecs,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct BmbtKey {
-    pub br_startoff: XfsFileoff,
-}
-
-impl BmbtKey {
-    pub fn from<R: BufRead>(buf_reader: &mut R) -> BmbtKey {
-        let br_startoff = buf_reader.read_u64::<BigEndian>().unwrap();
-
-        BmbtKey { br_startoff }
-    }
-}
-
-pub type XfsBmbtPtr = XfsFsblock;
-pub type XfsBmdrPtr = XfsFsblock;
-pub type XfsBmbtBlock = BtreeBlock<u64>;
 
 #[derive(Debug)]
 pub struct Dir2Btree {

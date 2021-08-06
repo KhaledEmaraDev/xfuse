@@ -1,6 +1,9 @@
-use std::io::BufRead;
+use std::{
+    cmp::Ordering,
+    io::{BufRead, Seek, SeekFrom},
+};
 
-use super::definitions::*;
+use super::{definitions::*, sb::Sb};
 
 use byteorder::{BigEndian, ReadBytesExt};
 use uuid::Uuid;
@@ -56,7 +59,7 @@ pub struct XfsDa3Blkinfo {
 }
 
 impl XfsDa3Blkinfo {
-    pub fn from<T: BufRead>(buf_reader: &mut T) -> XfsDa3Blkinfo {
+    pub fn from<R: BufRead>(buf_reader: &mut R) -> XfsDa3Blkinfo {
         let forw = buf_reader.read_u32::<BigEndian>().unwrap();
         let back = buf_reader.read_u32::<BigEndian>().unwrap();
         let magic = buf_reader.read_u16::<BigEndian>().unwrap();
@@ -91,7 +94,7 @@ pub struct XfsDa3NodeHdr {
 }
 
 impl XfsDa3NodeHdr {
-    pub fn from<T: BufRead>(buf_reader: &mut T) -> XfsDa3NodeHdr {
+    pub fn from<R: BufRead>(buf_reader: &mut R) -> XfsDa3NodeHdr {
         let info = XfsDa3Blkinfo::from(buf_reader.by_ref());
         let count = buf_reader.read_u16::<BigEndian>().unwrap();
         let level = buf_reader.read_u16::<BigEndian>().unwrap();
@@ -113,12 +116,17 @@ pub struct XfsDa3NodeEntry {
 }
 
 impl XfsDa3NodeEntry {
-    pub fn from<T: BufRead>(buf_reader: &mut T) -> XfsDa3NodeEntry {
+    pub fn from<R: BufRead>(buf_reader: &mut R) -> XfsDa3NodeEntry {
         let hashval = buf_reader.read_u32::<BigEndian>().unwrap();
         let before = buf_reader.read_u32::<BigEndian>().unwrap();
 
         XfsDa3NodeEntry { hashval, before }
     }
+}
+
+pub enum LookupResponse {
+    Intermediate,
+    Result(XfsFsblock),
 }
 
 #[derive(Debug)]
@@ -128,7 +136,7 @@ pub struct XfsDa3Intnode {
 }
 
 impl XfsDa3Intnode {
-    pub fn from<T: BufRead>(buf_reader: &mut T) -> XfsDa3Intnode {
+    pub fn from<R: BufRead>(buf_reader: &mut R) -> XfsDa3Intnode {
         let hdr = XfsDa3NodeHdr::from(buf_reader.by_ref());
 
         let mut btree = Vec::<XfsDa3NodeEntry>::new();
@@ -137,5 +145,78 @@ impl XfsDa3Intnode {
         }
 
         XfsDa3Intnode { hdr, btree }
+    }
+
+    pub fn lookup<R: BufRead + Seek, F: Fn(XfsDablk, &mut R) -> XfsFsblock>(
+        &self,
+        buf_reader: &mut R,
+        super_block: &Sb,
+        hash: u32,
+        map_da_block_to_fs_block: F,
+    ) -> XfsFsblock {
+        let mut low: i64 = 0;
+        let mut high: i64 = (self.btree.len() - 1) as i64;
+
+        let mut predecessor = 0;
+
+        while low <= high {
+            let mid = low + ((high - low) / 2);
+
+            let key = self.btree[mid as usize].hashval;
+
+            match key.cmp(&hash.into()) {
+                Ordering::Greater => {
+                    high = mid - 1;
+                }
+                Ordering::Less => {
+                    low = mid + 1;
+                    predecessor = mid;
+                }
+                Ordering::Equal => {
+                    predecessor = mid;
+                    break;
+                }
+            }
+        }
+
+        if self.hdr.level == 1 {
+            self.btree[predecessor as usize].before.into()
+        } else {
+            let blk = map_da_block_to_fs_block(
+                self.btree[predecessor as usize].before,
+                buf_reader.by_ref(),
+            );
+            buf_reader
+                .seek(SeekFrom::Start(blk * u64::from(super_block.sb_blocksize)))
+                .unwrap();
+
+            let node = XfsDa3Intnode::from(buf_reader.by_ref());
+            node.lookup(
+                buf_reader.by_ref(),
+                &super_block,
+                hash,
+                map_da_block_to_fs_block,
+            )
+        }
+    }
+
+    pub fn first_block<R: BufRead + Seek, F: Fn(XfsDablk, &mut R) -> XfsFsblock>(
+        &self,
+        buf_reader: &mut R,
+        super_block: &Sb,
+        map_da_block_to_fs_block: F,
+    ) -> XfsFsblock {
+        if self.hdr.level == 1 {
+            self.btree.first().unwrap().before.into()
+        } else {
+            let blk =
+                map_da_block_to_fs_block(self.btree.first().unwrap().before, buf_reader.by_ref());
+            buf_reader
+                .seek(SeekFrom::Start(blk * u64::from(super_block.sb_blocksize)))
+                .unwrap();
+
+            let node = XfsDa3Intnode::from(buf_reader.by_ref());
+            node.first_block(buf_reader.by_ref(), &super_block, map_da_block_to_fs_block)
+        }
     }
 }
