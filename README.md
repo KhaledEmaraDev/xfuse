@@ -58,4 +58,4 @@ done
 
 ## License
 
-TODO
+bsd-2-clause
