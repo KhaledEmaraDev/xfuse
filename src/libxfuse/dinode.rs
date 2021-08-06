@@ -225,24 +225,20 @@ impl Dinode {
         superblock: &Sb,
     ) -> Box<dyn File<R>> {
         match &self.di_u {
-            DiU::DiBmx(bmx) => {
-                return Box::new(FileExtentList {
-                    bmx: bmx.clone(),
-                    size: self.di_core.di_size,
-                    block_size: superblock.sb_blocksize,
-                });
-            }
-            DiU::DiBmbt((bmdr, keys, pointers)) => {
-                return Box::new(FileBtree {
-                    btree: Btree {
-                        bmdr: bmdr.clone(),
-                        keys: keys.clone(),
-                        ptrs: pointers.clone(),
-                    },
-                    size: self.di_core.di_size,
-                    block_size: superblock.sb_blocksize,
-                });
-            }
+            DiU::DiBmx(bmx) => Box::new(FileExtentList {
+                bmx: bmx.clone(),
+                size: self.di_core.di_size,
+                block_size: superblock.sb_blocksize,
+            }),
+            DiU::DiBmbt((bmdr, keys, pointers)) => Box::new(FileBtree {
+                btree: Btree {
+                    bmdr: bmdr.clone(),
+                    keys: keys.clone(),
+                    ptrs: pointers.clone(),
+                },
+                size: self.di_core.di_size,
+                block_size: superblock.sb_blocksize,
+            }),
             _ => {
                 panic!("Unsupported file format!");
             }
@@ -316,19 +312,17 @@ impl Dinode {
                         _ => panic!("Unkown magic number!"),
                     }
                 } else {
-                    return None;
+                    None
                 }
             }
-            Some(DiA::DiAbmbt((bmdr, keys, pointers))) => {
-                return Some(Box::new(AttrBtree {
-                    btree: Btree {
-                        bmdr: bmdr.clone(),
-                        keys: keys.clone(),
-                        ptrs: pointers.clone(),
-                    },
-                    total_size: -1,
-                }));
-            }
+            Some(DiA::DiAbmbt((bmdr, keys, pointers))) => Some(Box::new(AttrBtree {
+                btree: Btree {
+                    bmdr: bmdr.clone(),
+                    keys: keys.clone(),
+                    ptrs: pointers.clone(),
+                },
+                total_size: -1,
+            })),
             None => None,
         }
     }

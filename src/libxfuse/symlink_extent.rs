@@ -52,7 +52,7 @@ pub struct SymlinkExtents;
 impl SymlinkExtents {
     pub fn get_target<T: BufRead + Seek>(
         buf_reader: &mut T,
-        bmx: &Vec<BmbtRec>,
+        bmx: &[BmbtRec],
         superblock: &Sb,
     ) -> CString {
         let mut data = Vec::<u8>::with_capacity(1024);
@@ -75,6 +75,6 @@ impl SymlinkExtents {
             }
         }
 
-        return CString::new(data).unwrap();
+        CString::new(data).unwrap()
     }
 }

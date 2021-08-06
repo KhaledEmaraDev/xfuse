@@ -133,7 +133,7 @@ impl Btree {
 
             let key = self.keys[mid as usize].br_startoff;
 
-            match key.cmp(&logical_block.into()) {
+            match key.cmp(&logical_block) {
                 Ordering::Greater => {
                     high = mid - 1;
                 }
@@ -176,7 +176,7 @@ impl Btree {
 
                     let key = BmbtKey::from(buf_reader.by_ref()).br_startoff;
 
-                    match key.cmp(&logical_block.into()) {
+                    match key.cmp(&logical_block) {
                         Ordering::Greater => {
                             high = mid - 1;
                         }
@@ -227,7 +227,7 @@ impl Btree {
 
             let key = BmbtRec::from(buf_reader.by_ref()).br_startoff;
 
-            match key.cmp(&logical_block.into()) {
+            match key.cmp(&logical_block) {
                 Ordering::Greater => {
                     high = mid - 1;
                 }

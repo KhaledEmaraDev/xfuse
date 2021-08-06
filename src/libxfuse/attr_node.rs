@@ -132,9 +132,7 @@ impl AttrNode {
 
 impl<R: BufRead + Seek> Attr<R> for AttrNode {
     fn get_total_size(&mut self, buf_reader: &mut R, super_block: &Sb) -> u32 {
-        if self.total_size != -1 {
-            return self.total_size.try_into().unwrap();
-        } else {
+        if self.total_size == -1 {
             let mut total_size: u32 = 0;
 
             let blk = self
@@ -155,8 +153,9 @@ impl<R: BufRead + Seek> Attr<R> for AttrNode {
             }
 
             self.total_size = i64::from(total_size);
-            self.total_size.try_into().unwrap()
         }
+
+        self.total_size.try_into().unwrap()
     }
 
     fn get_size(&self, buf_reader: &mut R, super_block: &Sb, name: &str) -> u32 {

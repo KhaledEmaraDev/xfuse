@@ -53,7 +53,7 @@ impl<R: BufRead + Seek> File<R> for FileExtentList {
 
             let mut buf = vec![0u8; size_to_read as usize];
             buf_reader.read_exact(&mut buf).unwrap();
-            data.extend_from_slice(&mut buf);
+            data.extend_from_slice(&buf);
 
             remaining_size -= size_to_read;
             logical_block += 1;

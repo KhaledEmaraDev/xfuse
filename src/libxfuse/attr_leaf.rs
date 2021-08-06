@@ -57,7 +57,7 @@ impl AttrLeaf {
 impl<R: BufRead + Seek> Attr<R> for AttrLeaf {
     fn get_total_size(&mut self, buf_reader: &mut R, _super_block: &Sb) -> u32 {
         if self.total_size != -1 {
-            return self.total_size.try_into().unwrap();
+            self.total_size.try_into().unwrap()
         } else {
             self.total_size = i64::from(
                 self.leaf

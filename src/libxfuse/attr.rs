@@ -1,4 +1,5 @@
 use std::{
+    cmp::Ordering,
     convert::TryInto,
     io::{BufRead, Seek, SeekFrom},
     mem::size_of,
@@ -226,23 +227,27 @@ impl AttrLeafblock {
 
             let entry = AttrLeafEntry::from(buf_reader.by_ref());
 
-            if entry.hashval == hash {
-                buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-                buf_reader
-                    .seek(SeekFrom::Current(i64::from(entry.nameidx)))
-                    .unwrap();
-
-                if entry.flags & XFS_ATTR_LOCAL == 0 {
-                    let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
-                    return name_entry.valuelen.into();
-                } else {
-                    let name_entry = AttrLeafNameRemote::from(buf_reader.by_ref());
-                    return name_entry.valuelen;
+            match entry.hashval.cmp(&hash) {
+                Ordering::Greater => {
+                    high = mid - 1;
                 }
-            } else if entry.hashval < hash {
-                low = mid + 1;
-            } else if entry.hashval > hash {
-                high = mid - 1;
+                Ordering::Less => {
+                    low = mid + 1;
+                }
+                Ordering::Equal => {
+                    buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
+                    buf_reader
+                        .seek(SeekFrom::Current(i64::from(entry.nameidx)))
+                        .unwrap();
+
+                    if entry.flags & XFS_ATTR_LOCAL == 0 {
+                        let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
+                        return name_entry.valuelen.into();
+                    } else {
+                        let name_entry = AttrLeafNameRemote::from(buf_reader.by_ref());
+                        return name_entry.valuelen;
+                    }
+                }
             }
         }
 
@@ -267,15 +272,15 @@ impl AttrLeafblock {
                 list.extend_from_slice(&get_namespace_from_flags(entry.flags).as_bytes().to_vec());
                 let namelen = name_entry.namelen as usize;
                 list.extend_from_slice(&name_entry.nameval[0..namelen].to_vec());
-                list.push(0)
             } else {
                 let name_entry = AttrLeafNameRemote::from(buf_reader.by_ref());
 
                 list.extend_from_slice(&get_namespace_from_flags(entry.flags).as_bytes().to_vec());
                 let namelen = name_entry.namelen as usize;
                 list.extend_from_slice(&name_entry.name[0..namelen].to_vec());
-                list.push(0)
             }
+
+            list.push(0)
         }
     }
 
@@ -307,46 +312,50 @@ impl AttrLeafblock {
 
             let entry = AttrLeafEntry::from(buf_reader.by_ref());
 
-            if entry.hashval == hash {
-                buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-                buf_reader
-                    .seek(SeekFrom::Current(i64::from(entry.nameidx)))
-                    .unwrap();
+            match entry.hashval.cmp(&hash) {
+                Ordering::Greater => {
+                    high = mid - 1;
+                }
+                Ordering::Less => {
+                    low = mid + 1;
+                }
+                Ordering::Equal => {
+                    buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
+                    buf_reader
+                        .seek(SeekFrom::Current(i64::from(entry.nameidx)))
+                        .unwrap();
 
-                if entry.flags & XFS_ATTR_LOCAL == 0 {
-                    let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
+                    if entry.flags & XFS_ATTR_LOCAL == 0 {
+                        let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
 
-                    let namelen = name_entry.namelen as usize;
+                        let namelen = name_entry.namelen as usize;
 
-                    return Vec::<u8>::from(name_entry.nameval[namelen..].to_vec());
-                } else {
-                    let name_entry = AttrLeafNameRemote::from(buf_reader.by_ref());
+                        return name_entry.nameval[namelen..].to_vec();
+                    } else {
+                        let name_entry = AttrLeafNameRemote::from(buf_reader.by_ref());
 
-                    let mut valuelen: i64 = name_entry.valuelen.into();
-                    let mut valueblk = name_entry.valueblk;
+                        let mut valuelen: i64 = name_entry.valuelen.into();
+                        let mut valueblk = name_entry.valueblk;
 
-                    let mut res: Vec<u8> = Vec::with_capacity(valuelen as usize);
+                        let mut res: Vec<u8> = Vec::with_capacity(valuelen as usize);
 
-                    while valueblk > 0 {
-                        let blk_num =
-                            map_logical_block_to_fs_block(valueblk.into(), buf_reader.by_ref());
-                        buf_reader
-                            .seek(SeekFrom::Start(
-                                blk_num * u64::from(super_block.sb_blocksize),
-                            ))
-                            .unwrap();
+                        while valueblk > 0 {
+                            let blk_num =
+                                map_logical_block_to_fs_block(valueblk.into(), buf_reader.by_ref());
+                            buf_reader
+                                .seek(SeekFrom::Start(
+                                    blk_num * u64::from(super_block.sb_blocksize),
+                                ))
+                                .unwrap();
 
-                        let (_, data) = AttrRmtHdr::from(buf_reader.by_ref());
+                            let (_, data) = AttrRmtHdr::from(buf_reader.by_ref());
 
-                        valuelen -= data.len() as i64;
-                        res.extend(data);
-                        valueblk += 1;
+                            valuelen -= data.len() as i64;
+                            res.extend(data);
+                            valueblk += 1;
+                        }
                     }
                 }
-            } else if entry.hashval < hash {
-                low = mid + 1;
-            } else if entry.hashval > hash {
-                high = mid - 1;
             }
         }
 
@@ -414,7 +423,7 @@ impl AttrRmtHdr {
             .unwrap();
 
         let mut data = Vec::<u8>::with_capacity(rm_bytes as usize);
-        buf_reader.read(&mut data).unwrap();
+        buf_reader.read_exact(&mut data).unwrap();
 
         (
             AttrRmtHdr {

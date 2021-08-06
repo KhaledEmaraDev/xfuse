@@ -174,7 +174,7 @@ impl XfsDa3Intnode {
 
             let key = self.btree[mid as usize].hashval;
 
-            match key.cmp(&hash.into()) {
+            match key.cmp(&hash) {
                 Ordering::Greater => {
                     high = mid - 1;
                 }

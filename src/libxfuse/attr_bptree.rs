@@ -19,9 +19,7 @@ pub struct AttrBtree {
 
 impl<R: BufRead + Seek> Attr<R> for AttrBtree {
     fn get_total_size(&mut self, buf_reader: &mut R, super_block: &Sb) -> u32 {
-        if self.total_size != -1 {
-            return self.total_size.try_into().unwrap();
-        } else {
+        if self.total_size == -1 {
             let mut total_size: u32 = 0;
 
             let blk = self.btree.map_block(buf_reader.by_ref(), &super_block, 0);
@@ -48,8 +46,9 @@ impl<R: BufRead + Seek> Attr<R> for AttrBtree {
             }
 
             self.total_size = i64::from(total_size);
-            self.total_size.try_into().unwrap()
         }
+
+        self.total_size.try_into().unwrap()
     }
 
     fn get_size(&self, buf_reader: &mut R, super_block: &Sb, name: &str) -> u32 {
@@ -130,10 +129,7 @@ impl<R: BufRead + Seek> Attr<R> for AttrBtree {
             super_block,
             hash,
             leaf_offset,
-            |block, reader| {
-                self.btree
-                    .map_block(reader.by_ref(), &super_block, block.into())
-            },
+            |block, reader| self.btree.map_block(reader.by_ref(), &super_block, block),
         )
     }
 }

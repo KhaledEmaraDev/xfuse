@@ -129,7 +129,7 @@ impl<R: BufRead + Seek> Attr<R> for AttrShortform {
             if name.as_bytes().to_vec() == entry_name {
                 let namelen = entry.namelen as usize;
 
-                return Vec::<u8>::from(entry.nameval[namelen..].to_vec());
+                return entry.nameval[namelen..].to_vec();
             }
         }
 
