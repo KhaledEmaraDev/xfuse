@@ -2,11 +2,9 @@ use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 
-use crate::libxfuse::dir3::Dir3;
-
 use super::agi::Agi;
 use super::definitions::XfsIno;
-use super::dinode::{Dinode, InodeType};
+use super::dinode::Dinode;
 use super::sb::Sb;
 
 use fuse::{
@@ -53,90 +51,36 @@ impl Filesystem for Volume {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         println!("lookup: {:?}", name);
 
-        let dinode = Dinode::from(
-            BufReader::new(&self.device).by_ref(),
-            &self.sb,
-            if parent == FUSE_ROOT_ID {
-                self.sb.sb_rootino
-            } else {
-                parent as XfsIno
-            },
-        );
+        let mut buf_reader = BufReader::new(&self.device);
+        let inode_number = if parent == FUSE_ROOT_ID {
+            self.sb.sb_rootino
+        } else {
+            parent as XfsIno
+        };
+        let dinode = Dinode::from(buf_reader.by_ref(), &self.sb, inode_number);
 
         let ttl = Timespec {
             sec: 86400,
             nsec: 0,
         };
 
-        match dinode.get_data(BufReader::new(&self.device).by_ref(), &self.sb) {
-            InodeType::Dir2Sf(dir) => {
-                match dir.lookup(
-                    BufReader::new(&self.device).by_ref(),
-                    &self.sb,
-                    &name.to_string_lossy().to_owned(),
-                ) {
-                    Ok((attr, generation)) => {
-                        reply.entry(&ttl, &attr, generation);
-                    }
-                    Err(err) => reply.error(err),
-                }
+        let dir = dinode.get_dir(buf_reader.by_ref(), &self.sb);
+
+        match dir.lookup(
+            BufReader::new(&self.device).by_ref(),
+            &self.sb,
+            &name.to_string_lossy().to_owned(),
+        ) {
+            Ok((attr, generation)) => {
+                reply.entry(&ttl, &attr, generation);
             }
-            InodeType::Dir2Block(dir) => {
-                match dir.lookup(
-                    BufReader::new(&self.device).by_ref(),
-                    &self.sb,
-                    &name.to_string_lossy().to_owned(),
-                ) {
-                    Ok((attr, generation)) => {
-                        reply.entry(&ttl, &attr, generation);
-                    }
-                    Err(err) => reply.error(err),
-                }
-            }
-            InodeType::Dir2Leaf(dir) => {
-                match dir.lookup(
-                    BufReader::new(&self.device).by_ref(),
-                    &self.sb,
-                    &name.to_string_lossy().to_owned(),
-                ) {
-                    Ok((attr, generation)) => {
-                        reply.entry(&ttl, &attr, generation);
-                    }
-                    Err(err) => reply.error(err),
-                }
-            }
-            InodeType::Dir2Node(dir) => {
-                match dir.lookup(
-                    BufReader::new(&self.device).by_ref(),
-                    &self.sb,
-                    &name.to_string_lossy().to_owned(),
-                ) {
-                    Ok((attr, generation)) => {
-                        reply.entry(&ttl, &attr, generation);
-                    }
-                    Err(err) => reply.error(err),
-                }
-            }
-            InodeType::Dir2Btree(dir) => {
-                match dir.lookup(
-                    BufReader::new(&self.device).by_ref(),
-                    &self.sb,
-                    &name.to_string_lossy().to_owned(),
-                ) {
-                    Ok((attr, generation)) => {
-                        reply.entry(&ttl, &attr, generation);
-                    }
-                    Err(err) => reply.error(err),
-                }
-            }
-            _ => {
-                panic!("Not a directory.")
-            }
-        }
+            Err(err) => reply.error(err),
+        };
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
         println!("getattr: {}", ino);
+
         let dinode = Dinode::from(
             BufReader::new(&self.device).by_ref(),
             &self.sb,
@@ -191,6 +135,7 @@ impl Filesystem for Volume {
 
     fn readlink(&mut self, _req: &Request, ino: u64, reply: fuse::ReplyData) {
         println!("readlink: {}", ino);
+
         let dinode = Dinode::from(
             BufReader::new(&self.device).by_ref(),
             &self.sb,
@@ -201,17 +146,13 @@ impl Filesystem for Volume {
             },
         );
 
-        match dinode.get_data(BufReader::new(&self.device).by_ref(), &self.sb) {
-            InodeType::SymlinkSf(data) => {
-                reply.data(data.as_bytes_with_nul());
-            }
-            InodeType::SymlinkExtents(data) => {
-                reply.data(data.as_bytes_with_nul());
-            }
-            _ => {
-                panic!("Not a symlink.");
-            }
-        }
+        let mut buf_reader = BufReader::new(&self.device);
+
+        reply.data(
+            dinode
+                .get_link_data(buf_reader.by_ref(), &self.sb)
+                .as_bytes_with_nul(),
+        );
     }
 
     fn open(&mut self, _req: &Request, ino: u64, flags: u32, reply: ReplyOpen) {
@@ -285,126 +226,46 @@ impl Filesystem for Volume {
         mut reply: ReplyDirectory,
     ) {
         println!("readdir: {}", ino);
-        let dinode = Dinode::from(
-            BufReader::new(&self.device).by_ref(),
-            &self.sb,
-            if ino == FUSE_ROOT_ID {
-                self.sb.sb_rootino
-            } else {
-                ino as XfsIno
-            },
-        );
 
-        match dinode.get_data(BufReader::new(&self.device).by_ref(), &self.sb) {
-            InodeType::Dir2Sf(dir) => {
-                let mut off = offset;
-                loop {
-                    let res = dir.next(BufReader::new(&self.device).by_ref(), &self.sb, off);
-                    match res {
-                        Ok((ino, offset, kind, name)) => {
-                            let res = reply.add(ino, offset, kind, name);
-                            if res {
-                                reply.ok();
-                                return;
-                            }
-                            off = offset;
-                        }
-                        Err(_) => {
-                            reply.ok();
-                            return;
-                        }
+        let mut buf_reader = BufReader::new(&self.device);
+        let inode_number = if ino == FUSE_ROOT_ID {
+            self.sb.sb_rootino
+        } else {
+            ino as XfsIno
+        };
+        let dinode = Dinode::from(buf_reader.by_ref(), &self.sb, inode_number);
+
+        let dir = dinode.get_dir(buf_reader.by_ref(), &self.sb);
+
+        let mut off = offset;
+        loop {
+            let res = dir.next(BufReader::new(&self.device).by_ref(), &self.sb, off);
+            match res {
+                Ok((ino, offset, kind, name)) => {
+                    let res = reply.add(ino, offset, kind, name);
+                    if res {
+                        reply.ok();
+                        return;
                     }
+                    off = offset;
                 }
-            }
-            InodeType::Dir2Block(dir) => {
-                let mut off = offset;
-                loop {
-                    let res = dir.next(BufReader::new(&self.device).by_ref(), &self.sb, off);
-                    match res {
-                        Ok((ino, offset, kind, name)) => {
-                            if reply.add(ino, offset, kind, name) {
-                                reply.ok();
-                                return;
-                            }
-                            off = offset;
-                        }
-                        Err(_) => {
-                            reply.ok();
-                            return;
-                        }
-                    }
+                Err(_) => {
+                    reply.ok();
+                    return;
                 }
-            }
-            InodeType::Dir2Leaf(dir) => {
-                let mut off = offset;
-                loop {
-                    let res = dir.next(BufReader::new(&self.device).by_ref(), &self.sb, off);
-                    match res {
-                        Ok((ino, offset, kind, name)) => {
-                            if reply.add(ino, offset, kind, name) {
-                                reply.ok();
-                                return;
-                            }
-                            off = offset;
-                        }
-                        Err(_) => {
-                            reply.ok();
-                            return;
-                        }
-                    }
-                }
-            }
-            InodeType::Dir2Node(dir) => {
-                let mut off = offset;
-                loop {
-                    let res = dir.next(BufReader::new(&self.device).by_ref(), &self.sb, off);
-                    match res {
-                        Ok((ino, offset, kind, name)) => {
-                            if reply.add(ino, offset, kind, name) {
-                                reply.ok();
-                                return;
-                            }
-                            off = offset;
-                        }
-                        Err(_) => {
-                            reply.ok();
-                            return;
-                        }
-                    }
-                }
-            }
-            InodeType::Dir2Btree(dir) => {
-                let mut off = offset;
-                loop {
-                    let res = dir.next(BufReader::new(&self.device).by_ref(), &self.sb, off);
-                    match res {
-                        Ok((ino, offset, kind, name)) => {
-                            if reply.add(ino, offset, kind, name) {
-                                reply.ok();
-                                return;
-                            }
-                            off = offset;
-                        }
-                        Err(_) => {
-                            reply.ok();
-                            return;
-                        }
-                    }
-                }
-            }
-            _ => {
-                panic!("Not a directory.")
             }
         }
     }
 
     fn releasedir(&mut self, _req: &Request, _ino: u64, _fh: u64, _flags: u32, reply: ReplyEmpty) {
         println!("releasedir: {}", _ino);
+
         reply.ok();
     }
 
     fn statfs(&mut self, _req: &Request, _ino: u64, reply: ReplyStatfs) {
         println!("statfs: {}", _ino);
+
         reply.statfs(
             self.sb.sb_dblocks,
             self.sb.sb_fdblocks,
@@ -499,6 +360,7 @@ impl Filesystem for Volume {
 
     fn access(&mut self, _req: &Request, _ino: u64, _mask: u32, reply: ReplyEmpty) {
         println!("access: {}", _ino);
+
         reply.ok();
     }
 }

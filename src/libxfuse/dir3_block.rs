@@ -110,10 +110,10 @@ impl Dir2Block {
     }
 }
 
-impl Dir3 for Dir2Block {
-    fn lookup<T: BufRead + Seek>(
+impl<R: BufRead + Seek> Dir3<R> for Dir2Block {
+    fn lookup(
         &self,
-        buf_reader: &mut T,
+        buf_reader: &mut R,
         super_block: &Sb,
         name: &str,
     ) -> Result<(FileAttr, u64), c_int> {
@@ -162,9 +162,9 @@ impl Dir3 for Dir2Block {
         }
     }
 
-    fn next<T: BufRead + Seek>(
+    fn next(
         &self,
-        buf_reader: &mut T,
+        buf_reader: &mut R,
         _super_block: &Sb,
         offset: i64,
     ) -> Result<(XfsIno, i64, FileType, String), c_int> {
