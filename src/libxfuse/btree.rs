@@ -52,12 +52,6 @@ impl<T: PrimInt + Unsigned> BtreeBlock<T> {
             panic!("UUID mismatch!");
         }
 
-        let inferred_block_number =
-            buf_reader.stream_position().unwrap() / u64::from(super_block.sb_blocksize);
-        if inferred_block_number != bb_blkno {
-            panic!("Block number mismatch!");
-        }
-
         BtreeBlock {
             bb_magic,
             bb_level,

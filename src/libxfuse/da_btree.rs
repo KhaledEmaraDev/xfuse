@@ -75,12 +75,6 @@ impl XfsDa3Blkinfo {
             panic!("UUID mismatch!");
         }
 
-        let inferred_block_number =
-            buf_reader.stream_position().unwrap() / u64::from(super_block.sb_blocksize);
-        if inferred_block_number != blkno {
-            panic!("Block number mismatch!");
-        }
-
         XfsDa3Blkinfo {
             forw,
             back,

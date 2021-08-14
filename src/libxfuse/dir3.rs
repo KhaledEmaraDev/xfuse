@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::io::{BufRead, Seek, SeekFrom};
 use std::mem;
 
@@ -7,7 +8,7 @@ use super::sb::Sb;
 
 use byteorder::{BigEndian, ReadBytesExt};
 use fuse::{FileAttr, FileType};
-use libc::c_int;
+use libc::{c_int, ENOENT};
 use uuid::Uuid;
 
 pub type XfsDir2DataOff = u16;
@@ -55,6 +56,21 @@ impl Dir3BlkHdr {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Dir2DataFree {
+    pub offset: XfsDir2DataOff,
+    pub length: XfsDir2DataOff,
+}
+
+impl Dir2DataFree {
+    pub fn from<T: BufRead>(buf_reader: &mut T) -> Dir2DataFree {
+        let offset = buf_reader.read_u16::<BigEndian>().unwrap();
+        let length = buf_reader.read_u16::<BigEndian>().unwrap();
+
+        Dir2DataFree { offset, length }
+    }
+}
+
 #[derive(Debug)]
 pub struct Dir3DataHdr {
     pub hdr: Dir3BlkHdr,
@@ -81,28 +97,6 @@ impl Dir3DataHdr {
             best_free,
             pad,
         }
-    }
-}
-
-#[derive(Debug)]
-pub struct Dir2Data {
-    pub hdr: Dir3DataHdr,
-
-    pub offset: u64,
-}
-
-impl Dir2Data {
-    pub fn from<T: BufRead + Seek>(
-        buf_reader: &mut T,
-        superblock: &Sb,
-        start_block: u64,
-    ) -> Dir2Data {
-        let offset = start_block * (superblock.sb_blocksize as u64);
-        buf_reader.seek(SeekFrom::Start(offset as u64)).unwrap();
-
-        let hdr = Dir3DataHdr::from(buf_reader.by_ref());
-
-        Dir2Data { hdr, offset }
     }
 }
 
@@ -183,33 +177,25 @@ pub enum Dir2DataUnion {
     Unused(Dir2DataUnused),
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct Dir2DataFree {
-    pub offset: XfsDir2DataOff,
-    pub length: XfsDir2DataOff,
-}
-
-impl Dir2DataFree {
-    pub fn from<T: BufRead>(buf_reader: &mut T) -> Dir2DataFree {
-        let offset = buf_reader.read_u16::<BigEndian>().unwrap();
-        let length = buf_reader.read_u16::<BigEndian>().unwrap();
-
-        Dir2DataFree { offset, length }
-    }
-}
-
 #[derive(Debug)]
-pub struct Dir2LeafEntry {
-    pub hashval: XfsDahash,
-    pub address: XfsDir2Dataptr,
+pub struct Dir2Data {
+    pub hdr: Dir3DataHdr,
+
+    pub offset: u64,
 }
 
-impl Dir2LeafEntry {
-    pub fn from<T: BufRead>(buf_reader: &mut T) -> Dir2LeafEntry {
-        let hashval = buf_reader.read_u32::<BigEndian>().unwrap();
-        let address = buf_reader.read_u32::<BigEndian>().unwrap();
+impl Dir2Data {
+    pub fn from<T: BufRead + Seek>(
+        buf_reader: &mut T,
+        superblock: &Sb,
+        start_block: u64,
+    ) -> Dir2Data {
+        let offset = start_block * (superblock.sb_blocksize as u64);
+        buf_reader.seek(SeekFrom::Start(offset as u64)).unwrap();
 
-        Dir2LeafEntry { hashval, address }
+        let hdr = Dir3DataHdr::from(buf_reader.by_ref());
+
+        Dir2Data { hdr, offset }
     }
 }
 
@@ -234,6 +220,21 @@ impl Dir3LeafHdr {
             stale,
             pad,
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct Dir2LeafEntry {
+    pub hashval: XfsDahash,
+    pub address: XfsDir2Dataptr,
+}
+
+impl Dir2LeafEntry {
+    pub fn from<T: BufRead>(buf_reader: &mut T) -> Dir2LeafEntry {
+        let hashval = buf_reader.read_u32::<BigEndian>().unwrap();
+        let address = buf_reader.read_u32::<BigEndian>().unwrap();
+
+        Dir2LeafEntry { hashval, address }
     }
 }
 
@@ -299,6 +300,29 @@ impl Dir2LeafDisk {
             bests,
             tail,
         }
+    }
+
+    pub fn get_address(&self, hash: XfsDahash) -> Result<XfsDir2Dataptr, c_int> {
+        let mut low: i64 = 0;
+        let mut high: i64 = (self.ents.len() - 1) as i64;
+
+        while low <= high {
+            let mid = low + ((high - low) / 2);
+
+            let entry = &self.ents[mid as usize];
+
+            match entry.hashval.cmp(&hash) {
+                Ordering::Greater => {
+                    high = mid - 1;
+                }
+                Ordering::Less => {
+                    low = mid + 1;
+                }
+                Ordering::Equal => return Ok(entry.address),
+            }
+        }
+
+        Err(ENOENT)
     }
 }
 
