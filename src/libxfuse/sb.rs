@@ -1,8 +1,9 @@
-use std::io::prelude::*;
+use std::io::{prelude::*, SeekFrom};
 
 use super::definitions::*;
 
-use byteorder::{BigEndian, ReadBytesExt};
+use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
+use crc::{Crc, CRC_32_ISCSI};
 use uuid::Uuid;
 
 pub const XFS_SB_VERSION_ATTRBIT: u16 = 0x0010;
@@ -89,7 +90,7 @@ pub struct Sb {
 }
 
 impl Sb {
-    pub fn from<T: BufRead>(buf_reader: &mut T) -> Sb {
+    pub fn from<T: BufRead + Seek>(buf_reader: &mut T) -> Sb {
         let sb_magicnum = buf_reader.read_u32::<BigEndian>().unwrap();
         if sb_magicnum != XFS_SB_MAGIC {
             panic!("Superblock magic number is invalid");
@@ -144,6 +145,26 @@ impl Sb {
         let sb_logsunit = buf_reader.read_u32::<BigEndian>().unwrap();
         let sb_features2 = buf_reader.read_u32::<BigEndian>().unwrap();
         let sb_bad_features2 = buf_reader.read_u32::<BigEndian>().unwrap();
+
+        buf_reader.seek(SeekFrom::Start(0)).unwrap();
+
+        const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
+        let mut digest = CASTAGNOLI.digest();
+
+        let mut buf_bcrc = [0u8; 224];
+        buf_reader.read_exact(&mut buf_bcrc).unwrap();
+        digest.update(&buf_bcrc);
+        digest.update(&[0u8; 4]);
+
+        let sb_crc = buf_reader.read_u32::<LittleEndian>().unwrap();
+
+        let mut buf_acrc = [0u8; 284];
+        buf_reader.read_exact(&mut buf_acrc).unwrap();
+        digest.update(&buf_acrc);
+
+        if digest.finalize() != sb_crc {
+            panic!("Crc check failed!");
+        }
 
         Sb {
             sb_magicnum,

@@ -19,6 +19,7 @@ time = "0.1.44"
 uuid = "0.8.2"
 num-traits = "0.2.14"
 num-derive = "0.3.3"
+crc = "2.0.0"
 
 [dependencies.clap]
 version = "2"
