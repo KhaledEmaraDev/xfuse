@@ -2,12 +2,10 @@ use std::io::{BufRead, Seek, SeekFrom};
 use std::mem;
 
 use super::bmbt_rec::BmbtRec;
-use super::da_btree::{hashname, XfsDa3NodeEntry, XfsDa3NodeHdr};
+use super::da_btree::{hashname, XfsDa3Intnode};
 use super::definitions::*;
 use super::dinode::Dinode;
-use super::dir3::{
-    Dir2DataEntry, Dir2DataUnused, Dir2LeafEntry, Dir3, Dir3BlkHdr, Dir3DataHdr, Dir3LeafHdr,
-};
+use super::dir3::{Dir2DataEntry, Dir2DataUnused, Dir2LeafNDisk, Dir3, Dir3BlkHdr, Dir3DataHdr};
 use super::sb::Sb;
 use super::utils::{get_file_type, FileKind};
 
@@ -79,14 +77,32 @@ impl Dir2Node {
         Dir2Node { bmx, block_size }
     }
 
-    pub fn map_dblock(&self, dblock: XfsDablk) -> Option<&BmbtRec> {
-        for record in self.bmx.iter() {
-            if record.br_startoff == dblock as u64 {
-                return Some(record);
+    pub fn map_dblock(&self, dblock: XfsFileoff) -> Option<&BmbtRec> {
+        let mut res: Option<&BmbtRec> = None;
+        for record in self.bmx.iter().rev() {
+            if dblock >= record.br_startoff {
+                res = Some(record);
+                break;
             }
         }
 
-        None
+        if let Some(res_some) = res {
+            if dblock >= res_some.br_startoff + res_some.br_blockcount {
+                res = None
+            }
+        }
+
+        res
+    }
+
+    pub fn map_dblock_number(&self, dblock: XfsFileoff) -> XfsFsblock {
+        for record in self.bmx.iter().rev() {
+            if dblock >= record.br_startoff {
+                return record.br_startblock + (dblock - record.br_startoff);
+            }
+        }
+
+        panic!("Couldn't find the directory block");
     }
 }
 
@@ -100,7 +116,7 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Node {
         let dblock = super_block.get_dir3_leaf_offset();
         let hash = hashname(name);
 
-        let bmbt_rec = self.map_dblock(dblock as u32);
+        let bmbt_rec = self.map_dblock(dblock);
         if let Some(bmbt_rec_some) = bmbt_rec {
             buf_reader
                 .seek(SeekFrom::Start(
@@ -113,101 +129,65 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Node {
 
         buf_reader.seek(SeekFrom::Current(8)).unwrap();
         let magic = buf_reader.read_u16::<BigEndian>();
-        buf_reader.seek(SeekFrom::Current(-8)).unwrap();
+        buf_reader.seek(SeekFrom::Current(-10)).unwrap();
 
         if magic.unwrap() == XFS_DA3_NODE_MAGIC {
-            let mut hdr = XfsDa3NodeHdr::from(buf_reader.by_ref(), super_block);
+            let node = XfsDa3Intnode::from(buf_reader.by_ref(), super_block);
+            let blk = node.lookup(buf_reader.by_ref(), &super_block, hash, |block, _| {
+                self.map_dblock_number(block.into())
+            });
 
-            loop {
-                loop {
-                    let entry = XfsDa3NodeEntry::from(buf_reader.by_ref());
+            let leaf_offset = blk * u64::from(super_block.sb_blocksize);
 
-                    if entry.hashval > hash {
-                        let bmbt_rec = self.map_dblock(entry.before);
-
-                        if let Some(bmbt_rec_some) = &bmbt_rec {
-                            buf_reader
-                                .seek(SeekFrom::Start(
-                                    (bmbt_rec_some.br_startblock) * (self.block_size as u64),
-                                ))
-                                .unwrap();
-
-                            break;
-                        } else {
-                            return Err(ENOENT);
-                        }
-                    }
-                }
-
-                if hdr.level == 1 {
-                    break;
-                } else {
-                    hdr = XfsDa3NodeHdr::from(buf_reader.by_ref(), super_block);
-                }
-            }
+            buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
         }
 
-        let hdr = Dir3LeafHdr::from(buf_reader.by_ref(), super_block);
+        let leaf = Dir2LeafNDisk::from(buf_reader.by_ref(), super_block);
 
-        for _i in 0..hdr.count {
-            let entry = Dir2LeafEntry::from(buf_reader.by_ref());
+        let address = leaf.get_address(hash)? * 8;
+        let idx = (address / super_block.sb_blocksize) as usize;
+        let address = address % super_block.sb_blocksize;
 
-            if entry.hashval == hash {
-                let address = (entry.address as u64) * 8;
-                let idx = address / (self.block_size as u64);
-                let address = address % (self.block_size as u64);
+        let blk = self.map_dblock_number(idx as u64);
+        buf_reader
+            .seek(SeekFrom::Start(blk * u64::from(super_block.sb_blocksize)))
+            .unwrap();
 
-                let bmbt_rec = self.map_dblock(idx as u32);
+        buf_reader.seek(SeekFrom::Current(address as i64)).unwrap();
 
-                if let Some(bmbt_rec_some) = &bmbt_rec {
-                    buf_reader
-                        .seek(SeekFrom::Start(
-                            (bmbt_rec_some.br_startblock) * (self.block_size as u64),
-                        ))
-                        .unwrap();
+        let entry = Dir2DataEntry::from(buf_reader.by_ref());
 
-                    buf_reader.seek(SeekFrom::Current(address as i64)).unwrap();
+        let dinode = Dinode::from(buf_reader.by_ref(), super_block, entry.inumber);
 
-                    let entry = Dir2DataEntry::from(buf_reader.by_ref());
+        let kind = get_file_type(FileKind::Mode(dinode.di_core.di_mode))?;
 
-                    let dinode = Dinode::from(buf_reader.by_ref(), super_block, entry.inumber);
+        let attr = FileAttr {
+            ino: entry.inumber,
+            size: dinode.di_core.di_size as u64,
+            blocks: dinode.di_core.di_nblocks,
+            atime: Timespec {
+                sec: dinode.di_core.di_atime.t_sec as i64,
+                nsec: dinode.di_core.di_atime.t_nsec,
+            },
+            mtime: Timespec {
+                sec: dinode.di_core.di_mtime.t_sec as i64,
+                nsec: dinode.di_core.di_mtime.t_nsec,
+            },
+            ctime: Timespec {
+                sec: dinode.di_core.di_ctime.t_sec as i64,
+                nsec: dinode.di_core.di_ctime.t_nsec,
+            },
+            crtime: Timespec { sec: 0, nsec: 0 },
+            kind,
+            perm: dinode.di_core.di_mode & (!(S_IFMT as u16)),
+            nlink: dinode.di_core.di_nlink,
+            uid: dinode.di_core.di_uid,
+            gid: dinode.di_core.di_gid,
+            rdev: 0,
+            flags: 0,
+        };
 
-                    let kind = get_file_type(FileKind::Mode(dinode.di_core.di_mode))?;
-
-                    let attr = FileAttr {
-                        ino: entry.inumber,
-                        size: dinode.di_core.di_size as u64,
-                        blocks: dinode.di_core.di_nblocks,
-                        atime: Timespec {
-                            sec: dinode.di_core.di_atime.t_sec as i64,
-                            nsec: dinode.di_core.di_atime.t_nsec,
-                        },
-                        mtime: Timespec {
-                            sec: dinode.di_core.di_mtime.t_sec as i64,
-                            nsec: dinode.di_core.di_mtime.t_nsec,
-                        },
-                        ctime: Timespec {
-                            sec: dinode.di_core.di_ctime.t_sec as i64,
-                            nsec: dinode.di_core.di_ctime.t_nsec,
-                        },
-                        crtime: Timespec { sec: 0, nsec: 0 },
-                        kind,
-                        perm: dinode.di_core.di_mode & (!(S_IFMT as u16)),
-                        nlink: dinode.di_core.di_nlink,
-                        uid: dinode.di_core.di_uid,
-                        gid: dinode.di_core.di_gid,
-                        rdev: 0,
-                        flags: 0,
-                    };
-
-                    return Ok((attr, dinode.di_core.di_gen.into()));
-                } else {
-                    return Err(ENOENT);
-                };
-            }
-        }
-
-        Err(ENOENT)
+        Ok((attr, dinode.di_core.di_gen.into()))
     }
 
     fn next(
@@ -227,7 +207,7 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Node {
             offset
         };
 
-        let mut bmbt_rec = self.map_dblock(idx as u32);
+        let mut bmbt_rec = self.map_dblock(idx);
         let mut bmbt_rec_idx;
 
         if let Some(bmbt_rec_some) = &bmbt_rec {
@@ -259,15 +239,14 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Node {
 
                         let kind = get_file_type(FileKind::Type(entry.ftype))?;
 
-                        let tag = ((bmbt_rec_some.br_startoff + bmbt_rec_idx) & 0xFFFFFFFFFFFF0000)
-                            | (entry.tag as u64);
-
                         let name = entry.name;
+
+                        let tag = ((bmbt_rec_some.br_startoff + bmbt_rec_idx) << (64 - 48))
+                            | (entry.tag as u64);
 
                         return Ok((entry.inumber, tag as i64, kind, name));
                     } else {
-                        let length = Dir2DataEntry::get_length(buf_reader.by_ref());
-                        buf_reader.seek(SeekFrom::Current(length)).unwrap();
+                        Dir2DataEntry::from(buf_reader.by_ref());
 
                         next = true;
                     }
@@ -278,7 +257,7 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Node {
                 offset = mem::size_of::<Dir3DataHdr>() as u64;
             }
 
-            bmbt_rec = self.map_dblock((bmbt_rec_some.br_startoff + bmbt_rec_idx) as u32);
+            bmbt_rec = self.map_dblock(bmbt_rec_some.br_startoff + bmbt_rec_idx);
 
             bmbt_rec_idx = 0;
 

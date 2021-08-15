@@ -161,7 +161,7 @@ impl XfsDa3Intnode {
         let mut low: i64 = 0;
         let mut high: i64 = (self.btree.len() - 1) as i64;
 
-        let mut predecessor = 0;
+        let mut successor = 0;
 
         while low <= high {
             let mid = low + ((high - low) / 2);
@@ -171,25 +171,24 @@ impl XfsDa3Intnode {
             match key.cmp(&hash) {
                 Ordering::Greater => {
                     high = mid - 1;
+                    successor = mid;
                 }
                 Ordering::Less => {
                     low = mid + 1;
-                    predecessor = mid;
                 }
                 Ordering::Equal => {
-                    predecessor = mid;
+                    successor = mid;
                     break;
                 }
             }
         }
 
+        let blk =
+            map_da_block_to_fs_block(self.btree[successor as usize].before, buf_reader.by_ref());
+
         if self.hdr.level == 1 {
-            self.btree[predecessor as usize].before.into()
+            blk
         } else {
-            let blk = map_da_block_to_fs_block(
-                self.btree[predecessor as usize].before,
-                buf_reader.by_ref(),
-            );
             buf_reader
                 .seek(SeekFrom::Start(blk * u64::from(super_block.sb_blocksize)))
                 .unwrap();

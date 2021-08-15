@@ -91,9 +91,6 @@ impl<R: BufRead + Seek> Attr<R> for AttrShortform {
     }
 
     fn get_size(&self, _buf_reader: &mut R, _super_block: &Sb, name: &str) -> u32 {
-        println!("Attr: {:?}", self);
-        println!("Attr: {:?}", name.as_bytes());
-
         for entry in &self.list {
             let entry_name = entry.nameval[0..(entry.namelen as usize)].to_vec();
 
@@ -120,9 +117,6 @@ impl<R: BufRead + Seek> Attr<R> for AttrShortform {
     }
 
     fn get(&self, _buf_reader: &mut R, _super_block: &Sb, name: &str) -> Vec<u8> {
-        println!("Attr: {:?}", self);
-        println!("Attr: {:?}", name.as_bytes());
-
         for entry in &self.list {
             let entry_name = entry.nameval[0..(entry.namelen as usize)].to_vec();
 

@@ -136,9 +136,10 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Leaf {
                 buf_reader.seek(SeekFrom::Current(-2)).unwrap();
 
                 if freetag == 0xffff {
-                    let unused = Dir2DataUnused::from(buf_reader.by_ref());
+                    Dir2DataUnused::from(buf_reader.by_ref());
                 } else if next {
                     let entry = Dir2DataEntry::from(buf_reader.by_ref());
+
                     let kind = get_file_type(FileKind::Type(entry.ftype))?;
 
                     let name = entry.name;
