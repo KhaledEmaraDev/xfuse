@@ -8,8 +8,8 @@ A read-only XFS implementation using FUSE, written for GSoC 2021.
 
 ## Golden Image
 
-I haven't yet standarized a golden image, because I'm making it as I go. Currently, I have five
-directores each with a different number of entries and as such each is of a different type.
+I haven't yet standardized a golden image, because I'm making it as I go. Currently, I have five
+directories each with a different number of entries and as such each is of a different type.
 
 ### Filesystem configuration
 

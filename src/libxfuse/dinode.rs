@@ -305,7 +305,7 @@ impl Dinode {
                                 bmx.clone(),
                             )));
                         }
-                        _ => panic!("Unkown magic number!"),
+                        _ => panic!("Unknown magic number!"),
                     }
                 } else {
                     None
