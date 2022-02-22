@@ -5,10 +5,8 @@ cargo_cache:
 task:
   env:
     HOME: /tmp # cargo cache needs it
-    # Temporary workaround for https://github.com/rust-lang/rustup/issues/2774
-    RUSTUP_IO_THREADS: 1
   freebsd_instance:
-    image: freebsd-11-4-release-amd64
+    image: freebsd-12-3-release-amd64
   matrix:
     - name: FreeBSD stable
       env:

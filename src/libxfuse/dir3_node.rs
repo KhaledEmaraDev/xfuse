@@ -160,7 +160,7 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Node {
 
         if magic.unwrap() == XFS_DA3_NODE_MAGIC {
             let node = XfsDa3Intnode::from(buf_reader.by_ref(), super_block);
-            let blk = node.lookup(buf_reader.by_ref(), &super_block, hash, |block, _| {
+            let blk = node.lookup(buf_reader.by_ref(), super_block, hash, |block, _| {
                 self.map_dblock_number(block.into())
             });
 
@@ -235,13 +235,11 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Node {
         };
 
         let mut bmbt_rec = self.map_dblock(idx);
-        let mut bmbt_rec_idx;
-
-        if let Some(bmbt_rec_some) = &bmbt_rec {
-            bmbt_rec_idx = idx - bmbt_rec_some.br_startoff;
+        let mut bmbt_rec_idx = if let Some(bmbt_rec_some) = &bmbt_rec {
+            idx - bmbt_rec_some.br_startoff
         } else {
-            return Err(ENOENT);
-        }
+            return Err(ENOENT)
+        };
 
         while let Some(bmbt_rec_some) = &bmbt_rec {
             while bmbt_rec_idx < bmbt_rec_some.br_blockcount {
