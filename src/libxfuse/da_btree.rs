@@ -223,7 +223,7 @@ impl XfsDa3Intnode {
             let node = XfsDa3Intnode::from(buf_reader.by_ref(), super_block);
             node.lookup(
                 buf_reader.by_ref(),
-                &super_block,
+                super_block,
                 hash,
                 map_da_block_to_fs_block,
             )
@@ -246,7 +246,7 @@ impl XfsDa3Intnode {
                 .unwrap();
 
             let node = XfsDa3Intnode::from(buf_reader.by_ref(), super_block);
-            node.first_block(buf_reader.by_ref(), &super_block, map_da_block_to_fs_block)
+            node.first_block(buf_reader.by_ref(), super_block, map_da_block_to_fs_block)
         }
     }
 }

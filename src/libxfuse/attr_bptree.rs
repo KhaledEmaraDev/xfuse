@@ -49,16 +49,16 @@ impl<R: BufRead + Seek> Attr<R> for AttrBtree {
         if self.total_size == -1 {
             let mut total_size: u32 = 0;
 
-            let blk = self.btree.map_block(buf_reader.by_ref(), &super_block, 0);
+            let blk = self.btree.map_block(buf_reader.by_ref(), super_block, 0);
             buf_reader
                 .seek(SeekFrom::Start(blk * u64::from(super_block.sb_blocksize)))
                 .unwrap();
 
             let node = XfsDa3Intnode::from(buf_reader.by_ref(), super_block);
 
-            let blk = node.first_block(buf_reader.by_ref(), &super_block, |block, reader| {
+            let blk = node.first_block(buf_reader.by_ref(), super_block, |block, reader| {
                 self.btree
-                    .map_block(reader.by_ref(), &super_block, block.into())
+                    .map_block(reader.by_ref(), super_block, block.into())
             });
             let leaf_offset = blk * u64::from(super_block.sb_blocksize);
 
@@ -81,16 +81,16 @@ impl<R: BufRead + Seek> Attr<R> for AttrBtree {
     fn get_size(&self, buf_reader: &mut R, super_block: &Sb, name: &str) -> u32 {
         let hash = hashname(name);
 
-        let blk = self.btree.map_block(buf_reader.by_ref(), &super_block, 0);
+        let blk = self.btree.map_block(buf_reader.by_ref(), super_block, 0);
         buf_reader
             .seek(SeekFrom::Start(blk * u64::from(super_block.sb_blocksize)))
             .unwrap();
 
         let node = XfsDa3Intnode::from(buf_reader.by_ref(), super_block);
 
-        let blk = node.lookup(buf_reader.by_ref(), &super_block, hash, |block, reader| {
+        let blk = node.lookup(buf_reader.by_ref(), super_block, hash, |block, reader| {
             self.btree
-                .map_block(reader.by_ref(), &super_block, block.into())
+                .map_block(reader.by_ref(), super_block, block.into())
         });
         let leaf_offset = blk * u64::from(super_block.sb_blocksize);
 
@@ -103,18 +103,18 @@ impl<R: BufRead + Seek> Attr<R> for AttrBtree {
 
     fn list(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8> {
         let mut list: Vec<u8> =
-            Vec::with_capacity(self.get_total_size(buf_reader.by_ref(), &super_block) as usize);
+            Vec::with_capacity(self.get_total_size(buf_reader.by_ref(), super_block) as usize);
 
-        let blk = self.btree.map_block(buf_reader.by_ref(), &super_block, 0);
+        let blk = self.btree.map_block(buf_reader.by_ref(), super_block, 0);
         buf_reader
             .seek(SeekFrom::Start(blk * u64::from(super_block.sb_blocksize)))
             .unwrap();
 
         let node = XfsDa3Intnode::from(buf_reader.by_ref(), super_block);
 
-        let blk = node.first_block(buf_reader.by_ref(), &super_block, |block, reader| {
+        let blk = node.first_block(buf_reader.by_ref(), super_block, |block, reader| {
             self.btree
-                .map_block(reader.by_ref(), &super_block, block.into())
+                .map_block(reader.by_ref(), super_block, block.into())
         });
         let leaf_offset = blk * u64::from(super_block.sb_blocksize);
 
@@ -134,16 +134,16 @@ impl<R: BufRead + Seek> Attr<R> for AttrBtree {
     fn get(&self, buf_reader: &mut R, super_block: &Sb, name: &str) -> Vec<u8> {
         let hash = hashname(name);
 
-        let blk = self.btree.map_block(buf_reader.by_ref(), &super_block, 0);
+        let blk = self.btree.map_block(buf_reader.by_ref(), super_block, 0);
         buf_reader
             .seek(SeekFrom::Start(blk * u64::from(super_block.sb_blocksize)))
             .unwrap();
 
         let node = XfsDa3Intnode::from(buf_reader.by_ref(), super_block);
 
-        let blk = node.lookup(buf_reader.by_ref(), &super_block, hash, |block, reader| {
+        let blk = node.lookup(buf_reader.by_ref(), super_block, hash, |block, reader| {
             self.btree
-                .map_block(reader.by_ref(), &super_block, block.into())
+                .map_block(reader.by_ref(), super_block, block.into())
         });
         let leaf_offset = blk * u64::from(super_block.sb_blocksize);
 
@@ -156,7 +156,7 @@ impl<R: BufRead + Seek> Attr<R> for AttrBtree {
             super_block,
             hash,
             leaf_offset,
-            |block, reader| self.btree.map_block(reader.by_ref(), &super_block, block),
+            |block, reader| self.btree.map_block(reader.by_ref(), super_block, block),
         )
     }
 }

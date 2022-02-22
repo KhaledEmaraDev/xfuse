@@ -103,7 +103,7 @@ impl<R: BufRead + Seek> Attr<R> for AttrLeaf {
 
     fn list(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8> {
         let mut list: Vec<u8> =
-            Vec::with_capacity(self.get_total_size(buf_reader.by_ref(), &super_block) as usize);
+            Vec::with_capacity(self.get_total_size(buf_reader.by_ref(), super_block) as usize);
 
         self.leaf
             .list(buf_reader.by_ref(), &mut list, self.leaf_offset);

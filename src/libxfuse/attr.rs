@@ -296,15 +296,15 @@ impl AttrLeafblock {
             if entry.flags & XFS_ATTR_LOCAL == 0 {
                 let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
 
-                list.extend_from_slice(&get_namespace_from_flags(entry.flags).as_bytes().to_vec());
+                list.extend_from_slice(get_namespace_from_flags(entry.flags).as_bytes());
                 let namelen = name_entry.namelen as usize;
-                list.extend_from_slice(&name_entry.nameval[0..namelen].to_vec());
+                list.extend_from_slice(&name_entry.nameval[0..namelen]);
             } else {
                 let name_entry = AttrLeafNameRemote::from(buf_reader.by_ref());
 
-                list.extend_from_slice(&get_namespace_from_flags(entry.flags).as_bytes().to_vec());
+                list.extend_from_slice(get_namespace_from_flags(entry.flags).as_bytes());
                 let namelen = name_entry.namelen as usize;
-                list.extend_from_slice(&name_entry.name[0..namelen].to_vec());
+                list.extend_from_slice(&name_entry.name[0..namelen]);
             }
 
             list.push(0)

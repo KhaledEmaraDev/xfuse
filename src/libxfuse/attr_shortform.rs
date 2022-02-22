@@ -131,10 +131,10 @@ impl<R: BufRead + Seek> Attr<R> for AttrShortform {
 
     fn list(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8> {
         let mut list: Vec<u8> =
-            Vec::with_capacity(self.get_total_size(buf_reader.by_ref(), &super_block) as usize);
+            Vec::with_capacity(self.get_total_size(buf_reader.by_ref(), super_block) as usize);
 
         for entry in self.list.iter() {
-            list.extend_from_slice(&get_namespace_from_flags(entry.flags).as_bytes().to_vec());
+            list.extend_from_slice(get_namespace_from_flags(entry.flags).as_bytes());
             let namelen = entry.namelen as usize;
             list.extend_from_slice(&entry.nameval[0..namelen].to_vec());
             list.push(0)

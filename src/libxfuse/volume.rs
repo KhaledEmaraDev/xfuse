@@ -323,7 +323,7 @@ impl Filesystem for Volume {
         let attrs = dinode.get_attrs(buf_reader.by_ref(), &self.sb);
         match attrs {
             Some(attrs) => {
-                let attrs_size = attrs.get_size(buf_reader.by_ref(), &self.sb, &name);
+                let attrs_size = attrs.get_size(buf_reader.by_ref(), &self.sb, name);
 
                 if size == 0 {
                     reply.size(attrs_size);
@@ -335,7 +335,7 @@ impl Filesystem for Volume {
                     return;
                 }
 
-                reply.data(attrs.get(buf_reader.by_ref(), &self.sb, &name).as_slice());
+                reply.data(attrs.get(buf_reader.by_ref(), &self.sb, name).as_slice());
             }
             None => {
                 if size == 0 {
