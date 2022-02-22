@@ -56,17 +56,17 @@ pub const LITERAL_AREA_OFFSET: u8 = 0xb0;
 
 #[derive(Debug)]
 pub enum DiU {
-    DiDir2Sf(Dir2Sf),
-    DiBmx(Vec<BmbtRec>),
-    DiBmbt((BmdrBlock, Vec<BmbtKey>, Vec<XfsBmbtPtr>)),
-    DiSymlink(Vec<u8>),
+    Dir2Sf(Dir2Sf),
+    Bmx(Vec<BmbtRec>),
+    Bmbt((BmdrBlock, Vec<BmbtKey>, Vec<XfsBmbtPtr>)),
+    Symlink(Vec<u8>),
 }
 
 #[derive(Debug)]
 pub enum DiA {
-    DiAttrsf(AttrShortform),
-    DiAbmx(Vec<BmbtRec>),
-    DiAbmbt((BmdrBlock, Vec<BmbtKey>, Vec<XfsBmbtPtr>)),
+    Attrsf(AttrShortform),
+    Abmx(Vec<BmbtRec>),
+    Abmbt((BmdrBlock, Vec<BmbtKey>, Vec<XfsBmbtPtr>)),
 }
 
 #[derive(Debug)]
@@ -107,7 +107,7 @@ impl Dinode {
                     for _i in 0..di_core.di_nextents {
                         bmx.push(BmbtRec::from(buf_reader.by_ref()))
                     }
-                    di_u = Some(DiU::DiBmx(bmx));
+                    di_u = Some(DiU::Bmx(bmx));
                 }
                 XfsDinodeFmt::Btree => {
                     let bmbt = BmdrBlock::from(buf_reader.by_ref());
@@ -123,7 +123,7 @@ impl Dinode {
                         pointers.push(pointer)
                     }
 
-                    di_u = Some(DiU::DiBmbt((bmbt, keys, pointers)));
+                    di_u = Some(DiU::Bmbt((bmbt, keys, pointers)));
                 }
                 _ => {
                     panic!("Directory format not yet supported.");
@@ -132,14 +132,14 @@ impl Dinode {
             S_IFDIR => match di_core.di_format {
                 XfsDinodeFmt::Local => {
                     let dir_sf = Dir2Sf::from(buf_reader.by_ref());
-                    di_u = Some(DiU::DiDir2Sf(dir_sf));
+                    di_u = Some(DiU::Dir2Sf(dir_sf));
                 }
                 XfsDinodeFmt::Extents => {
                     let mut bmx = Vec::<BmbtRec>::new();
                     for _i in 0..di_core.di_nextents {
                         bmx.push(BmbtRec::from(buf_reader.by_ref()))
                     }
-                    di_u = Some(DiU::DiBmx(bmx));
+                    di_u = Some(DiU::Bmx(bmx));
                 }
                 XfsDinodeFmt::Btree => {
                     let bmbt = BmdrBlock::from(buf_reader.by_ref());
@@ -155,7 +155,7 @@ impl Dinode {
                         pointers.push(pointer)
                     }
 
-                    di_u = Some(DiU::DiBmbt((bmbt, keys, pointers)));
+                    di_u = Some(DiU::Bmbt((bmbt, keys, pointers)));
                 }
                 _ => {
                     panic!("Directory format not yet supported.");
@@ -168,14 +168,14 @@ impl Dinode {
                         let byte = buf_reader.read_u8().unwrap();
                         data.push(byte)
                     }
-                    di_u = Some(DiU::DiSymlink(data))
+                    di_u = Some(DiU::Symlink(data))
                 }
                 XfsDinodeFmt::Extents => {
                     let mut bmx = Vec::<BmbtRec>::new();
                     for _i in 0..di_core.di_nextents {
                         bmx.push(BmbtRec::from(buf_reader.by_ref()))
                     }
-                    di_u = Some(DiU::DiBmx(bmx));
+                    di_u = Some(DiU::Bmx(bmx));
                 }
                 _ => {
                     panic!("Unexpected format for symlink");
@@ -196,14 +196,14 @@ impl Dinode {
             match di_core.di_aformat {
                 XfsDinodeFmt::Local => {
                     let attr_shortform = AttrShortform::from(buf_reader.by_ref());
-                    di_a = Some(DiA::DiAttrsf(attr_shortform));
+                    di_a = Some(DiA::Attrsf(attr_shortform));
                 }
                 XfsDinodeFmt::Extents => {
                     let mut bmx = Vec::<BmbtRec>::new();
                     for _i in 0..di_core.di_anextents {
                         bmx.push(BmbtRec::from(buf_reader.by_ref()))
                     }
-                    di_a = Some(DiA::DiAbmx(bmx));
+                    di_a = Some(DiA::Abmx(bmx));
                 }
                 XfsDinodeFmt::Btree => {
                     let bmbt = BmdrBlock::from(buf_reader.by_ref());
@@ -219,7 +219,7 @@ impl Dinode {
                         pointers.push(pointer)
                     }
 
-                    di_a = Some(DiA::DiAbmbt((bmbt, keys, pointers)));
+                    di_a = Some(DiA::Abmbt((bmbt, keys, pointers)));
                 }
                 _ => {
                     panic!("Attributes format not yet supported.");
@@ -242,8 +242,8 @@ impl Dinode {
         superblock: &Sb,
     ) -> Box<dyn Dir3<R>> {
         match &self.di_u {
-            DiU::DiDir2Sf(dir) => Box::new(dir.clone()),
-            DiU::DiBmx(bmx) => {
+            DiU::Dir2Sf(dir) => Box::new(dir.clone()),
+            DiU::Bmx(bmx) => {
                 if bmx.len() == 1 {
                     Box::new(Dir2Block::from(
                         buf_reader.by_ref(),
@@ -256,7 +256,7 @@ impl Dinode {
                     Box::new(Dir2Leaf::from(buf_reader.by_ref(), superblock, bmx))
                 }
             }
-            DiU::DiBmbt((bmbt, keys, pointers)) => Box::new(Dir2Btree::from(
+            DiU::Bmbt((bmbt, keys, pointers)) => Box::new(Dir2Btree::from(
                 bmbt.clone(),
                 keys.clone(),
                 pointers.clone(),
@@ -274,12 +274,12 @@ impl Dinode {
         superblock: &Sb,
     ) -> Box<dyn File<R>> {
         match &self.di_u {
-            DiU::DiBmx(bmx) => Box::new(FileExtentList {
+            DiU::Bmx(bmx) => Box::new(FileExtentList {
                 bmx: bmx.clone(),
                 size: self.di_core.di_size,
                 block_size: superblock.sb_blocksize,
             }),
-            DiU::DiBmbt((bmdr, keys, pointers)) => Box::new(FileBtree {
+            DiU::Bmbt((bmdr, keys, pointers)) => Box::new(FileBtree {
                 btree: Btree {
                     bmdr: bmdr.clone(),
                     keys: keys.clone(),
@@ -296,8 +296,8 @@ impl Dinode {
 
     pub fn get_link_data<R: BufRead + Seek>(&self, buf_reader: &mut R, superblock: &Sb) -> CString {
         match &self.di_u {
-            DiU::DiSymlink(data) => CString::new(data.clone()).unwrap(),
-            DiU::DiBmx(bmx) => SymlinkExtents::get_target(buf_reader.by_ref(), bmx, superblock),
+            DiU::Symlink(data) => CString::new(data.clone()).unwrap(),
+            DiU::Bmx(bmx) => SymlinkExtents::get_target(buf_reader.by_ref(), bmx, superblock),
             _ => {
                 panic!("Unsupported link format!");
             }
@@ -310,8 +310,8 @@ impl Dinode {
         superblock: &Sb,
     ) -> Option<Box<dyn Attr<R>>> {
         match &self.di_a {
-            Some(DiA::DiAttrsf(attr)) => Some(Box::new(attr.clone())),
-            Some(DiA::DiAbmx(bmx)) => {
+            Some(DiA::Attrsf(attr)) => Some(Box::new(attr.clone())),
+            Some(DiA::Abmx(bmx)) => {
                 if self.di_core.di_anextents > 0 {
                     buf_reader.seek(SeekFrom::Current(8)).unwrap();
                     let magic = buf_reader.read_u16::<BigEndian>().unwrap();
@@ -338,7 +338,7 @@ impl Dinode {
                     None
                 }
             }
-            Some(DiA::DiAbmbt((bmdr, keys, pointers))) => Some(Box::new(AttrBtree {
+            Some(DiA::Abmbt((bmdr, keys, pointers))) => Some(Box::new(AttrBtree {
                 btree: Btree {
                     bmdr: bmdr.clone(),
                     keys: keys.clone(),
