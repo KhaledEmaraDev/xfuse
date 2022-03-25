@@ -31,8 +31,7 @@ mod libxfuse;
 use libxfuse::volume::Volume;
 
 use clap::crate_version;
-use fuser::mount;
-use std::ffi::{OsStr, OsString};
+use fuser::{mount2, MountOption};
 
 fn main() {
     let app = clap::App::new("xfs-fuse")
@@ -49,22 +48,39 @@ fn main() {
         .arg(clap::Arg::with_name("mountpoint").required(true));
     let matches = app.get_matches();
 
-    let mut opts = Vec::new();
+    let mut opts = vec![
+        MountOption::FSName("fusefs".to_string()),
+        MountOption::Subtype("xfs".to_string())
+    ];
     if let Some(it) = matches.values_of("option") {
         for o in it {
-            // mount_fusefs expects to have a separate "-o" per option
-            opts.push(OsString::from("-o"));
-            opts.push(OsString::from(o));
+            opts.push(match o {
+                "auto_unmount" => MountOption::AutoUnmount,
+                "allow_other" => MountOption::AllowOther,
+                "allow_root" => MountOption::AllowRoot,
+                "default_permissions" => MountOption::DefaultPermissions,
+                "dev" => MountOption::Dev,
+                "nodev" => MountOption::NoDev,
+                "suid" => MountOption::Suid,
+                "nosuid" => MountOption::NoSuid,
+                "ro" => MountOption::RO,
+                "rw" => MountOption::RW,
+                "exec" => MountOption::Exec,
+                "noexec" => MountOption::NoExec,
+                "atime" => MountOption::Atime,
+                "noatime" => MountOption::NoAtime,
+                "dirsync" => MountOption::DirSync,
+                "sync" => MountOption::Sync,
+                "async" => MountOption::Async,
+                custom => MountOption::CUSTOM(custom.to_string())
+            });
         }
     };
-    // We need a separate vec of references :(
-    // https://github.com/zargony/rust-fuse/issues/117
-    let opt_refs = opts.iter().map(|o| o.as_ref()).collect::<Vec<&OsStr>>();
 
     let device = matches.value_of("device").unwrap().to_string();
     let mountpoint = matches.value_of("mountpoint").unwrap().to_string();
 
     let vol = Volume::from(&device);
 
-    mount(vol, &mountpoint, &opt_refs[..]).unwrap();
+    mount2(vol, &mountpoint, &opts[..]).unwrap();
 }
