@@ -37,6 +37,7 @@ use super::sb::Sb;
 use fuse::{
     FileAttr, FileType, Filesystem, ReplyAttr, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen,
     ReplyStatfs, ReplyXattr, Request, FUSE_ROOT_ID,
+    consts::FOPEN_KEEP_CACHE
 };
 use libc::{mode_t, ERANGE, S_IFDIR, S_IFMT, S_IFREG};
 use time::Timespec;
@@ -182,7 +183,7 @@ impl Filesystem for Volume {
         );
     }
 
-    fn open(&mut self, _req: &Request, ino: u64, flags: u32, reply: ReplyOpen) {
+    fn open(&mut self, _req: &Request, ino: u64, _flags: u32, reply: ReplyOpen) {
         println!("open: {}", ino);
 
         let dinode = Dinode::from(
@@ -197,7 +198,7 @@ impl Filesystem for Volume {
 
         self.open_files.push(dinode);
 
-        reply.opened((self.open_files.len() as u64) - 1, flags)
+        reply.opened((self.open_files.len() as u64) - 1, FOPEN_KEEP_CACHE)
     }
 
     fn read(
