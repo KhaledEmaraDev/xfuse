@@ -28,19 +28,19 @@
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::time::{Duration, UNIX_EPOCH};
 
 use super::agi::Agi;
 use super::definitions::XfsIno;
 use super::dinode::Dinode;
 use super::sb::Sb;
 
-use fuse::{
+use fuser::{
     FileAttr, FileType, Filesystem, ReplyAttr, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen,
     ReplyStatfs, ReplyXattr, Request, FUSE_ROOT_ID,
     consts::FOPEN_KEEP_CACHE
 };
 use libc::{mode_t, ERANGE, S_IFDIR, S_IFMT, S_IFREG};
-use time::Timespec;
 
 #[derive(Debug)]
 pub struct Volume {
@@ -87,10 +87,7 @@ impl Filesystem for Volume {
         };
         let dinode = Dinode::from(buf_reader.by_ref(), &self.sb, inode_number);
 
-        let ttl = Timespec {
-            sec: 86400,
-            nsec: 0,
-        };
+        let ttl = Duration::new(86400, 0);
 
         let dir = dinode.get_dir(buf_reader.by_ref(), &self.sb);
 
@@ -119,10 +116,7 @@ impl Filesystem for Volume {
             },
         );
 
-        let ttl = Timespec {
-            sec: 86400,
-            nsec: 0,
-        };
+        let ttl = Duration::new(86400, 0);
 
         let kind = match (dinode.di_core.di_mode as mode_t) & S_IFMT {
             S_IFREG => FileType::RegularFile,
@@ -136,32 +130,33 @@ impl Filesystem for Volume {
             ino,
             size: dinode.di_core.di_size as u64,
             blocks: dinode.di_core.di_nblocks,
-            atime: Timespec {
-                sec: dinode.di_core.di_atime.t_sec as i64,
-                nsec: dinode.di_core.di_atime.t_nsec,
-            },
-            mtime: Timespec {
-                sec: dinode.di_core.di_mtime.t_sec as i64,
-                nsec: dinode.di_core.di_mtime.t_nsec,
-            },
-            ctime: Timespec {
-                sec: dinode.di_core.di_ctime.t_sec as i64,
-                nsec: dinode.di_core.di_ctime.t_nsec,
-            },
-            crtime: Timespec { sec: 0, nsec: 0 },
+            atime: UNIX_EPOCH + Duration::new(
+                dinode.di_core.di_atime.t_sec as u64,
+                dinode.di_core.di_atime.t_nsec,
+            ),
+            mtime: UNIX_EPOCH + Duration::new(
+                dinode.di_core.di_mtime.t_sec as u64,
+                dinode.di_core.di_mtime.t_nsec,
+            ),
+            ctime: UNIX_EPOCH + Duration::new(
+                dinode.di_core.di_ctime.t_sec as u64,
+                dinode.di_core.di_ctime.t_nsec,
+            ),
+            crtime: UNIX_EPOCH,
             kind,
             perm: dinode.di_core.di_mode & (!(S_IFMT as u16)),
             nlink: dinode.di_core.di_nlink,
             uid: dinode.di_core.di_uid,
             gid: dinode.di_core.di_gid,
             rdev: 0,
+            blksize: 4096,
             flags: 0,
         };
 
         reply.attr(&ttl, &attr)
     }
 
-    fn readlink(&mut self, _req: &Request, ino: u64, reply: fuse::ReplyData) {
+    fn readlink(&mut self, _req: &Request, ino: u64, reply: fuser::ReplyData) {
         println!("readlink: {}", ino);
 
         let dinode = Dinode::from(
@@ -183,7 +178,7 @@ impl Filesystem for Volume {
         );
     }
 
-    fn open(&mut self, _req: &Request, ino: u64, _flags: u32, reply: ReplyOpen) {
+    fn open(&mut self, _req: &Request, ino: u64, _flags: i32, reply: ReplyOpen) {
         println!("open: {}", ino);
 
         let dinode = Dinode::from(
@@ -208,7 +203,9 @@ impl Filesystem for Volume {
         fh: u64,
         offset: i64,
         size: u32,
-        reply: fuse::ReplyData,
+        _flags: i32,
+        _lock_owner: Option<u64>,
+        reply: fuser::ReplyData,
     ) {
         println!("read: {}", _ino);
 
@@ -228,8 +225,8 @@ impl Filesystem for Volume {
         _req: &Request,
         _ino: u64,
         fh: u64,
-        _flags: u32,
-        _lock_owner: u64,
+        _flags: i32,
+        _lock_owner: Option<u64>,
         _flush: bool,
         reply: ReplyEmpty,
     ) {
@@ -240,7 +237,7 @@ impl Filesystem for Volume {
         reply.ok();
     }
 
-    fn opendir(&mut self, _req: &Request, _ino: u64, _flags: u32, reply: ReplyOpen) {
+    fn opendir(&mut self, _req: &Request, _ino: u64, _flags: i32, reply: ReplyOpen) {
         println!("opendir: {}", _ino);
         reply.opened(0, 0);
     }
@@ -285,7 +282,7 @@ impl Filesystem for Volume {
         }
     }
 
-    fn releasedir(&mut self, _req: &Request, _ino: u64, _fh: u64, _flags: u32, reply: ReplyEmpty) {
+    fn releasedir(&mut self, _req: &Request, _ino: u64, _fh: u64, _flags: i32, reply: ReplyEmpty) {
         println!("releasedir: {}", _ino);
 
         reply.ok();
@@ -386,7 +383,7 @@ impl Filesystem for Volume {
         }
     }
 
-    fn access(&mut self, _req: &Request, _ino: u64, _mask: u32, reply: ReplyEmpty) {
+    fn access(&mut self, _req: &Request, _ino: u64, _mask: i32, reply: ReplyEmpty) {
         println!("access: {}", _ino);
 
         reply.ok();

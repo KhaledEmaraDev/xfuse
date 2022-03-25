@@ -34,7 +34,7 @@ use super::definitions::*;
 use super::sb::Sb;
 
 use byteorder::{BigEndian, ReadBytesExt};
-use fuse::{FileAttr, FileType};
+use fuser::{FileAttr, FileType};
 use libc::{c_int, ENOENT};
 use uuid::Uuid;
 

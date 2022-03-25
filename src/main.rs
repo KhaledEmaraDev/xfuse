@@ -31,7 +31,7 @@ mod libxfuse;
 use libxfuse::volume::Volume;
 
 use clap::crate_version;
-use fuse::mount;
+use fuser::mount;
 use std::ffi::{OsStr, OsString};
 
 fn main() {

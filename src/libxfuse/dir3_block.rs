@@ -28,6 +28,7 @@
 use std::collections::HashMap;
 use std::io::{BufRead, Seek, SeekFrom};
 use std::mem;
+use std::time::{Duration, UNIX_EPOCH};
 
 use super::da_btree::hashname;
 use super::definitions::*;
@@ -39,9 +40,8 @@ use super::sb::Sb;
 use super::utils::{get_file_type, FileKind};
 
 use byteorder::{BigEndian, ReadBytesExt};
-use fuse::{FileAttr, FileType};
+use fuser::{FileAttr, FileType};
 use libc::{c_int, ENOENT, S_IFMT};
-use time::Timespec;
 
 pub const XFS_DIR2_DATA_FD_COUNT: usize = 3;
 
@@ -161,25 +161,26 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Block {
                 ino: entry.inumber,
                 size: dinode.di_core.di_size as u64,
                 blocks: dinode.di_core.di_nblocks,
-                atime: Timespec {
-                    sec: dinode.di_core.di_atime.t_sec as i64,
-                    nsec: dinode.di_core.di_atime.t_nsec,
-                },
-                mtime: Timespec {
-                    sec: dinode.di_core.di_mtime.t_sec as i64,
-                    nsec: dinode.di_core.di_mtime.t_nsec,
-                },
-                ctime: Timespec {
-                    sec: dinode.di_core.di_ctime.t_sec as i64,
-                    nsec: dinode.di_core.di_ctime.t_nsec,
-                },
-                crtime: Timespec { sec: 0, nsec: 0 },
+                atime: UNIX_EPOCH + Duration::new(
+                    dinode.di_core.di_atime.t_sec as u64,
+                    dinode.di_core.di_atime.t_nsec,
+                ),
+                mtime: UNIX_EPOCH + Duration::new(
+                    dinode.di_core.di_mtime.t_sec as u64,
+                    dinode.di_core.di_mtime.t_nsec,
+                ),
+                ctime: UNIX_EPOCH + Duration::new(
+                    dinode.di_core.di_ctime.t_sec as u64,
+                    dinode.di_core.di_ctime.t_nsec,
+                ),
+                crtime: UNIX_EPOCH,
                 kind,
                 perm: dinode.di_core.di_mode & (!(S_IFMT as u16)),
                 nlink: dinode.di_core.di_nlink,
                 uid: dinode.di_core.di_uid,
                 gid: dinode.di_core.di_gid,
                 rdev: 0,
+                blksize: 0,
                 flags: 0,
             };
 
