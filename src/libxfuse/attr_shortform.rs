@@ -136,7 +136,7 @@ impl<R: BufRead + Seek> Attr<R> for AttrShortform {
         for entry in self.list.iter() {
             list.extend_from_slice(get_namespace_from_flags(entry.flags).as_bytes());
             let namelen = entry.namelen as usize;
-            list.extend_from_slice(&entry.nameval[0..namelen].to_vec());
+            list.extend_from_slice(&entry.nameval[0..namelen]);
             list.push(0)
         }
 
