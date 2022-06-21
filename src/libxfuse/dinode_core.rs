@@ -47,7 +47,7 @@ pub enum XfsDinodeFmt {
 #[derive(Debug)]
 pub struct XfsTimestamp {
     pub t_sec: i32,
-    pub t_nsec: i32,
+    pub t_nsec: u32,
 }
 
 pub const XFS_DIFLAG_REALTIME: u16 = 1 << 0;
@@ -132,15 +132,15 @@ impl DinodeCore {
 
         let di_atime = XfsTimestamp {
             t_sec: buf_reader.read_i32::<BigEndian>().unwrap(),
-            t_nsec: buf_reader.read_i32::<BigEndian>().unwrap(),
+            t_nsec: buf_reader.read_u32::<BigEndian>().unwrap(),
         };
         let di_mtime = XfsTimestamp {
             t_sec: buf_reader.read_i32::<BigEndian>().unwrap(),
-            t_nsec: buf_reader.read_i32::<BigEndian>().unwrap(),
+            t_nsec: buf_reader.read_u32::<BigEndian>().unwrap(),
         };
         let di_ctime = XfsTimestamp {
             t_sec: buf_reader.read_i32::<BigEndian>().unwrap(),
-            t_nsec: buf_reader.read_i32::<BigEndian>().unwrap(),
+            t_nsec: buf_reader.read_u32::<BigEndian>().unwrap(),
         };
 
         let di_size = buf_reader.read_i64::<BigEndian>().unwrap();
@@ -168,7 +168,7 @@ impl DinodeCore {
 
         let di_crtime = XfsTimestamp {
             t_sec: buf_reader.read_i32::<BigEndian>().unwrap(),
-            t_nsec: buf_reader.read_i32::<BigEndian>().unwrap(),
+            t_nsec: buf_reader.read_u32::<BigEndian>().unwrap(),
         };
 
         let di_ino = buf_reader.read_u64::<BigEndian>().unwrap();
