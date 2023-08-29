@@ -28,6 +28,7 @@
 use std::{
     cmp::Ordering,
     convert::TryInto,
+    ffi::OsStr,
     io::{BufRead, Seek, SeekFrom},
     mem::size_of,
 };
@@ -51,28 +52,18 @@ pub const XFS_ATTR_SECURE: u8 = 1 << XFS_ATTR_SECURE_BIT;
 pub const XFS_ATTR_INCOMPLETE: u8 = 1 << XFS_ATTR_INCOMPLETE_BIT;
 pub const XFS_ATTR_NSP_ONDISK_MASK: u8 = XFS_ATTR_ROOT | XFS_ATTR_SECURE;
 
-pub fn get_namespace_from_flags(flags: u8) -> String {
-    let namespace: String;
-
+pub const fn get_namespace_from_flags(flags: u8) -> &'static [u8] {
     if flags & XFS_ATTR_SECURE != 0 {
-        namespace = String::from("secure.");
+        b"secure."
     } else if flags & XFS_ATTR_ROOT != 0 {
-        namespace = String::from("trusted.");
+        b"trusted."
     } else {
-        namespace = String::from("user.");
+        b"user."
     }
-
-    namespace
 }
 
-pub fn get_namespace_size_from_flags(flags: u8) -> u32 {
-    if flags & XFS_ATTR_SECURE != 0 {
-        7 // secure.
-    } else if flags & XFS_ATTR_ROOT != 0 {
-        8 // trusted.
-    } else {
-        5 // user.
-    }
+pub const fn get_namespace_size_from_flags(flags: u8) -> u32 {
+    get_namespace_from_flags(flags).len() as u32
 }
 
 #[derive(Debug)]
@@ -296,13 +287,13 @@ impl AttrLeafblock {
             if entry.flags & XFS_ATTR_LOCAL == 0 {
                 let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
 
-                list.extend_from_slice(get_namespace_from_flags(entry.flags).as_bytes());
+                list.extend_from_slice(get_namespace_from_flags(entry.flags));
                 let namelen = name_entry.namelen as usize;
                 list.extend_from_slice(&name_entry.nameval[0..namelen]);
             } else {
                 let name_entry = AttrLeafNameRemote::from(buf_reader.by_ref());
 
-                list.extend_from_slice(get_namespace_from_flags(entry.flags).as_bytes());
+                list.extend_from_slice(get_namespace_from_flags(entry.flags));
                 let namelen = name_entry.namelen as usize;
                 list.extend_from_slice(&name_entry.name[0..namelen]);
             }
@@ -471,9 +462,9 @@ impl AttrRmtHdr {
 pub trait Attr<R: BufRead + Seek> {
     fn get_total_size(&mut self, buf_reader: &mut R, super_block: &Sb) -> u32;
 
-    fn get_size(&self, buf_reader: &mut R, super_block: &Sb, name: &str) -> u32;
+    fn get_size(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> u32;
 
     fn list(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8>;
 
-    fn get(&self, buf_reader: &mut R, super_block: &Sb, name: &str) -> Vec<u8>;
+    fn get(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Vec<u8>;
 }

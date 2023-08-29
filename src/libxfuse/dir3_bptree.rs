@@ -25,6 +25,7 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+use std::ffi::{OsStr, OsString};
 use std::cmp::Ordering;
 use std::io::{BufRead, Seek, SeekFrom};
 use std::mem;
@@ -190,7 +191,7 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Btree {
         &self,
         buf_reader: &mut R,
         super_block: &Sb,
-        name: &str,
+        name: &OsStr,
     ) -> Result<(FileAttr, u64), c_int> {
         let idx = super_block.get_dir3_leaf_offset();
         let hash = hashname(name);
@@ -307,7 +308,7 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Btree {
         buf_reader: &mut R,
         super_block: &Sb,
         offset: i64,
-    ) -> Result<(XfsIno, i64, FileType, String), c_int> {
+    ) -> Result<(XfsIno, i64, FileType, OsString), c_int> {
         let offset = offset as u64;
         let idx = offset >> (64 - 48); // tags take 16-bits
         let offset = offset & ((1 << (64 - 48)) - 1);

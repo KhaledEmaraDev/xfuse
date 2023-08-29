@@ -27,7 +27,9 @@
  */
 use std::{
     cmp::Ordering,
+    ffi::OsStr,
     io::{BufRead, Seek, SeekFrom},
+    os::unix::ffi::OsStrExt
 };
 
 use super::{definitions::*, sb::Sb};
@@ -41,7 +43,7 @@ macro_rules! rol32 {
     };
 }
 
-pub fn hashname(name: &str) -> XfsDahash {
+pub fn hashname(name: &OsStr) -> XfsDahash {
     let name = name.as_bytes();
     let mut namelen = name.len();
     let mut hash: XfsDahash = 0;

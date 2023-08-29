@@ -25,7 +25,9 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+use std::ffi::OsStr;
 use std::io::{BufRead, Seek};
+use std::os::unix::ffi::OsStrExt;
 
 use super::{
     attr::{get_namespace_from_flags, get_namespace_size_from_flags, Attr},
@@ -117,7 +119,7 @@ impl<R: BufRead + Seek> Attr<R> for AttrShortform {
         self.total_size
     }
 
-    fn get_size(&self, _buf_reader: &mut R, _super_block: &Sb, name: &str) -> u32 {
+    fn get_size(&self, _buf_reader: &mut R, _super_block: &Sb, name: &OsStr) -> u32 {
         for entry in &self.list {
             let entry_name = entry.nameval[0..(entry.namelen as usize)].to_vec();
 
@@ -134,7 +136,7 @@ impl<R: BufRead + Seek> Attr<R> for AttrShortform {
             Vec::with_capacity(self.get_total_size(buf_reader.by_ref(), super_block) as usize);
 
         for entry in self.list.iter() {
-            list.extend_from_slice(get_namespace_from_flags(entry.flags).as_bytes());
+            list.extend_from_slice(get_namespace_from_flags(entry.flags));
             let namelen = entry.namelen as usize;
             list.extend_from_slice(&entry.nameval[0..namelen]);
             list.push(0)
@@ -143,7 +145,7 @@ impl<R: BufRead + Seek> Attr<R> for AttrShortform {
         list
     }
 
-    fn get(&self, _buf_reader: &mut R, _super_block: &Sb, name: &str) -> Vec<u8> {
+    fn get(&self, _buf_reader: &mut R, _super_block: &Sb, name: &OsStr) -> Vec<u8> {
         for entry in &self.list {
             let entry_name = entry.nameval[0..(entry.namelen as usize)].to_vec();
 

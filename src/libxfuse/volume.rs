@@ -28,6 +28,7 @@
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::os::unix::ffi::OsStrExt;
 use std::time::{Duration, UNIX_EPOCH};
 
 use super::S_IFMT;
@@ -93,7 +94,7 @@ impl Filesystem for Volume {
         match dir.lookup(
             BufReader::new(&self.device).by_ref(),
             &self.sb,
-            &name.to_string_lossy(),
+            name,
         ) {
             Ok((attr, generation)) => {
                 reply.entry(&ttl, &attr, generation);
@@ -286,9 +287,9 @@ impl Filesystem for Volume {
     }
 
     fn getxattr(&mut self, _req: &Request, ino: u64, name: &OsStr, size: u32, reply: ReplyXattr) {
-        let name = name.to_string_lossy();
-        let name: Vec<&str> = name.split('.').collect();
-        let name = name[1];
+        let mut nameparts = name.as_bytes().splitn(2, |c| *c == b'.');
+        let _namespace = nameparts.next().unwrap();
+        let name = OsStr::from_bytes(nameparts.next().unwrap());
 
         let mut buf_reader = BufReader::new(&self.device);
         let inode_number = if ino == FUSE_ROOT_ID {

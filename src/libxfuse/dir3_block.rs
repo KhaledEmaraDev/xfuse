@@ -26,6 +26,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 use std::collections::HashMap;
+use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, Seek, SeekFrom};
 use std::mem;
 use std::time::{Duration, UNIX_EPOCH};
@@ -143,7 +144,7 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Block {
         &self,
         buf_reader: &mut R,
         super_block: &Sb,
-        name: &str,
+        name: &OsStr,
     ) -> Result<(FileAttr, u64), c_int> {
         let hash = hashname(name);
         if let Some(address) = self.hashes.get(&hash) {
@@ -196,7 +197,7 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Block {
         buf_reader: &mut R,
         _super_block: &Sb,
         offset: i64,
-    ) -> Result<(XfsIno, i64, FileType, String), c_int> {
+    ) -> Result<(XfsIno, i64, FileType, OsString), c_int> {
         let mut next = offset == 0;
         let offset = if offset == 0 {
             mem::size_of::<Dir3DataHdr>() as i64

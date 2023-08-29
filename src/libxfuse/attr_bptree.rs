@@ -27,6 +27,7 @@
  */
 use std::{
     convert::TryInto,
+    ffi::OsStr,
     io::{BufRead, Seek, SeekFrom},
 };
 
@@ -78,7 +79,7 @@ impl<R: BufRead + Seek> Attr<R> for AttrBtree {
         self.total_size.try_into().unwrap()
     }
 
-    fn get_size(&self, buf_reader: &mut R, super_block: &Sb, name: &str) -> u32 {
+    fn get_size(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> u32 {
         let hash = hashname(name);
 
         let blk = self.btree.map_block(buf_reader.by_ref(), super_block, 0);
@@ -131,7 +132,7 @@ impl<R: BufRead + Seek> Attr<R> for AttrBtree {
         list
     }
 
-    fn get(&self, buf_reader: &mut R, super_block: &Sb, name: &str) -> Vec<u8> {
+    fn get(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Vec<u8> {
         let hash = hashname(name);
 
         let blk = self.btree.map_block(buf_reader.by_ref(), super_block, 0);
