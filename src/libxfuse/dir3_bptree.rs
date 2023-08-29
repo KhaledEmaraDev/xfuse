@@ -30,6 +30,7 @@ use std::io::{BufRead, Seek, SeekFrom};
 use std::mem;
 use std::time::{Duration, UNIX_EPOCH};
 
+use super::S_IFMT;
 use super::bmbt_rec::BmbtRec;
 use super::btree::{BmbtKey, BmdrBlock, XfsBmbtBlock, XfsBmbtPtr};
 use super::da_btree::{hashname, XfsDa3NodeEntry, XfsDa3NodeHdr};
@@ -41,7 +42,7 @@ use super::utils::{get_file_type, FileKind};
 
 use byteorder::{BigEndian, ReadBytesExt};
 use fuser::{FileAttr, FileType};
-use libc::{c_int, ENOENT, S_IFMT};
+use libc::{c_int, ENOENT};
 
 #[derive(Debug)]
 pub struct Dir2Btree {
@@ -282,7 +283,7 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Btree {
                         ),
                         crtime: UNIX_EPOCH,
                         kind,
-                        perm: dinode.di_core.di_mode & (!(S_IFMT as u16)),
+                        perm: dinode.di_core.di_mode & !S_IFMT,
                         nlink: dinode.di_core.di_nlink,
                         uid: dinode.di_core.di_uid,
                         gid: dinode.di_core.di_gid,

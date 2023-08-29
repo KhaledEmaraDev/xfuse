@@ -82,5 +82,5 @@ fn main() {
 
     let vol = Volume::from(&device);
 
-    mount2(vol, &mountpoint, &opts[..]).unwrap();
+    mount2(vol, mountpoint, &opts[..]).unwrap();
 }

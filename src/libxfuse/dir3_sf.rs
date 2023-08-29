@@ -28,6 +28,7 @@
 use std::io::{BufRead, Seek};
 use std::time::{Duration, UNIX_EPOCH};
 
+use super::S_IFMT;
 use super::{
     definitions::*,
     dinode::Dinode,
@@ -38,7 +39,7 @@ use super::{
 
 use byteorder::{BigEndian, ReadBytesExt};
 use fuser::{FileAttr, FileType};
-use libc::{c_int, ENOENT, S_IFMT};
+use libc::{c_int, ENOENT};
 
 // pub type XfsDir2SfOff = [u8; 2];
 
@@ -172,7 +173,7 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Sf {
                 ),
                 crtime: UNIX_EPOCH,
                 kind,
-                perm: dinode.di_core.di_mode & (!(S_IFMT as u16)),
+                perm: dinode.di_core.di_mode & !S_IFMT,
                 nlink: dinode.di_core.di_nlink,
                 uid: dinode.di_core.di_uid,
                 gid: dinode.di_core.di_gid,

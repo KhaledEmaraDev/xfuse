@@ -30,6 +30,7 @@ use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::time::{Duration, UNIX_EPOCH};
 
+use super::S_IFMT;
 use super::agi::Agi;
 use super::definitions::XfsIno;
 use super::dinode::Dinode;
@@ -40,7 +41,7 @@ use fuser::{
     ReplyStatfs, ReplyXattr, Request, FUSE_ROOT_ID,
     consts::FOPEN_KEEP_CACHE
 };
-use libc::{mode_t, ERANGE, S_IFDIR, S_IFMT, S_IFREG};
+use libc::{mode_t, ERANGE, S_IFDIR, S_IFREG};
 
 #[derive(Debug)]
 pub struct Volume {
@@ -94,7 +95,7 @@ impl Filesystem for Volume {
         match dir.lookup(
             BufReader::new(&self.device).by_ref(),
             &self.sb,
-            &name.to_string_lossy().to_owned(),
+            &name.to_string_lossy(),
         ) {
             Ok((attr, generation)) => {
                 reply.entry(&ttl, &attr, generation);
@@ -118,7 +119,7 @@ impl Filesystem for Volume {
 
         let ttl = Duration::new(86400, 0);
 
-        let kind = match (dinode.di_core.di_mode as mode_t) & S_IFMT {
+        let kind = match (dinode.di_core.di_mode & S_IFMT) as mode_t {
             S_IFREG => FileType::RegularFile,
             S_IFDIR => FileType::Directory,
             _ => {
@@ -144,7 +145,7 @@ impl Filesystem for Volume {
             ),
             crtime: UNIX_EPOCH,
             kind,
-            perm: dinode.di_core.di_mode & (!(S_IFMT as u16)),
+            perm: dinode.di_core.di_mode & !S_IFMT,
             nlink: dinode.di_core.di_nlink,
             uid: dinode.di_core.di_uid,
             gid: dinode.di_core.di_gid,
