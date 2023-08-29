@@ -32,6 +32,7 @@ use libxfuse::volume::Volume;
 
 use clap::{crate_version, Parser};
 use fuser::{mount2, MountOption};
+use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Clone, Debug)]
 #[clap(version = crate_version!())]
@@ -48,6 +49,11 @@ struct App {
 }
 
 fn main() {
+    tracing_subscriber::fmt()
+        .pretty()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
+
     let app = App::parse();
 
     let mut opts = vec![

@@ -78,8 +78,6 @@ impl Volume {
 
 impl Filesystem for Volume {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        println!("lookup: {:?}", name);
-
         let mut buf_reader = BufReader::new(&self.device);
         let inode_number = if parent == FUSE_ROOT_ID {
             self.sb.sb_rootino
@@ -105,8 +103,6 @@ impl Filesystem for Volume {
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
-        println!("getattr: {}", ino);
-
         let dinode = Dinode::from(
             BufReader::new(&self.device).by_ref(),
             &self.sb,
@@ -158,8 +154,6 @@ impl Filesystem for Volume {
     }
 
     fn readlink(&mut self, _req: &Request, ino: u64, reply: fuser::ReplyData) {
-        println!("readlink: {}", ino);
-
         let dinode = Dinode::from(
             BufReader::new(&self.device).by_ref(),
             &self.sb,
@@ -180,8 +174,6 @@ impl Filesystem for Volume {
     }
 
     fn open(&mut self, _req: &Request, ino: u64, _flags: i32, reply: ReplyOpen) {
-        println!("open: {}", ino);
-
         let dinode = Dinode::from(
             BufReader::new(&self.device).by_ref(),
             &self.sb,
@@ -208,8 +200,6 @@ impl Filesystem for Volume {
         _lock_owner: Option<u64>,
         reply: fuser::ReplyData,
     ) {
-        println!("read: {}", _ino);
-
         let dinode = &self.open_files[fh as usize];
         let mut buf_reader = BufReader::new(&self.device);
 
@@ -231,15 +221,12 @@ impl Filesystem for Volume {
         _flush: bool,
         reply: ReplyEmpty,
     ) {
-        println!("release: {}", _ino);
-
         self.open_files.remove(fh as usize);
 
         reply.ok();
     }
 
     fn opendir(&mut self, _req: &Request, _ino: u64, _flags: i32, reply: ReplyOpen) {
-        println!("opendir: {}", _ino);
         reply.opened(0, 0);
     }
 
@@ -251,8 +238,6 @@ impl Filesystem for Volume {
         offset: i64,
         mut reply: ReplyDirectory,
     ) {
-        println!("readdir: {}", ino);
-
         let mut buf_reader = BufReader::new(&self.device);
         let inode_number = if ino == FUSE_ROOT_ID {
             self.sb.sb_rootino
@@ -284,14 +269,10 @@ impl Filesystem for Volume {
     }
 
     fn releasedir(&mut self, _req: &Request, _ino: u64, _fh: u64, _flags: i32, reply: ReplyEmpty) {
-        println!("releasedir: {}", _ino);
-
         reply.ok();
     }
 
     fn statfs(&mut self, _req: &Request, _ino: u64, reply: ReplyStatfs) {
-        println!("statfs: {}", _ino);
-
         reply.statfs(
             self.sb.sb_dblocks,
             self.sb.sb_fdblocks,
@@ -305,8 +286,6 @@ impl Filesystem for Volume {
     }
 
     fn getxattr(&mut self, _req: &Request, ino: u64, name: &OsStr, size: u32, reply: ReplyXattr) {
-        println!("getxattr: {:?}", name);
-
         let name = name.to_string_lossy();
         let name: Vec<&str> = name.split('.').collect();
         let name = name[1];
@@ -347,8 +326,6 @@ impl Filesystem for Volume {
     }
 
     fn listxattr(&mut self, _req: &Request, ino: u64, size: u32, reply: ReplyXattr) {
-        println!("listxattr: {}", ino);
-
         let mut buf_reader = BufReader::new(&self.device);
         let inode_number = if ino == FUSE_ROOT_ID {
             self.sb.sb_rootino
@@ -385,8 +362,6 @@ impl Filesystem for Volume {
     }
 
     fn access(&mut self, _req: &Request, _ino: u64, _mask: i32, reply: ReplyEmpty) {
-        println!("access: {}", _ino);
-
         reply.ok();
     }
 }

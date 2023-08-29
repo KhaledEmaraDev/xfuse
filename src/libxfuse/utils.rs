@@ -30,6 +30,7 @@ use fuser::FileType;
 use super::dir3::{XFS_DIR3_FT_DIR, XFS_DIR3_FT_REG_FILE, XFS_DIR3_FT_SYMLINK};
 
 use libc::{c_int, mode_t, ENOENT, S_IFDIR, S_IFLNK, S_IFMT, S_IFREG};
+use tracing::error;
 
 pub enum FileKind {
     Type(u8),
@@ -43,7 +44,7 @@ pub fn get_file_type(kind: FileKind) -> Result<FileType, c_int> {
             XFS_DIR3_FT_DIR => Ok(FileType::Directory),
             XFS_DIR3_FT_SYMLINK => Ok(FileType::Symlink),
             _ => {
-                println!("Unknown file type.");
+                error!("Unknown file type {:?}.", file_type);
                 Err(ENOENT)
             }
         },
@@ -52,7 +53,7 @@ pub fn get_file_type(kind: FileKind) -> Result<FileType, c_int> {
             S_IFDIR => Ok(FileType::Directory),
             S_IFLNK => Ok(FileType::Symlink),
             _ => {
-                println!("Unknown file type.");
+                error!("Unknown file type {:?}.", (file_mode as mode_t) & S_IFMT);
                 Err(ENOENT)
             }
         },
