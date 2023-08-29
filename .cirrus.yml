@@ -34,7 +34,7 @@ task:
   audit_script:
     - . $HOME/.cargo/env
     - if [ "$VERSION" = "nightly" ]; then
-    -   cargo install cargo-audit
+    -   pkg install -y cargo-audit
     -   cargo audit
     - fi
   before_cache_script: rm -rf $HOME/.cargo/registry/index
