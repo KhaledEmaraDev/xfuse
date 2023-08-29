@@ -25,7 +25,9 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, Seek};
+use std::os::unix::ffi::OsStringExt;
 use std::time::{Duration, UNIX_EPOCH};
 
 use super::S_IFMT;
@@ -79,7 +81,7 @@ impl Dir2SfHdr {
 pub struct Dir2SfEntry {
     pub namelen: u8,
     pub offset: u16,
-    pub name: String,
+    pub name: OsString,
     pub ftype: u8,
     pub inumber: XfsDir2Inou,
 }
@@ -90,10 +92,9 @@ impl Dir2SfEntry {
 
         let offset = buf_reader.read_u16::<BigEndian>().unwrap();
 
-        let mut name = String::new();
-        for _i in 0..namelen {
-            name.push(buf_reader.read_u8().unwrap() as char);
-        }
+        let mut namebytes = vec![0u8; namelen.into()];
+        buf_reader.read_exact(&mut namebytes).unwrap();
+        let name = OsString::from_vec(namebytes);
 
         let ftype = buf_reader.read_u8().unwrap();
 
@@ -137,7 +138,7 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Sf {
         &self,
         buf_reader: &mut R,
         super_block: &Sb,
-        name: &str,
+        name: &OsStr,
     ) -> Result<(FileAttr, u64), c_int> {
         let mut inode: Option<XfsIno> = None;
 
@@ -193,7 +194,7 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Sf {
         _buf_reader: &mut R,
         _super_block: &Sb,
         offset: i64,
-    ) -> Result<(XfsIno, i64, FileType, String), c_int> {
+    ) -> Result<(XfsIno, i64, FileType, OsString), c_int> {
         for entry in self.list.iter() {
             if i64::from(entry.offset) <= offset {
                 continue;

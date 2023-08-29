@@ -26,8 +26,10 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 use std::cmp::Ordering;
+use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, Seek, SeekFrom};
 use std::mem;
+use std::os::unix::ffi::OsStringExt;
 
 use super::da_btree::XfsDa3Blkinfo;
 use super::definitions::*;
@@ -131,7 +133,7 @@ impl Dir3DataHdr {
 pub struct Dir2DataEntry {
     pub inumber: XfsIno,
     pub namelen: u8,
-    pub name: String,
+    pub name: OsString,
     pub ftype: u8,
     pub tag: XfsDir2DataOff,
 }
@@ -141,10 +143,9 @@ impl Dir2DataEntry {
         let inumber = buf_reader.read_u64::<BigEndian>().unwrap();
         let namelen = buf_reader.read_u8().unwrap();
 
-        let mut name = String::new();
-        for _i in 0..namelen {
-            name.push(buf_reader.read_u8().unwrap() as char);
-        }
+        let mut namebytes = vec![0u8; namelen.into()];
+        buf_reader.read_exact(&mut namebytes).unwrap();
+        let name = OsString::from_vec(namebytes);
 
         let ftype = buf_reader.read_u8().unwrap();
 
@@ -401,7 +402,7 @@ pub trait Dir3<R: BufRead + Seek> {
         &self,
         buf_reader: &mut R,
         super_block: &Sb,
-        name: &str,
+        name: &OsStr,
     ) -> Result<(FileAttr, u64), c_int>;
 
     fn next(
@@ -409,5 +410,5 @@ pub trait Dir3<R: BufRead + Seek> {
         buf_reader: &mut R,
         super_block: &Sb,
         offset: i64,
-    ) -> Result<(XfsIno, i64, FileType, String), c_int>;
+    ) -> Result<(XfsIno, i64, FileType, OsString), c_int>;
 }
