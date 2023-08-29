@@ -218,7 +218,7 @@ impl Dir2Data {
         start_block: u64,
     ) -> Dir2Data {
         let offset = start_block * (superblock.sb_blocksize as u64);
-        buf_reader.seek(SeekFrom::Start(offset as u64)).unwrap();
+        buf_reader.seek(SeekFrom::Start(offset)).unwrap();
 
         let hdr = Dir3DataHdr::from(buf_reader.by_ref());
 

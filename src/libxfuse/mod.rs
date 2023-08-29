@@ -50,3 +50,6 @@ pub mod sb;
 pub mod symlink_extent;
 pub mod utils;
 pub mod volume;
+
+#[allow(clippy::unnecessary_cast)]  // It isn't unnecessary on all platforms.
+const S_IFMT: u16 = libc::S_IFMT as u16;
