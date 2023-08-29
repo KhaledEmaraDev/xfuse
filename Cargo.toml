@@ -21,6 +21,6 @@ num-derive = "0.3.3"
 crc = "2.0.0"
 
 [dependencies.clap]
-version = "2"
+version = "4"
 default-features = false
-features=  [ "suggestions", "color", "wrap_help" ]
+features=  [ "cargo", "color", "derive", "std", "suggestions", "wrap_help" ,"usage"]
