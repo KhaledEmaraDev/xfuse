@@ -155,7 +155,7 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Leaf {
         let mut entry: &Dir2Data = &self.entries[idx];
 
         buf_reader
-            .seek(SeekFrom::Start(entry.offset + (offset as u64)))
+            .seek(SeekFrom::Start(entry.offset + offset))
             .unwrap();
 
         loop {
