@@ -30,57 +30,54 @@ mod libxfuse;
 
 use libxfuse::volume::Volume;
 
-use clap::crate_version;
+use clap::{crate_version, Parser};
 use fuser::{mount2, MountOption};
 
+#[derive(Parser, Clone, Debug)]
+#[clap(version = crate_version!())]
+struct App {
+    /// Mount options, comma delimited.
+    #[clap(
+        short = 'o',
+        long,
+        value_delimiter(',')
+    )]
+    options: Vec<String>,
+    device: String,
+    mountpoint: String
+}
+
 fn main() {
-    let app = clap::App::new("xfs-fuse")
-        .version(crate_version!())
-        .arg(
-            clap::Arg::with_name("option")
-                .help("Mount options")
-                .short("o")
-                .takes_value(true)
-                .multiple(true)
-                .require_delimiter(true),
-        )
-        .arg(clap::Arg::with_name("device").required(true))
-        .arg(clap::Arg::with_name("mountpoint").required(true));
-    let matches = app.get_matches();
+    let app = App::parse();
 
     let mut opts = vec![
         MountOption::FSName("fusefs".to_string()),
         MountOption::Subtype("xfs".to_string())
     ];
-    if let Some(it) = matches.values_of("option") {
-        for o in it {
-            opts.push(match o {
-                "auto_unmount" => MountOption::AutoUnmount,
-                "allow_other" => MountOption::AllowOther,
-                "allow_root" => MountOption::AllowRoot,
-                "default_permissions" => MountOption::DefaultPermissions,
-                "dev" => MountOption::Dev,
-                "nodev" => MountOption::NoDev,
-                "suid" => MountOption::Suid,
-                "nosuid" => MountOption::NoSuid,
-                "ro" => MountOption::RO,
-                "rw" => MountOption::RW,
-                "exec" => MountOption::Exec,
-                "noexec" => MountOption::NoExec,
-                "atime" => MountOption::Atime,
-                "noatime" => MountOption::NoAtime,
-                "dirsync" => MountOption::DirSync,
-                "sync" => MountOption::Sync,
-                "async" => MountOption::Async,
-                custom => MountOption::CUSTOM(custom.to_string())
-            });
-        }
+    for o in app.options.iter() {
+        opts.push(match o.as_str() {
+            "auto_unmount" => MountOption::AutoUnmount,
+            "allow_other" => MountOption::AllowOther,
+            "allow_root" => MountOption::AllowRoot,
+            "default_permissions" => MountOption::DefaultPermissions,
+            "dev" => MountOption::Dev,
+            "nodev" => MountOption::NoDev,
+            "suid" => MountOption::Suid,
+            "nosuid" => MountOption::NoSuid,
+            "ro" => MountOption::RO,
+            "rw" => MountOption::RW,
+            "exec" => MountOption::Exec,
+            "noexec" => MountOption::NoExec,
+            "atime" => MountOption::Atime,
+            "noatime" => MountOption::NoAtime,
+            "dirsync" => MountOption::DirSync,
+            "sync" => MountOption::Sync,
+            "async" => MountOption::Async,
+            custom => MountOption::CUSTOM(custom.to_string())
+        });
     };
 
-    let device = matches.value_of("device").unwrap().to_string();
-    let mountpoint = matches.value_of("mountpoint").unwrap().to_string();
+    let vol = Volume::from(&app.device);
 
-    let vol = Volume::from(&device);
-
-    mount2(vol, mountpoint, &opts[..]).unwrap();
+    mount2(vol, app.mountpoint, &opts[..]).unwrap();
 }

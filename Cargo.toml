@@ -12,7 +12,7 @@ exclude = [
 ]
 
 [dependencies]
-fuser = "0.11.0"
+fuser = "0.13.0"
 byteorder = "1.4.3"
 libc = "0.2.97"
 uuid = "0.8.2"
@@ -21,6 +21,6 @@ num-derive = "0.3.3"
 crc = "2.0.0"
 
 [dependencies.clap]
-version = "2"
+version = "4"
 default-features = false
-features=  [ "suggestions", "color", "wrap_help" ]
+features=  [ "cargo", "color", "derive", "std", "suggestions", "wrap_help" ,"usage"]
