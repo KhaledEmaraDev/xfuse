@@ -449,7 +449,7 @@ impl AttrRmtHdr {
             .seek(SeekFrom::Start(start_offset + u64::from(rm_offset)))
             .unwrap();
 
-        let mut data = Vec::<u8>::with_capacity(rm_bytes as usize);
+        let mut data = vec![0; rm_bytes as usize];
         buf_reader.read_exact(&mut data).unwrap();
 
         (
