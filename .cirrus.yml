@@ -16,6 +16,7 @@ task:
         VERSION: nightly
   setup_script:
     - pkg install -y fusefs-libs pkgconf
+    - kldload fusefs
     - fetch https://sh.rustup.rs -o rustup.sh
     - sh rustup.sh -y
     - $HOME/.cargo/bin/rustup toolchain install $VERSION
