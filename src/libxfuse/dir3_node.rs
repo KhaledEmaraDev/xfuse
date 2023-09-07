@@ -38,7 +38,7 @@ use super::definitions::*;
 use super::dinode::Dinode;
 use super::dir3::{Dir2DataEntry, Dir2DataUnused, Dir2LeafNDisk, Dir3, Dir3BlkHdr, Dir3DataHdr};
 use super::sb::Sb;
-use super::utils::{get_file_type, FileKind};
+use super::utils::{decode_from, get_file_type, FileKind};
 
 use byteorder::{BigEndian, ReadBytesExt};
 use fuser::{FileAttr, FileType};
@@ -54,8 +54,8 @@ pub struct Dir3FreeHdr {
 }
 
 impl Dir3FreeHdr {
-    pub fn from<T: BufRead>(buf_reader: &mut T) -> Dir3FreeHdr {
-        let hdr = Dir3BlkHdr::from(buf_reader);
+    pub fn from<T: bincode::de::read::Reader + BufRead>(buf_reader: &mut T) -> Dir3FreeHdr {
+        let hdr = decode_from(buf_reader.by_ref()).unwrap();
         let firstdb = buf_reader.read_i32::<BigEndian>().unwrap();
         let nvalid = buf_reader.read_i32::<BigEndian>().unwrap();
         let nused = buf_reader.read_i32::<BigEndian>().unwrap();
@@ -78,7 +78,7 @@ pub struct Dir3Free {
 }
 
 impl Dir3Free {
-    pub fn from<T: BufRead + Seek>(buf_reader: &mut T, offset: u64, size: u32) -> Dir3Free {
+    pub fn from<T: bincode::de::read::Reader + BufRead + Seek>(buf_reader: &mut T, offset: u64, size: u32) -> Dir3Free {
         buf_reader.seek(SeekFrom::Start(offset)).unwrap();
 
         let hdr = Dir3FreeHdr::from(buf_reader);
@@ -136,7 +136,7 @@ impl Dir2Node {
     }
 }
 
-impl<R: BufRead + Seek> Dir3<R> for Dir2Node {
+impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Node {
     fn lookup(
         &self,
         buf_reader: &mut R,
@@ -263,7 +263,7 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Node {
                     let unused = Dir2DataUnused::from(buf_reader.by_ref());
                     offset += u64::from(unused.length);
                 } else if !next {
-                    let length = Dir2DataEntry::get_length(buf_reader.by_ref());
+                    let length = Dir2DataEntry::get_length_from_reader(buf_reader.by_ref());
                     buf_reader.seek(SeekFrom::Current(length)).unwrap();
                     offset += length as u64;
                     next = true;

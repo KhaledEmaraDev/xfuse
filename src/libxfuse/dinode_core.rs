@@ -28,11 +28,17 @@
 use std::io::BufRead;
 
 use super::definitions::*;
+use super::utils::Uuid;
 
+use bincode::{
+    Decode,
+    de::Decoder,
+    error::DecodeError,
+    impl_borrow_decode
+};
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
-use uuid::Uuid;
 
 #[derive(Debug, FromPrimitive)]
 pub enum XfsDinodeFmt {
@@ -44,7 +50,15 @@ pub enum XfsDinodeFmt {
     Rmap,
 }
 
-#[derive(Debug)]
+impl bincode::Decode for XfsDinodeFmt {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let discriminant: u8 = Decode::decode(decoder)?;
+        Ok(XfsDinodeFmt::from_u8(discriminant).expect("Unknown dinode fmt"))
+    }
+}
+impl_borrow_decode!(XfsDinodeFmt);
+
+#[derive(Debug, Decode)]
 pub struct XfsTimestamp {
     pub t_sec: i32,
     pub t_nsec: u32,
@@ -66,7 +80,7 @@ pub const XFS_DIFLAG_EXTSZINHERIT: u16 = 1 << 12;
 pub const XFS_DIFLAG_NODEFRAG: u16 = 1 << 13;
 pub const XFS_DIFLAG_FILESTREAMS: u16 = 1 << 14;
 
-#[derive(Debug)]
+#[derive(Debug, bincode::Decode)]
 pub struct DinodeCore {
     pub di_magic: u16,
     pub di_mode: u16,
@@ -214,5 +228,10 @@ impl DinodeCore {
             di_ino,
             di_uuid,
         }
+    }
+
+    pub fn sanity(&self) {
+        assert_eq!(self.di_magic, XFS_DINODE_MAGIC,
+                   "Agi magic number is invalid");
     }
 }

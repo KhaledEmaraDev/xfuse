@@ -51,7 +51,7 @@ pub struct Dir2Leaf {
 }
 
 impl Dir2Leaf {
-    pub fn from<T: BufRead + Seek>(
+    pub fn from<T: bincode::de::read::Reader + BufRead + Seek>(
         buf_reader: &mut T,
         superblock: &Sb,
         bmx: &[BmbtRec],
@@ -66,7 +66,7 @@ impl Dir2Leaf {
         let offset = leaf_extent.br_startblock * (superblock.sb_blocksize as u64);
         let entry_size = superblock.sb_blocksize * (1 << superblock.sb_dirblklog);
 
-        let leaf = Dir2LeafDisk::from(buf_reader, superblock, offset, entry_size);
+        let leaf = Dir2LeafDisk::from(buf_reader, superblock, offset, entry_size as usize);
 
         Dir2Leaf {
             entries,
@@ -76,7 +76,7 @@ impl Dir2Leaf {
     }
 }
 
-impl<R: BufRead + Seek> Dir3<R> for Dir2Leaf {
+impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Leaf {
     fn lookup(
         &self,
         buf_reader: &mut R,

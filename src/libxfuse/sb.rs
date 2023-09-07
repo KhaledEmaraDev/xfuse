@@ -28,10 +28,10 @@
 use std::io::{prelude::*, SeekFrom};
 
 use super::definitions::*;
+use super::utils::Uuid;
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use crc::{Crc, CRC_32_ISCSI};
-use uuid::Uuid;
 
 pub const XFS_SB_VERSION_ATTRBIT: u16 = 0x0010;
 pub const XFS_SB_VERSION_NLINKBIT: u16 = 0x0020;
@@ -191,6 +191,10 @@ impl Sb {
 
         if digest.finalize() != sb_crc {
             panic!("Crc check failed!");
+        }
+
+        if sb_versionnum & 0xF != 5 {
+            panic!("Unsupported filesystem version number {}", sb_versionnum & 0xF);
         }
 
         Sb {

@@ -33,7 +33,7 @@ use std::{
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use num_traits::{PrimInt, Unsigned};
-use uuid::Uuid;
+use super::utils::Uuid;
 
 use super::{
     bmbt_rec::BmbtRec,

@@ -186,7 +186,7 @@ impl Dir2Btree {
     }
 }
 
-impl<R: BufRead + Seek> Dir3<R> for Dir2Btree {
+impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
     fn lookup(
         &self,
         buf_reader: &mut R,
@@ -365,7 +365,7 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Btree {
 
                             return Ok((entry.inumber, tag as i64, kind, name));
                         } else {
-                            let length = Dir2DataEntry::get_length(buf_reader.by_ref());
+                            let length = Dir2DataEntry::get_length_from_reader(buf_reader.by_ref());
                             buf_reader.seek(SeekFrom::Current(length)).unwrap();
 
                             next = true;

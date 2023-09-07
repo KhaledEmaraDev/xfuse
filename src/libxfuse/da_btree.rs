@@ -34,8 +34,9 @@ use std::{
 
 use super::{definitions::*, sb::Sb};
 
+use bincode::Decode;
 use byteorder::{BigEndian, ReadBytesExt};
-use uuid::Uuid;
+use super::utils::Uuid;
 
 macro_rules! rol32 {
     ($x:expr, $y:expr) => {
@@ -73,7 +74,7 @@ pub fn hashname(name: &OsStr) -> XfsDahash {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Decode)]
 pub struct XfsDa3Blkinfo {
     pub forw: u32,
     pub back: u32,
@@ -116,9 +117,15 @@ impl XfsDa3Blkinfo {
             owner,
         }
     }
+
+    pub fn sanity(&self, super_block: &Sb) {
+        if self.uuid != super_block.sb_uuid {
+            panic!("UUID mismatch!");
+        }
+    }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Decode)]
 pub struct XfsDa3NodeHdr {
     pub info: XfsDa3Blkinfo,
     pub count: u16,

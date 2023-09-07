@@ -127,7 +127,7 @@ impl<R: BufRead + Seek> Attr<R> for AttrLeaf {
 
 #[cfg(test)]
 mod tests {
-    use uuid::Uuid;
+    use crate::libxfuse::utils::Uuid;
 
     use crate::libxfuse::{
         attr::{AttrLeafHdr, AttrLeafMap, AttrLeafblock},
