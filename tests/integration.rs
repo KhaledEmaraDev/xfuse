@@ -1,6 +1,8 @@
 use std::{
+    ffi::OsStr,
     fmt,
     fs::metadata,
+    os::unix::fs::{DirEntryExt, MetadataExt},
     path::PathBuf,
     process::{Child, Command},
     time::{Duration, Instant},
@@ -15,6 +17,7 @@ use nix::{
     unistd::{AccessFlags, access}
 };
 use rstest::{fixture, rstest};
+use rstest_reuse::{self, apply, template};
 use tempfile::{tempdir, TempDir};
 
 lazy_static! {
@@ -43,6 +46,19 @@ lazy_static! {
         }
         img
     };
+}
+
+/// How many directory entries are in each directory?
+// This is a function of the golden image creation.
+fn ents_per_dir(d: &str) -> usize {
+    match d {
+        "sf" => 4,
+        "block" => 8,
+        "leaf" => 256,
+        "node" => 2048,
+        "btree" => 204800,
+        _ => 0
+    }
 }
 
 /// Skip a test.
@@ -147,6 +163,16 @@ impl Drop for Harness {
     }
 }
 
+#[template]
+#[rstest]
+#[case::leaf("leaf")]
+#[case::sf("sf")]
+#[case::block("block")]
+#[case::node("node")]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/22" ]
+#[case::btree("btree")]
+fn all_dir_types(d: &str) {}
+
 /// Mount and unmount the golden image
 #[rstest]
 #[named]
@@ -156,79 +182,48 @@ fn mount(harness: Harness) {
     drop(harness);
 }
 
-/// Tests relating to sf directories
-mod sf {
-    use super::*;
+/// Lookup all entries in a directory
+#[named]
+#[apply(all_dir_types)]
+fn lookup(harness: Harness, #[case] d: &str) {
+    require_fusefs!();
 
-    /// Lookup entries in an sf directory
-    #[rstest]
-    #[named]
-    fn lookup(harness: Harness) {
-        require_fusefs!();
-
-        let amode = AccessFlags::F_OK;
-        for i in 0..3 {
-            let p = harness.d.path().join(format!("sf/frame{:06}", i));
-            access(p.as_path(), amode)
-                .unwrap_or_else(|_| panic!("Lookup failed: {}", p.display()));
-        }
+    let amode = AccessFlags::F_OK;
+    for i in 0..ents_per_dir(d) {
+        let p = harness.d.path().join(format!("{d}/frame{i:06}"));
+        access(p.as_path(), amode)
+            .unwrap_or_else(|_| panic!("Lookup failed: {}", p.display()));
     }
 }
 
-/// Tests relating to block directories
-mod block {
-    use super::*;
+/// List a directory's contents with readdir
+#[named]
+#[rstest]
+#[case::sf("sf")]
+#[case::block("block")]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/25" ]
+#[case::node("node")]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/25" ]
+#[case::leaf("leaf")]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/22" ]
+#[case::btree("btree")]
+fn readdir(harness: Harness, #[case] d: &str) {
+    require_fusefs!();
 
-    /// Lookup entries in a block directory
-    #[rstest]
-    #[named]
-    fn lookup(harness: Harness) {
-        require_fusefs!();
-
-        let amode = AccessFlags::F_OK;
-        for i in 0..8 {
-            let p = harness.d.path().join(format!("block/frame{:06}", i));
-            access(p.as_path(), amode)
-                .unwrap_or_else(|_| panic!("Lookup failed: {}", p.display()));
-        }
+    let dpath = harness.d.path().join(d);
+    let ents = std::fs::read_dir(dpath)
+        .unwrap();
+    let mut count = 0;
+    for (i, rent) in ents.enumerate() {
+        let ent = rent.unwrap();
+        dbg!(&ent);
+        let expected_name = format!("frame{:06}", i);
+        assert_eq!(ent.file_name(), OsStr::new(&expected_name));
+        assert!(ent.file_type().unwrap().is_dir());
+        let md = ent.metadata().unwrap();
+        assert_eq!(ent.ino(), md.ino());
+        // The other metadata fields are checked in a separate test case.
+        count += 1;
     }
-}
-
-/// Tests relating to leaf directories
-mod leaf {
-    use super::*;
-
-    /// Lookup entries in a leaf directory
-    #[rstest]
-    #[named]
-    fn lookup(harness: Harness) {
-        require_fusefs!();
-
-        let amode = AccessFlags::F_OK;
-        for i in 0..256 {
-            let p = harness.d.path().join(format!("leaf/frame{:06}", i));
-            access(p.as_path(), amode)
-                .unwrap_or_else(|_| panic!("Lookup failed: {}", p.display()));
-        }
-    }
-}
-
-/// Tests relating to btree directories
-mod btree {
-    use super::*;
-
-    /// Lookup entries in a btree directory
-    #[rstest]
-    #[named]
-    #[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/22" ]
-    fn lookup(harness: Harness) {
-        require_fusefs!();
-
-        let amode = AccessFlags::F_OK;
-        for i in 0..204800 {
-            let p = harness.d.path().join(format!("btree/frame{:06}", i));
-            access(p.as_path(), amode)
-                .unwrap_or_else(|_| panic!("Lookup failed: {}", p.display()));
-        }
-    }
+    assert_eq!(count, ents_per_dir(d));
 }
