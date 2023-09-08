@@ -52,11 +52,11 @@ lazy_static! {
 // This is a function of the golden image creation.
 fn ents_per_dir(d: &str) -> usize {
     match d {
-        "sf" => 4,
-        "block" => 8,
+        "sf" => 2,
+        "block" => 32,
         "leaf" => 256,
-        "node" => 2048,
-        "btree" => 204800,
+        "node" => 1024,
+        "btree" => 8192,
         _ => 0
     }
 }
@@ -165,9 +165,9 @@ impl Drop for Harness {
 
 #[template]
 #[rstest]
-#[case::leaf("leaf")]
 #[case::sf("sf")]
 #[case::block("block")]
+#[case::leaf("leaf")]
 #[case::node("node")]
 #[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/22" ]
 #[case::btree("btree")]
@@ -200,11 +200,11 @@ fn lookup(harness: Harness, #[case] d: &str) {
 #[named]
 #[rstest]
 #[case::sf("sf")]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/25" ]
 #[case::block("block")]
+#[case::leaf("leaf")]
 #[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/25" ]
 #[case::node("node")]
-#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/25" ]
-#[case::leaf("leaf")]
 #[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/22" ]
 #[case::btree("btree")]
 fn readdir(harness: Harness, #[case] d: &str) {
@@ -216,10 +216,9 @@ fn readdir(harness: Harness, #[case] d: &str) {
     let mut count = 0;
     for (i, rent) in ents.enumerate() {
         let ent = rent.unwrap();
-        dbg!(&ent);
         let expected_name = format!("frame{:06}", i);
         assert_eq!(ent.file_name(), OsStr::new(&expected_name));
-        assert!(ent.file_type().unwrap().is_dir());
+        assert!(ent.file_type().unwrap().is_file());
         let md = ent.metadata().unwrap();
         assert_eq!(ent.ino(), md.ino());
         // The other metadata fields are checked in a separate test case.
