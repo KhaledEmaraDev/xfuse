@@ -138,7 +138,6 @@ impl Dir3DataHdr {
 #[derive(Debug)]
 pub struct Dir2DataEntry {
     pub inumber: XfsIno,
-    pub namelen: u8,
     pub name: OsString,
     pub ftype: u8,
     pub tag: XfsDir2DataOff,
@@ -163,7 +162,6 @@ impl Dir2DataEntry {
 
         Dir2DataEntry {
             inumber,
-            namelen,
             name,
             ftype,
             tag,
