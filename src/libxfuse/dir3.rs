@@ -167,9 +167,9 @@ impl Dir2DataEntry {
     pub fn get_length<T: BufRead + Seek>(buf_reader: &mut T) -> i64 {
         buf_reader.seek(SeekFrom::Current(8)).unwrap();
         let namelen = buf_reader.read_u8().unwrap();
-        buf_reader.seek(SeekFrom::Current(-8)).unwrap();
+        buf_reader.seek(SeekFrom::Current(-9)).unwrap();
 
-        ((((namelen as i64) + 1 + 2) + 8 - 1) / 8) * 8
+        ((((namelen as i64) + 8 + 1 + 2) + 8 - 1) / 8) * 8
     }
 }
 
