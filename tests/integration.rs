@@ -200,7 +200,6 @@ fn lookup(harness: Harness, #[case] d: &str) {
 #[named]
 #[rstest]
 #[case::sf("sf")]
-#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/25" ]
 #[case::block("block")]
 #[case::leaf("leaf")]
 #[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/25" ]
