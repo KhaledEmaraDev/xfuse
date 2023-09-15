@@ -25,6 +25,7 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+use std::convert::TryInto;
 use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, Seek, SeekFrom};
 use std::mem;
@@ -223,73 +224,57 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Node {
     fn next(
         &self,
         buf_reader: &mut R,
-        _super_block: &Sb,
+        sb: &Sb,
+        // logical byte offset within the directory
         offset: i64,
-    ) -> Result<(XfsIno, i64, FileType, OsString), c_int> {
-        let offset = offset as u64;
-        let idx = offset >> (64 - 48); // tags take 16-bits
-        let offset = offset & ((1 << (64 - 48)) - 1);
-
+    ) -> Result<(XfsIno, i64, FileType, OsString), c_int>
+    {
+        let mut offset: u64 = offset.try_into().unwrap();
+        let block_size = self.block_size as u64;
         let mut next = offset == 0;
-        let mut offset = if offset == 0 {
-            mem::size_of::<Dir3DataHdr>() as u64
-        } else {
-            offset
-        };
 
-        let mut bmbt_rec = self.map_dblock(idx);
-        let mut bmbt_rec_idx = if let Some(bmbt_rec_some) = &bmbt_rec {
-            idx - bmbt_rec_some.br_startoff
-        } else {
-            return Err(ENOENT)
-        };
+        while let Some(bmbt_rec) = self.map_dblock(offset / block_size) {
+            // Byte offset within this extent
+            let ex_offset = offset - bmbt_rec.br_startoff * block_size;
 
-        while let Some(bmbt_rec_some) = &bmbt_rec {
-            while bmbt_rec_idx < bmbt_rec_some.br_blockcount {
-                buf_reader
-                    .seek(SeekFrom::Start(
-                        (bmbt_rec_some.br_startblock + bmbt_rec_idx) * (self.block_size as u64),
-                    ))
-                    .unwrap();
+            buf_reader.seek(
+                SeekFrom::Start(bmbt_rec.br_startblock * block_size + ex_offset)
+            ).unwrap();
 
-                buf_reader.seek(SeekFrom::Current(offset as i64)).unwrap();
+            while buf_reader.stream_position().unwrap() <
+                (bmbt_rec.br_startblock + bmbt_rec.br_blockcount) * block_size
+            {
+                // Byte offset within this directory block
+                let dir_block_offset = offset % ((1 << sb.sb_dirblklog) * block_size);
+                // Offset of this directory block within its extent
+                let dboffset = offset - dir_block_offset;
 
-                while buf_reader.stream_position().unwrap()
-                    < ((bmbt_rec_some.br_startblock + bmbt_rec_idx + 1) * (self.block_size as u64))
-                {
-                    let freetag = buf_reader.read_u16::<BigEndian>().unwrap();
-                    buf_reader.seek(SeekFrom::Current(-2)).unwrap();
-
-                    if freetag == 0xffff {
-                        Dir2DataUnused::from(buf_reader.by_ref());
-                    } else if next {
-                        let entry = Dir2DataEntry::from(buf_reader.by_ref());
-
-                        let kind = get_file_type(FileKind::Type(entry.ftype))?;
-
-                        let name = entry.name;
-
-                        let tag = ((bmbt_rec_some.br_startoff + bmbt_rec_idx) << (64 - 48))
-                            | (entry.tag as u64);
-
-                        return Ok((entry.inumber, tag as i64, kind, name));
-                    } else {
-                        Dir2DataEntry::from(buf_reader.by_ref());
-
-                        next = true;
-                    }
+                // If this is the start of the directory block, skip it.
+                if dir_block_offset == 0 {
+                    buf_reader.seek(SeekFrom::Current(Dir3DataHdr::SIZE as i64))
+                        .unwrap();
+                    offset += Dir3DataHdr::SIZE;
                 }
 
-                bmbt_rec_idx += 1;
-
-                offset = mem::size_of::<Dir3DataHdr>() as u64;
+                // Skip the next directory entry
+                let freetag = buf_reader.read_u16::<BigEndian>().unwrap();
+                buf_reader.seek(SeekFrom::Current(-2)).unwrap();
+                if freetag == 0xffff {
+                    let unused = Dir2DataUnused::from(buf_reader.by_ref());
+                    offset += u64::from(unused.length);
+                } else if !next {
+                    let length = Dir2DataEntry::get_length(buf_reader.by_ref());
+                    buf_reader.seek(SeekFrom::Current(length)).unwrap();
+                    offset += length as u64;
+                    next = true;
+                } else {
+                    let entry = Dir2DataEntry::from(buf_reader.by_ref());
+                    let kind = get_file_type(FileKind::Type(entry.ftype))?;
+                    let name = entry.name;
+                    let entry_offset = dboffset + entry.tag as u64;
+                    return Ok((entry.inumber, entry_offset as i64, kind, name));
+                }
             }
-
-            bmbt_rec = self.map_dblock(bmbt_rec_some.br_startoff + bmbt_rec_idx);
-
-            bmbt_rec_idx = 0;
-
-            offset = mem::size_of::<Dir3DataHdr>() as u64;
         }
 
         Err(ENOENT)

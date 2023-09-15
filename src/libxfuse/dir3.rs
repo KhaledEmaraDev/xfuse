@@ -66,6 +66,8 @@ pub struct Dir3BlkHdr {
 }
 
 impl Dir3BlkHdr {
+    pub const SIZE: u64 = 48;
+
     pub fn from<T: BufRead>(buf_reader: &mut T) -> Dir3BlkHdr {
         let magic = buf_reader.read_u32::<BigEndian>().unwrap();
         let crc = buf_reader.read_u32::<BigEndian>().unwrap();
@@ -92,6 +94,8 @@ pub struct Dir2DataFree {
 }
 
 impl Dir2DataFree {
+    pub const SIZE: u64 = 4;
+
     pub fn from<T: BufRead>(buf_reader: &mut T) -> Dir2DataFree {
         let offset = buf_reader.read_u16::<BigEndian>().unwrap();
         let length = buf_reader.read_u16::<BigEndian>().unwrap();
@@ -108,6 +112,8 @@ pub struct Dir3DataHdr {
 }
 
 impl Dir3DataHdr {
+    pub const SIZE: u64 = Dir3BlkHdr::SIZE + XFS_DIR2_DATA_FD_COUNT as u64 * Dir2DataFree::SIZE + 4;
+
     pub fn from<T: BufRead>(buf_reader: &mut T) -> Dir3DataHdr {
         let hdr = Dir3BlkHdr::from(buf_reader.by_ref());
 
