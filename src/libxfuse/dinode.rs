@@ -27,6 +27,7 @@
  */
 use std::ffi::CString;
 use std::io::{BufRead, Seek, SeekFrom};
+use std::mem;
 
 use super::attr::Attr;
 use super::attr_bptree::AttrBtree;
@@ -149,6 +150,19 @@ impl Dinode {
                         keys.push(BmbtKey::from(buf_reader.by_ref()))
                     }
 
+                    // The XFS Algorithms and Data Structures document contains
+                    // an error here.  It says that the pointers start
+                    // immediately after the keys, and the size of each array is
+                    // given by bb_numrecs.  HOWEVER, there is actually a gap.
+                    // The space from the end of bmbt to the end of the inode is
+                    // divided by half.  Half for keys and half for pointers,
+                    // even if only one of each are allocated.  The remaining
+                    // space is padded with zeros.
+                    assert_eq!(di_core.di_forkoff, 0, "TODO");
+                    let maxrecs = (superblock.sb_inodesize as usize - (DinodeCore::SIZE + BmdrBlock::SIZE)) /
+                        (BmbtKey::SIZE + mem::size_of::<XfsBmbtPtr>());
+                    let gap = (maxrecs - bmbt.bb_numrecs as usize) as i64 * BmbtKey::SIZE as i64;
+                    buf_reader.seek(SeekFrom::Current(gap)).unwrap();
                     let mut pointers = Vec::<XfsBmbtPtr>::new();
                     for _i in 0..bmbt.bb_numrecs {
                         let pointer = buf_reader.read_u64::<BigEndian>().unwrap();
