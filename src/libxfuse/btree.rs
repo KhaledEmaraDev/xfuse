@@ -102,6 +102,8 @@ pub struct BmdrBlock {
 }
 
 impl BmdrBlock {
+    pub const SIZE: usize = 4;
+
     pub fn from<R: BufRead>(buf_reader: &mut R) -> BmdrBlock {
         let bb_level = buf_reader.read_u16::<BigEndian>().unwrap();
         let bb_numrecs = buf_reader.read_u16::<BigEndian>().unwrap();
@@ -119,6 +121,8 @@ pub struct BmbtKey {
 }
 
 impl BmbtKey {
+    pub const SIZE: usize = 8;
+
     pub fn from<R: BufRead>(buf_reader: &mut R) -> BmbtKey {
         let br_startoff = buf_reader.read_u64::<BigEndian>().unwrap();
 

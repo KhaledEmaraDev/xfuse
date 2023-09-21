@@ -108,6 +108,8 @@ pub struct DinodeCore {
 }
 
 impl DinodeCore {
+    pub const SIZE: usize = 0xb0;   // For inode version 3
+
     pub fn from<R: BufRead>(buf_reader: &mut R) -> DinodeCore {
         let di_magic = buf_reader.read_u16::<BigEndian>().unwrap();
         if di_magic != XFS_DINODE_MAGIC {

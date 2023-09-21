@@ -169,7 +169,7 @@ impl Drop for Harness {
 #[case::block("block")]
 #[case::leaf("leaf")]
 #[case::node("node")]
-#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/22" ]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/30" ]
 #[case::btree("btree")]
 fn all_dir_types(d: &str) {}
 
@@ -203,7 +203,7 @@ fn lookup(harness: Harness, #[case] d: &str) {
 #[case::block("block")]
 #[case::leaf("leaf")]
 #[case::node("node")]
-#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/22" ]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/30" ]
 #[case::btree("btree")]
 fn readdir(harness: Harness, #[case] d: &str) {
     require_fusefs!();
