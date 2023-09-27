@@ -2,8 +2,12 @@ use std::{
     ffi::OsStr,
     fmt,
     fs::metadata,
-    os::unix::fs::{DirEntryExt, MetadataExt},
-    path::PathBuf,
+    io,
+    os::unix::{
+        ffi::OsStrExt,
+        fs::{DirEntryExt, MetadataExt}
+    },
+    path::{Path, PathBuf},
     process::{Child, Command},
     time::{Duration, Instant},
     thread::sleep
@@ -101,6 +105,21 @@ macro_rules! require_fusefs {
     };
 }
 
+macro_rules! require_root {
+    () => {
+        if ! ::nix::unistd::Uid::current().is_root() {
+            use ::std::io::Write;
+
+            let stderr = ::std::io::stderr();
+            let mut handle = stderr.lock();
+            writeln!(handle, "{} requires root privileges.  Skipping test.",
+                concat!(::std::module_path!(), "::", function_name!()))
+                .unwrap();
+            return;
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct WaitForError;
 
@@ -126,6 +145,35 @@ where
             break (Err(WaitForError));
         }
         sleep(Duration::from_millis(50));
+    }
+}
+
+/// A file-backed md(4) device.
+pub struct Md(pub PathBuf);
+impl Md {
+    pub fn new(filename: &Path) -> io::Result<Self> {
+        let output = Command::new("mdconfig")
+            .args(["-a", "-t",  "vnode", "-f"])
+            .arg(filename)
+            .output()?;
+        // Strip the trailing "\n"
+        let l = output.stdout.len() - 1;
+        let mddev = OsStr::from_bytes(&output.stdout[0..l]);
+        let pb = Path::new("/dev").join(mddev);
+        Ok(Self(pb))
+    }
+
+    pub fn as_path(&self) -> &Path {
+        self.0.as_path()
+    }
+}
+impl Drop for Md {
+    fn drop(&mut self) {
+        Command::new("mdconfig")
+            .args(["-d", "-u"])
+            .arg(&self.0)
+            .output()
+            .expect("failed to deallocate md(4) device");
     }
 }
 
@@ -163,6 +211,43 @@ impl Drop for Harness {
     }
 }
 
+struct MdHarness {
+    _md: Md,
+    d: TempDir,
+    child: Child
+}
+
+#[fixture]
+fn mdharness() -> MdHarness {
+    let md = Md::new(GOLDEN.as_path()).unwrap();
+    let d = tempdir().unwrap();
+    let child = Command::cargo_bin("xfs-fuse").unwrap()
+        .arg(md.0.as_path())
+        .arg(d.path())
+        .spawn()
+        .unwrap();
+
+    waitfor(Duration::from_secs(5), || {
+        let s = statfs(d.path()).unwrap();
+        s.filesystem_type_name() == "fusefs.xfs"
+    }).unwrap();
+
+    MdHarness {
+        _md: md,
+        d,
+        child
+    }
+}
+
+impl Drop for MdHarness {
+    fn drop(&mut self) {
+        let _ = Command::new("umount")
+            .arg(self.d.path())
+            .output();
+        let _ = self.child.wait();
+    }
+}
+
 #[template]
 #[rstest]
 #[case::sf("sf")]
@@ -172,6 +257,26 @@ impl Drop for Harness {
 #[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/30" ]
 #[case::btree("btree")]
 fn all_dir_types(d: &str) {}
+
+/// Mount the image via md(4) and read all its metadata, to verify that we work
+/// with devices that require all accesses to be sector size aligned.
+// Regression test for https://github.com/KhaledEmaraDev/xfuse/issues/15
+#[rstest]
+#[named]
+fn dev() {
+    require_fusefs!();
+    require_root!();
+    let h = mdharness();
+
+    let walker = walkdir::WalkDir::new(h.d.path())
+        .into_iter()
+        // Ignore btree dirs, for now.
+        // https://github.com/KhaledEmaraDev/xfuse/issues/22
+        .filter_entry(|e| !e.file_name().to_str().unwrap().starts_with("btree"));
+    for entry in walker {
+        let _ = entry.unwrap().metadata().unwrap();
+    }
+}
 
 /// Mount and unmount the golden image
 #[rstest]
