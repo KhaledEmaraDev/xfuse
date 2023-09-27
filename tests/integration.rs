@@ -54,7 +54,7 @@ fn ents_per_dir(d: &str) -> usize {
     match d {
         "sf" => 2,
         "block" => 32,
-        "leaf" => 256,
+        "leaf" => 384,
         "node" => 1024,
         "btree" => 8192,
         _ => 0

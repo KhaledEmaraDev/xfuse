@@ -18,7 +18,7 @@ MNTDIR=`mktemp -d`
 mount -t xfs resources/xfs.img $MNTDIR
 mkfiles ${MNTDIR}/sf 2
 mkfiles ${MNTDIR}/block 32
-mkfiles ${MNTDIR}/leaf 256
+mkfiles ${MNTDIR}/leaf 384
 mkfiles ${MNTDIR}/node 1024
 mkfiles ${MNTDIR}/btree 8192
 umount ${MNTDIR}
