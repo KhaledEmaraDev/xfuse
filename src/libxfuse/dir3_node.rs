@@ -25,6 +25,7 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+use std::cell::RefCell;
 use std::convert::TryInto;
 use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, Seek, SeekFrom};
@@ -38,7 +39,7 @@ use super::definitions::*;
 use super::dinode::Dinode;
 use super::dir3::{Dir2DataEntry, Dir2DataUnused, Dir2LeafNDisk, Dir3, Dir3BlkHdr, Dir3DataHdr};
 use super::sb::Sb;
-use super::utils::{decode_from, get_file_type, FileKind};
+use super::utils::{decode, decode_from, get_file_type, FileKind};
 
 use byteorder::{BigEndian, ReadBytesExt};
 use fuser::{FileAttr, FileType};
@@ -100,11 +101,18 @@ impl Dir3Free {
 pub struct Dir2Node {
     pub bmx: Vec<BmbtRec>,
     pub block_size: u32,
+    /// An cache of the last extent and its starting block number read by lookup
+    /// or readdir.
+    block_cache: RefCell<Option<(u64, Vec<u8>)>>
 }
 
 impl Dir2Node {
     pub fn from(bmx: Vec<BmbtRec>, block_size: u32) -> Dir2Node {
-        Dir2Node { bmx, block_size }
+        Dir2Node {
+            bmx,
+            block_size,
+            block_cache: RefCell::new(None)
+        }
     }
 
     pub fn map_dblock(&self, dblock: XfsFileoff) -> Option<&BmbtRec> {
@@ -235,14 +243,22 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Node {
 
         while let Some(bmbt_rec) = self.map_dblock(offset / block_size) {
             // Byte offset within this extent
-            let ex_offset = offset - bmbt_rec.br_startoff * block_size;
+            let mut ex_offset = (offset - bmbt_rec.br_startoff * block_size) as usize;
+            let extent_size = (bmbt_rec.br_blockcount) as usize * block_size as usize;
 
-            buf_reader.seek(
-                SeekFrom::Start(bmbt_rec.br_startblock * block_size + ex_offset)
-            ).unwrap();
+            let mut cache_guard = self.block_cache.borrow_mut();
+            if cache_guard.is_none() || cache_guard.as_ref().unwrap().0 != bmbt_rec.br_startblock
+            {
+                let mut raw = vec![0u8; extent_size];
+                buf_reader
+                    .seek(SeekFrom::Start(bmbt_rec.br_startblock * block_size))
+                    .unwrap();
+                buf_reader.read_exact(&mut raw).unwrap();
+                *cache_guard = Some((bmbt_rec.br_startblock, raw));
+            }
+            let raw = &cache_guard.as_ref().unwrap().1;
 
-            while buf_reader.stream_position().unwrap() <
-                (bmbt_rec.br_startblock + bmbt_rec.br_blockcount) * block_size
+            while ex_offset < extent_size
             {
                 // Byte offset within this directory block
                 let dir_block_offset = offset % ((1 << sb.sb_dirblklog) * block_size);
@@ -251,24 +267,24 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Node {
 
                 // If this is the start of the directory block, skip it.
                 if dir_block_offset == 0 {
-                    buf_reader.seek(SeekFrom::Current(Dir3DataHdr::SIZE as i64))
-                        .unwrap();
+                    ex_offset += Dir3DataHdr::SIZE as usize;
                     offset += Dir3DataHdr::SIZE;
                 }
 
                 // Skip the next directory entry
-                let freetag = buf_reader.read_u16::<BigEndian>().unwrap();
-                buf_reader.seek(SeekFrom::Current(-2)).unwrap();
+                let freetag: u16 = decode(&raw[ex_offset..]).unwrap().0;
                 if freetag == 0xffff {
-                    let unused = Dir2DataUnused::from(buf_reader.by_ref());
-                    offset += u64::from(unused.length);
+                    let (_, l) = decode::<Dir2DataUnused>(&raw[ex_offset..])
+                        .unwrap();
+                    ex_offset += l;
+                    offset += l as u64;
                 } else if !next {
-                    let length = Dir2DataEntry::get_length_from_reader(buf_reader.by_ref());
-                    buf_reader.seek(SeekFrom::Current(length)).unwrap();
+                    let length = Dir2DataEntry::get_length(&raw[ex_offset..]);
+                    ex_offset += length as usize;
                     offset += length as u64;
                     next = true;
                 } else {
-                    let entry = Dir2DataEntry::from(buf_reader.by_ref());
+                    let entry: Dir2DataEntry = decode(&raw[ex_offset..]).unwrap().0;
                     let kind = get_file_type(FileKind::Type(entry.ftype))?;
                     let name = entry.name;
                     let entry_offset = dboffset + entry.tag as u64;
