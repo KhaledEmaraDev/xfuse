@@ -43,7 +43,7 @@ use super::utils::{decode, decode_from, get_file_type, FileKind};
 
 use byteorder::{BigEndian, ReadBytesExt};
 use fuser::{FileAttr, FileType};
-use libc::{c_int, ENOENT};
+use libc::{c_int, EIO, ENOENT};
 
 #[derive(Debug)]
 pub struct Dir3FreeHdr {
@@ -154,46 +154,52 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Node {
         let dblock = super_block.get_dir3_leaf_offset();
         let hash = hashname(name);
 
-        let bmbt_rec = self.map_dblock(dblock);
-        if let Some(bmbt_rec_some) = bmbt_rec {
+        let blk = {
+            // NB: reading and decoding the XfsDa3Intnode could be cached in
+            // Self.  but it won't be worthwhile unless we implement
+            // ReaddirPlus.
+            let bmbt_rec = if let Some(bmbt_rec_some) = self.map_dblock(dblock) {
+                buf_reader
+                    .seek(SeekFrom::Start(
+                        (bmbt_rec_some.br_startblock) * (self.block_size as u64),
+                    ))
+                    .unwrap();
+                bmbt_rec_some
+            } else {
+                return Err(ENOENT)
+            };
+
+            let extent_size = (bmbt_rec.br_blockcount) as usize * self.block_size as usize;
+            let mut raw = vec![0u8; extent_size];
             buf_reader
-                .seek(SeekFrom::Start(
-                    (bmbt_rec_some.br_startblock) * (self.block_size as u64),
-                ))
+                .seek(SeekFrom::Start(bmbt_rec.br_startblock * self.block_size as u64))
                 .unwrap();
-        } else {
-            return Err(ENOENT);
-        }
+            buf_reader.read_exact(&mut raw).unwrap();
 
-        buf_reader.seek(SeekFrom::Current(8)).unwrap();
-        let magic = buf_reader.read_u16::<BigEndian>();
-        buf_reader.seek(SeekFrom::Current(-10)).unwrap();
-
-        if magic.unwrap() == XFS_DA3_NODE_MAGIC {
-            let node = XfsDa3Intnode::from(buf_reader.by_ref(), super_block);
-            let blk = node.lookup(buf_reader.by_ref(), super_block, hash, |block, _| {
+            let (node, _) = decode::<XfsDa3Intnode>(&raw[..]).map_err(|_| EIO)?;
+            node.lookup(buf_reader.by_ref(), super_block, hash, |block, _| {
                 self.map_dblock_number(block.into())
-            });
+            })
+        };
 
-            let leaf_offset = blk * u64::from(super_block.sb_blocksize);
-
-            buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-        }
-
-        let leaf = Dir2LeafNDisk::from(buf_reader.by_ref(), super_block);
+        let leaf_offset = blk * u64::from(super_block.sb_blocksize);
+        buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
+        let leaf: Dir2LeafNDisk = decode_from(buf_reader.by_ref()).unwrap();
+        leaf.sanity(super_block);
 
         let address = leaf.get_address(hash)? * 8;
-        let idx = (address / super_block.sb_blocksize) as usize;
-        let address = address % super_block.sb_blocksize;
+        let idx = (address / super_block.sb_blocksize) as u64;
+        let address = (address % super_block.sb_blocksize) as usize;
 
-        let blk = self.map_dblock_number(idx as u64);
+        let bmbt_rec = self.map_dblock(idx).ok_or(EIO)?;
+        let blk = bmbt_rec.br_startblock + (idx - bmbt_rec.br_startoff);
         buf_reader
             .seek(SeekFrom::Start(blk * u64::from(super_block.sb_blocksize)))
             .unwrap();
+        let mut leafraw = vec![0u8; bmbt_rec.br_blockcount as usize * self.block_size as usize];
+        buf_reader.read_exact(&mut leafraw).unwrap();
 
-        buf_reader.seek(SeekFrom::Current(address as i64)).unwrap();
-
-        let entry = Dir2DataEntry::from(buf_reader.by_ref());
+        let entry: Dir2DataEntry = decode(&leafraw[address..]).unwrap().0;
 
         let dinode = Dinode::from(buf_reader.by_ref(), super_block, entry.inumber);
 

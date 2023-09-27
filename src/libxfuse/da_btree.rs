@@ -34,7 +34,13 @@ use std::{
 
 use super::{definitions::*, sb::Sb};
 
-use bincode::Decode;
+use bincode::{
+    Decode,
+    de::Decoder,
+    error::DecodeError,
+    impl_borrow_decode,
+};
+
 use byteorder::{BigEndian, ReadBytesExt};
 use super::utils::Uuid;
 
@@ -125,7 +131,7 @@ impl XfsDa3Blkinfo {
     }
 }
 
-#[derive(Debug, Decode)]
+#[derive(Debug)]
 pub struct XfsDa3NodeHdr {
     pub info: XfsDa3Blkinfo,
     pub count: u16,
@@ -149,7 +155,26 @@ impl XfsDa3NodeHdr {
     }
 }
 
-#[derive(Debug)]
+impl Decode for XfsDa3NodeHdr {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let info: XfsDa3Blkinfo = Decode::decode(decoder)?;
+        if info.magic != XFS_DA3_NODE_MAGIC {
+            return Err(DecodeError::Other("bad magic"));
+        }
+        let count = Decode::decode(decoder)?;
+        let level = Decode::decode(decoder)?;
+        let pad32 = Decode::decode(decoder)?;
+        Ok(XfsDa3NodeHdr {
+            info,
+            count,
+            level,
+            pad32
+        })
+    }
+}
+impl_borrow_decode!(XfsDa3NodeHdr);
+
+#[derive(Debug, Decode)]
 pub struct XfsDa3NodeEntry {
     pub hashval: XfsDahash,
     pub before: XfsDablk,
@@ -257,5 +282,20 @@ impl XfsDa3Intnode {
             let node = XfsDa3Intnode::from(buf_reader.by_ref(), super_block);
             node.first_block(buf_reader.by_ref(), super_block, map_da_block_to_fs_block)
         }
+    }
+}
+
+impl Decode for XfsDa3Intnode {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let hdr: XfsDa3NodeHdr = Decode::decode(decoder)?;
+        let mut btree = Vec::<XfsDa3NodeEntry>::new();
+        for _i in 0..hdr.count {
+            btree.push(Decode::decode(decoder)?);
+        }
+
+        Ok(XfsDa3Intnode {
+            hdr,
+            btree
+        })
     }
 }

@@ -355,6 +355,23 @@ impl Dir2LeafNDisk {
 
         Err(ENOENT)
     }
+
+    pub fn sanity(&self, super_block: &Sb) {
+        self.hdr.sanity(super_block);
+    }
+}
+
+impl Decode for Dir2LeafNDisk {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let hdr: Dir3LeafHdr = Decode::decode(decoder)?;
+        let mut ents = Vec::<Dir2LeafEntry>::new();
+        for _i in 0..hdr.count {
+            let leaf_entry: Dir2LeafEntry = Decode::decode(decoder)?;
+            ents.push(leaf_entry);
+        }
+
+        Ok(Dir2LeafNDisk { hdr, ents })
+    }
 }
 
 #[derive(Debug)]
