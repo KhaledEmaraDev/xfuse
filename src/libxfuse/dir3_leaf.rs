@@ -90,17 +90,25 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Leaf {
 
         let address = self.leaf.get_address(hash)? * 8;
         let idx = (address / self.entry_size) as usize;
-        let address = address % self.entry_size;
+        let address = (address % self.entry_size) as usize;
 
         if idx >= self.entries.len() {
             return Err(ENOENT);
         }
         let entry: &Dir2Data = &self.entries[idx];
 
-        buf_reader
-            .seek(SeekFrom::Start(entry.offset + (address as u64)))
-            .unwrap();
-        let entry = Dir2DataEntry::from(buf_reader.by_ref());
+        let mut cache_guard = self.block_cache.borrow_mut();
+        if cache_guard.is_none() || cache_guard.as_ref().unwrap().0 != idx {
+            let mut raw = vec![0u8; self.entry_size as usize];
+            buf_reader
+                .seek(SeekFrom::Start(entry.offset))
+                .unwrap();
+            buf_reader.read_exact(&mut raw).unwrap();
+            *cache_guard = Some((idx, raw));
+        }
+        let raw = &cache_guard.as_ref().unwrap().1;
+
+        let entry: Dir2DataEntry = decode(&raw[address..]).unwrap().0;
 
         let dinode = Dinode::from(buf_reader.by_ref(), super_block, entry.inumber);
 
