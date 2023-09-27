@@ -50,6 +50,10 @@ use super::sb::Sb;
 use super::utils::decode_from;
 use super::symlink_extent::SymlinkExtents;
 
+use bincode::{
+    Decode,
+    de::{Decoder, read::Reader}
+};
 use byteorder::BigEndian;
 use byteorder::ReadBytesExt;
 use libc::{mode_t, S_IFDIR, S_IFLNK, S_IFMT, S_IFREG};
@@ -145,11 +149,19 @@ impl Dinode {
                     di_u = Some(DiU::Bmx(bmx));
                 }
                 XfsDinodeFmt::Btree => {
-                    let bmbt = BmdrBlock::from(buf_reader.by_ref());
+                    let mut raw = vec![0u8; superblock.sb_sectsize.into()];
+                    buf_reader.read_exact(&mut raw).unwrap();
+                    let config = bincode::config::standard()
+                        .with_big_endian()
+                        .with_fixed_int_encoding();
+                    let reader = bincode::de::read::SliceReader::new(&raw[..]);
+                    let mut decoder = bincode::de::DecoderImpl::new(reader, config);
+
+                    let bmbt = BmdrBlock::decode(&mut decoder).unwrap();
 
                     let mut keys = Vec::<BmbtKey>::new();
                     for _i in 0..bmbt.bb_numrecs {
-                        keys.push(BmbtKey::from(buf_reader.by_ref()))
+                        keys.push(BmbtKey::decode(&mut decoder).unwrap());
                     }
 
                     // The XFS Algorithms and Data Structures document contains
@@ -164,10 +176,10 @@ impl Dinode {
                     let maxrecs = (superblock.sb_inodesize as usize - (DinodeCore::SIZE + BmdrBlock::SIZE)) /
                         (BmbtKey::SIZE + mem::size_of::<XfsBmbtPtr>());
                     let gap = (maxrecs - bmbt.bb_numrecs as usize) as i64 * BmbtKey::SIZE as i64;
-                    buf_reader.seek(SeekFrom::Current(gap)).unwrap();
+                    decoder.reader().consume(gap as usize);
                     let mut pointers = Vec::<XfsBmbtPtr>::new();
                     for _i in 0..bmbt.bb_numrecs {
-                        let pointer = buf_reader.read_u64::<BigEndian>().unwrap();
+                        let pointer = u64::decode(&mut decoder).unwrap();
                         pointers.push(pointer)
                     }
 

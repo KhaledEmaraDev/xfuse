@@ -31,6 +31,7 @@ use std::{
     mem,
 };
 
+use bincode::Decode;
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use num_traits::{PrimInt, Unsigned};
 use super::utils::Uuid;
@@ -95,7 +96,7 @@ impl<T: PrimInt + Unsigned> BtreeBlock<T> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Decode)]
 pub struct BmdrBlock {
     pub bb_level: u16,
     pub bb_numrecs: u16,
@@ -115,7 +116,7 @@ impl BmdrBlock {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Decode)]
 pub struct BmbtKey {
     pub br_startoff: XfsFileoff,
 }
