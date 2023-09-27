@@ -140,26 +140,27 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Leaf {
         offset: i64,
     ) -> Result<(XfsIno, i64, FileType, OsString), c_int> {
         let offset = offset as u64;
-        let mut idx: usize = (offset >> (64 - 8)) as usize; // In V5 Inodes can contain up to 21 Extents
-        let offset = offset & ((1 << (64 - 8)) - 1);
-
-        let mut next = offset == 0;
-        let offset = if offset == 0 {
-            mem::size_of::<Dir3DataHdr>() as u64
-        } else {
-            offset
-        };
-
+        // In V5 Inodes can contain up to 21 Extents
+        let mut idx: usize = (offset >> (64 - 8)) as usize;
         if idx >= self.entries.len() {
             return Err(ENOENT);
         }
         let mut entry: &Dir2Data = &self.entries[idx];
 
-        buf_reader
-            .seek(SeekFrom::Start(entry.offset + offset))
-            .unwrap();
+        let mut offset = offset & ((1 << (64 - 8)) - 1);
 
+        let mut next = offset == 0;
         loop {
+            offset = if offset == 0 {
+                mem::size_of::<Dir3DataHdr>() as u64
+            } else {
+                offset
+            };
+
+            buf_reader
+                .seek(SeekFrom::Start(entry.offset + offset))
+                .unwrap();
+
             while buf_reader.stream_position().unwrap() < (entry.offset + (self.entry_size as u64))
             {
                 let freetag = buf_reader.read_u16::<BigEndian>().unwrap();
@@ -191,11 +192,7 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Leaf {
             }
             entry = &self.entries[idx];
 
-            buf_reader
-                .seek(SeekFrom::Start(
-                    entry.offset + (mem::size_of::<Dir3DataHdr>() as u64),
-                ))
-                .unwrap();
+            offset = 0;
         }
 
         Err(ENOENT)
