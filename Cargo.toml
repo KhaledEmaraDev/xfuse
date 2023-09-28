@@ -5,6 +5,8 @@ version = "0.1.0"
 edition = "2018"
 authors = ["Khaled Emara <mail@khaledemara.dev>"]
 repository = "https://github.com/KhaledEmaraDev/xfuse"
+license = "BSD-2-Clause"
+license-file = "LICENSE.md"
 categories = ["filesystem"]
 exclude = [
   "/.gitignore",
