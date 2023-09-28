@@ -66,6 +66,13 @@ pub const XFS_SB_VERSION2_PROJID32BIT: u32 = 0x00000080;
 pub const XFS_SB_VERSION2_CRCBIT: u32 = 0x00000100;
 pub const XFS_SB_VERSION2_FTYPE: u32 = 0x00000200;
 
+pub const XFS_SB_FEAT_INCOMPAT_FTYPE: u32 = 0x00000001;
+pub const XFS_SB_FEAT_INCOMPAT_SPINODES: u32 = 0x00000002;
+pub const XFS_SB_FEAT_INCOMPAT_META_UUID: u32 = 0x00000004;
+pub const XFS_SB_FEAT_INCOMPAT_BIGTIME: u32 = 0x00000008;
+pub const XFS_SB_FEAT_INCOMPAT_NEEDSREPAIR: u32 = 0x00000010;
+pub const XFS_SB_FEAT_INCOMPAT_NREXT64: u32 = 0x00000020;
+
 #[derive(Debug)]
 pub struct Sb {
     pub sb_magicnum: u32,
@@ -114,6 +121,10 @@ pub struct Sb {
     pub sb_logsunit: u32,
     pub sb_features2: u32,
     pub sb_bad_features2: u32,
+    pub sb_features_compat: u32,
+    pub sb_features_ro_compat: u32,
+    pub sb_features_incompat: u32,
+    pub sb_features_log_incompat: u32,
 }
 
 impl Sb {
@@ -172,6 +183,16 @@ impl Sb {
         let sb_logsunit = buf_reader.read_u32::<BigEndian>().unwrap();
         let sb_features2 = buf_reader.read_u32::<BigEndian>().unwrap();
         let sb_bad_features2 = buf_reader.read_u32::<BigEndian>().unwrap();
+
+        /* Version 5 superblock features */
+        let sb_features_compat = buf_reader.read_u32::<BigEndian>().unwrap();
+        let sb_features_ro_compat = buf_reader.read_u32::<BigEndian>().unwrap();
+        let sb_features_incompat = buf_reader.read_u32::<BigEndian>().unwrap();
+        let sb_features_log_incompat = buf_reader.read_u32::<BigEndian>().unwrap();
+
+        if sb_versionnum & 0xf != 5 {
+            panic!("XFS filesystem versions older than 5 are not supported");
+        }
 
         buf_reader.seek(SeekFrom::Start(0)).unwrap();
 
@@ -244,6 +265,10 @@ impl Sb {
             sb_logsunit,
             sb_features2,
             sb_bad_features2,
+            sb_features_compat,
+            sb_features_ro_compat,
+            sb_features_incompat,
+            sb_features_log_incompat,
         }
     }
 
