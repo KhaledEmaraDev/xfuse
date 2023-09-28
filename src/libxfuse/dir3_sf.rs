@@ -133,7 +133,7 @@ impl Dir2Sf {
     }
 }
 
-impl<R: BufRead + Seek> Dir3<R> for Dir2Sf {
+impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Sf {
     fn lookup(
         &self,
         buf_reader: &mut R,

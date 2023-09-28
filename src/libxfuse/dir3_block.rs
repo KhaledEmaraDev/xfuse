@@ -39,27 +39,23 @@ use super::dir3::{
     Dir2DataEntry, Dir2DataUnused, Dir2LeafEntry, Dir3, Dir3DataHdr, XfsDir2Dataptr,
 };
 use super::sb::Sb;
-use super::utils::{get_file_type, FileKind};
+use super::utils::{decode, get_file_type, FileKind};
 
-use byteorder::{BigEndian, ReadBytesExt};
+use bincode::Decode;
 use fuser::{FileAttr, FileType};
 use libc::{c_int, ENOENT};
 
 pub const XFS_DIR2_DATA_FD_COUNT: usize = 3;
 
-#[derive(Debug)]
+#[derive(Debug, Decode)]
 pub struct Dir2BlockTail {
     pub count: u32,
     pub stale: u32,
 }
 
 impl Dir2BlockTail {
-    pub fn from<T: BufRead>(buf_reader: &mut T) -> Dir2BlockTail {
-        let count = buf_reader.read_u32::<BigEndian>().unwrap();
-        let stale = buf_reader.read_u32::<BigEndian>().unwrap();
-
-        Dir2BlockTail { count, stale }
-    }
+    /// On-disk size in bytes
+    pub const SIZE: usize = 8;
 }
 
 #[derive(Debug)]
@@ -68,39 +64,34 @@ pub struct Dir2BlockDisk {
     // pub u: Vec<Dir2DataUnion>,
     pub leaf: Vec<Dir2LeafEntry>,
     pub tail: Dir2BlockTail,
+    raw: Vec<u8>,
 }
 
 impl Dir2BlockDisk {
     pub fn from<T: BufRead + Seek>(buf_reader: &mut T, offset: u64, size: u32) -> Dir2BlockDisk {
         buf_reader.seek(SeekFrom::Start(offset)).unwrap();
+        let mut raw = vec![0u8; size as usize];
+        buf_reader.read_exact(&mut raw).unwrap();
 
-        let hdr = Dir3DataHdr::from(buf_reader.by_ref());
+        let hdr: Dir3DataHdr = decode(&raw[..]).unwrap().0;
 
-        buf_reader
-            .seek(SeekFrom::Start(
-                offset + (size as u64) - (mem::size_of::<Dir2BlockTail>() as u64),
-            ))
-            .unwrap();
+        let tail_offset = (size as usize) - Dir2BlockTail::SIZE;
+        let tail: Dir2BlockTail = decode(&raw[tail_offset..]).unwrap().0;
 
-        let tail = Dir2BlockTail::from(buf_reader.by_ref());
+        let mut leaf_offset = tail_offset - Dir2LeafEntry::SIZE * tail.count as usize;
 
-        let data_end = offset + (size as u64)
-            - (mem::size_of::<Dir2BlockTail>() as u64)
-            - ((mem::size_of::<Dir2LeafEntry>() as u64) * (tail.count as u64));
-
-        buf_reader.seek(SeekFrom::Start(data_end)).unwrap();
-
-        let mut leaf = Vec::<Dir2LeafEntry>::new();
+        let mut leaf = Vec::with_capacity(tail.count as usize);
         for _i in 0..tail.count {
-            let leaf_entry = Dir2LeafEntry::from(buf_reader.by_ref());
-            leaf.push(leaf_entry);
+            leaf.push(decode(&raw[leaf_offset..]).unwrap().0);
+            leaf_offset += Dir2LeafEntry::SIZE;
         }
 
-        Dir2BlockDisk { hdr, leaf, tail }
+        Dir2BlockDisk { hdr, leaf, tail, raw }
     }
 
-    pub fn get_data_end(&self, offset: u64, directory_block_size: u32) -> u64 {
-        offset + (directory_block_size as u64)
+    /// get the length of the raw data region
+    pub fn get_data_len(&self, directory_block_size: u32) -> u64 {
+        (directory_block_size as u64)
             - (mem::size_of::<Dir2BlockTail>() as u64)
             - ((mem::size_of::<Dir2LeafEntry>() as u64) * (self.tail.count as u64))
     }
@@ -109,8 +100,8 @@ impl Dir2BlockDisk {
 #[derive(Debug)]
 pub struct Dir2Block {
     pub offset: u64,
-    pub data_end: u64,
     pub hashes: HashMap<XfsDahash, XfsDir2Dataptr>,
+    raw: Box<[u8]>,
 }
 
 impl Dir2Block {
@@ -124,7 +115,10 @@ impl Dir2Block {
 
         let dir_disk = Dir2BlockDisk::from(buf_reader.by_ref(), offset, dir_blk_size);
 
-        let data_end = dir_disk.get_data_end(offset, dir_blk_size);
+        let data_len = dir_disk.get_data_len(dir_blk_size);
+        assert!(data_len as usize <= dir_disk.raw.len());
+        let mut raw = dir_disk.raw;
+        raw.truncate(data_len as usize);
 
         let mut hashes = HashMap::new();
         for leaf_entry in dir_disk.leaf {
@@ -133,13 +127,13 @@ impl Dir2Block {
 
         Dir2Block {
             offset,
-            data_end,
             hashes,
+            raw: raw.into()
         }
     }
 }
 
-impl<R: BufRead + Seek> Dir3<R> for Dir2Block {
+impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Block {
     fn lookup(
         &self,
         buf_reader: &mut R,
@@ -148,12 +142,9 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Block {
     ) -> Result<(FileAttr, u64), c_int> {
         let hash = hashname(name);
         if let Some(address) = self.hashes.get(&hash) {
-            let address = (*address as u64) * 8;
+            let address = (*address as usize) * 8;
 
-            buf_reader
-                .seek(SeekFrom::Start(self.offset + address))
-                .unwrap();
-            let entry = Dir2DataEntry::from(buf_reader.by_ref());
+            let entry: Dir2DataEntry = decode(&self.raw[address..]).unwrap().0;
 
             let dinode = Dinode::from(buf_reader.by_ref(), super_block, entry.inumber);
 
@@ -194,28 +185,26 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Block {
 
     fn next(
         &self,
-        buf_reader: &mut R,
+        _buf_reader: &mut R,
         _super_block: &Sb,
         offset: i64,
     ) -> Result<(XfsIno, i64, FileType, OsString), c_int> {
         let mut next = offset == 0;
-        let offset = if offset == 0 {
-            mem::size_of::<Dir3DataHdr>() as i64
+        let mut offset = if offset == 0 {
+            mem::size_of::<Dir3DataHdr>()
         } else {
-            offset
+            offset as usize
         };
-        buf_reader
-            .seek(SeekFrom::Start(self.offset + (offset as u64)))
-            .unwrap();
 
-        while buf_reader.stream_position().unwrap() < self.data_end {
-            let freetag = buf_reader.read_u16::<BigEndian>().unwrap();
-            buf_reader.seek(SeekFrom::Current(-2)).unwrap();
+        while offset < self.raw.len() {
+            let freetag: u16 = decode(&self.raw[offset..]).unwrap().0;
 
             if freetag == 0xffff {
-                Dir2DataUnused::from(buf_reader.by_ref());
+                let (_, length) = decode::<Dir2DataUnused>(&self.raw[offset..])
+                    .unwrap();
+                offset += length;
             } else if next {
-                let entry = Dir2DataEntry::from(buf_reader.by_ref());
+                let entry: Dir2DataEntry = decode(&self.raw[offset..]).unwrap().0;
 
                 let kind = get_file_type(FileKind::Type(entry.ftype))?;
 
@@ -223,8 +212,8 @@ impl<R: BufRead + Seek> Dir3<R> for Dir2Block {
 
                 return Ok((entry.inumber, entry.tag.into(), kind, name));
             } else {
-                let length = Dir2DataEntry::get_length(buf_reader.by_ref());
-                buf_reader.seek(SeekFrom::Current(length)).unwrap();
+                let length = Dir2DataEntry::get_length(&self.raw[offset..]);
+                offset += length as usize;
 
                 next = true;
             }
