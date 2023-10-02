@@ -1,7 +1,7 @@
 use std::{
     ffi::OsStr,
     fmt,
-    fs::metadata,
+    fs,
     io,
     os::unix::{
         ffi::OsStrExt,
@@ -35,8 +35,8 @@ lazy_static! {
         // Note: we can't accurately compare the two timestamps with less than 1
         // second granularity due to a zstd bug.
         // https://github.com/facebook/zstd/issues/3748
-        let zmtime = metadata(&zimg).unwrap().modified().unwrap();
-        let mtime = metadata(&img);
+        let zmtime = fs::metadata(&zimg).unwrap().modified().unwrap();
+        let mtime = fs::metadata(&img);
         if mtime.is_err() || (mtime.unwrap().modified().unwrap() +
                               Duration::from_secs(1)) < zmtime
         {
@@ -299,6 +299,23 @@ fn lookup(harness: Harness, #[case] d: &str) {
         access(p.as_path(), amode)
             .unwrap_or_else(|_| panic!("Lookup failed: {}", p.display()));
     }
+}
+
+/// Lookup a directory's "." and ".." entries.  Verify their inode numbers
+#[named]
+#[apply(all_dir_types)]
+fn lookup_dots(harness: Harness, #[case] d: &str) {
+    require_fusefs!();
+
+    let root_md = fs::metadata(harness.d.path()).unwrap();
+    let dir_md = fs::metadata(harness.d.path().join(d)).unwrap();
+    let dotpath = harness.d.path().join(format!("{d}/."));
+    let dot_md = fs::metadata(dotpath).unwrap();
+    assert_eq!(dir_md.ino(), dot_md.ino());
+
+    let dotdotpath = harness.d.path().join(format!("{d}/.."));
+    let dotdot_md = fs::metadata(dotdotpath).unwrap();
+    assert_eq!(root_md.ino(), dotdot_md.ino());
 }
 
 /// List a directory's contents with readdir
