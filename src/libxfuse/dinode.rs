@@ -117,16 +117,16 @@ impl Dinode {
                     di_u = Some(DiU::Bmx(bmx));
                 }
                 XfsDinodeFmt::Btree => {
-                    let bmbt = BmdrBlock::from(buf_reader.by_ref());
+                    let bmbt: BmdrBlock = decode_from(buf_reader.by_ref()).unwrap();
 
                     let mut keys = Vec::<BmbtKey>::new();
                     for _i in 0..bmbt.bb_numrecs {
-                        keys.push(BmbtKey::from(buf_reader.by_ref()))
+                        keys.push(decode_from(buf_reader.by_ref()).unwrap())
                     }
 
                     let mut pointers = Vec::<XfsBmbtPtr>::new();
                     for _i in 0..bmbt.bb_numrecs {
-                        let pointer = buf_reader.read_u64::<BigEndian>().unwrap();
+                        let pointer = decode_from(buf_reader.by_ref()).unwrap();
                         pointers.push(pointer)
                     }
 
@@ -193,8 +193,7 @@ impl Dinode {
                 XfsDinodeFmt::Local => {
                     let mut data = Vec::<u8>::with_capacity(di_core.di_size as usize);
                     for _i in 0..di_core.di_size {
-                        let byte = buf_reader.read_u8().unwrap();
-                        data.push(byte)
+                        data.push(decode_from(buf_reader.by_ref()).unwrap());
                     }
                     di_u = Some(DiU::Symlink(data))
                 }
@@ -234,17 +233,16 @@ impl Dinode {
                     di_a = Some(DiA::Abmx(bmx));
                 }
                 XfsDinodeFmt::Btree => {
-                    let bmbt = BmdrBlock::from(buf_reader.by_ref());
+                    let bmbt: BmdrBlock = decode_from(buf_reader.by_ref()).unwrap();
 
                     let mut keys = Vec::<BmbtKey>::new();
                     for _i in 0..bmbt.bb_numrecs {
-                        keys.push(BmbtKey::from(buf_reader.by_ref()))
+                        keys.push(decode_from(buf_reader.by_ref()).unwrap());
                     }
 
                     let mut pointers = Vec::<XfsBmbtPtr>::new();
                     for _i in 0..bmbt.bb_numrecs {
-                        let pointer = buf_reader.read_u64::<BigEndian>().unwrap();
-                        pointers.push(pointer)
+                        pointers.push(decode_from(buf_reader.by_ref()).unwrap());
                     }
 
                     di_a = Some(DiA::Abmbt((bmbt, keys, pointers)));
