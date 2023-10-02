@@ -352,15 +352,10 @@ fn readdir(harness: Harness, #[case] d: &str) {
 // unconditionally hides the hidden entries.
 #[named]
 #[rstest]
-#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/39" ]
 #[case::sf("sf")]
-#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/39" ]
 #[case::block("block")]
-#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/39" ]
 #[case::leaf("leaf")]
-#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/39" ]
 #[case::node("node")]
-#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/39" ]
 #[case::btree("btree")]
 fn readdir_dots(harness: Harness, #[case] d: &str) {
     use nix::{dir::Dir, fcntl::OFlag, sys::stat::Mode};
