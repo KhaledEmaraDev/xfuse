@@ -138,7 +138,8 @@ impl Dinode {
             },
             S_IFDIR => match di_core.di_format {
                 XfsDinodeFmt::Local => {
-                    let dir_sf = Dir2Sf::from(buf_reader.by_ref(), inode_number);
+                    let mut dir_sf = Dir2Sf::from(buf_reader.by_ref());
+                    dir_sf.set_ino(inode_number);
                     di_u = Some(DiU::Dir2Sf(dir_sf));
                 }
                 XfsDinodeFmt::Extents => {
