@@ -190,10 +190,6 @@ impl Sb {
         let sb_features_incompat = buf_reader.read_u32::<BigEndian>().unwrap();
         let sb_features_log_incompat = buf_reader.read_u32::<BigEndian>().unwrap();
 
-        if sb_versionnum & 0xf != 5 {
-            panic!("XFS filesystem versions older than 5 are not supported");
-        }
-
         buf_reader.seek(SeekFrom::Start(0)).unwrap();
 
         const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
