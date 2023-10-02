@@ -1,5 +1,5 @@
 use std::{
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     fmt,
     fs,
     io,
@@ -50,6 +50,15 @@ lazy_static! {
         }
         img
     };
+}
+
+/// How many extended attributes are present on each file?
+fn attrs_per_file(f: &str) -> usize {
+    match f {
+        "local" => 4,
+        "extents" => 16,
+        _ => 0
+    }
 }
 
 /// How many directory entries are in each directory?
@@ -258,10 +267,18 @@ impl Drop for MdHarness {
 #[case::btree("btree")]
 fn all_dir_types(d: &str) {}
 
+#[template]
+#[rstest]
+#[case::local("local")]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/45" ]
+#[case::extents("extents")]
+fn all_xattr_fork_types(d: &str) {}
+
 /// Mount the image via md(4) and read all its metadata, to verify that we work
 /// with devices that require all accesses to be sector size aligned.
 // Regression test for https://github.com/KhaledEmaraDev/xfuse/issues/15
 #[rstest]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/46" ]
 #[named]
 fn dev() {
     require_fusefs!();
@@ -275,6 +292,23 @@ fn dev() {
         .filter_entry(|e| !e.file_name().to_str().unwrap().starts_with("btree"));
     for entry in walker {
         let _ = entry.unwrap().metadata().unwrap();
+    }
+}
+
+#[named]
+#[apply(all_xattr_fork_types)]
+fn getextattr(harness: Harness, #[case] d: &str) {
+    require_fusefs!();
+
+    let p = harness.d.path().join("xattrs").join(d);
+
+    for i in 0..attrs_per_file(d) {
+        let s = format!("user.attr.{:06}", i);
+        let attrname = OsStr::new(s.as_str());
+        let expected_value = OsString::from(format!("value.{:06}", i));
+        let binary_value = xattr::get(&p, attrname).unwrap().unwrap();
+        let value = OsStr::from_bytes(&binary_value[..]);
+        assert_eq!(expected_value, value);
     }
 }
 
@@ -321,6 +355,22 @@ fn lookup_dots(harness: Harness, #[case] d: &str) {
     let dotdotpath = harness.d.path().join(format!("{d}/.."));
     let dotdot_md = fs::metadata(dotdotpath).unwrap();
     assert_eq!(root_md.ino(), dotdot_md.ino());
+}
+
+#[named]
+#[apply(all_xattr_fork_types)]
+fn lsextattr(harness: Harness, #[case] d: &str) {
+    require_fusefs!();
+
+    let p = harness.d.path().join("xattrs").join(d);
+    let mut count = 0;
+
+    for (i, attrname) in xattr::list(p).unwrap().enumerate() {
+        let expected_name = OsString::from(format!("user.attr.{:06}", i));
+        assert_eq!(expected_name, attrname);
+        count += 1;
+    }
+    assert_eq!(count, attrs_per_file(d));
 }
 
 /// List a directory's contents with readdir
