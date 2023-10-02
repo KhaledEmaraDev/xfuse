@@ -1,7 +1,7 @@
 use std::{
     ffi::OsStr,
     fmt,
-    fs::metadata,
+    fs,
     io,
     os::unix::{
         ffi::OsStrExt,
@@ -35,8 +35,8 @@ lazy_static! {
         // Note: we can't accurately compare the two timestamps with less than 1
         // second granularity due to a zstd bug.
         // https://github.com/facebook/zstd/issues/3748
-        let zmtime = metadata(&zimg).unwrap().modified().unwrap();
-        let mtime = metadata(&img);
+        let zmtime = fs::metadata(&zimg).unwrap().modified().unwrap();
+        let mtime = fs::metadata(&img);
         if mtime.is_err() || (mtime.unwrap().modified().unwrap() +
                               Duration::from_secs(1)) < zmtime
         {
@@ -301,6 +301,23 @@ fn lookup(harness: Harness, #[case] d: &str) {
     }
 }
 
+/// Lookup a directory's "." and ".." entries.  Verify their inode numbers
+#[named]
+#[apply(all_dir_types)]
+fn lookup_dots(harness: Harness, #[case] d: &str) {
+    require_fusefs!();
+
+    let root_md = fs::metadata(harness.d.path()).unwrap();
+    let dir_md = fs::metadata(harness.d.path().join(d)).unwrap();
+    let dotpath = harness.d.path().join(format!("{d}/."));
+    let dot_md = fs::metadata(dotpath).unwrap();
+    assert_eq!(dir_md.ino(), dot_md.ino());
+
+    let dotdotpath = harness.d.path().join(format!("{d}/.."));
+    let dotdot_md = fs::metadata(dotdotpath).unwrap();
+    assert_eq!(root_md.ino(), dotdot_md.ino());
+}
+
 /// List a directory's contents with readdir
 #[named]
 #[rstest]
@@ -328,4 +345,41 @@ fn readdir(harness: Harness, #[case] d: &str) {
         count += 1;
     }
     assert_eq!(count, ents_per_dir(d));
+}
+
+/// List a directory's hidden contents with readdir
+// Use Nix::dir::Dir instead of std::fs::read_dir, because the latter
+// unconditionally hides the hidden entries.
+#[named]
+#[rstest]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/38" ]
+#[case::sf("sf")]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/39" ]
+#[case::block("block")]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/39" ]
+#[case::leaf("leaf")]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/39" ]
+#[case::node("node")]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/39" ]
+#[case::btree("btree")]
+fn readdir_dots(harness: Harness, #[case] d: &str) {
+    use nix::{dir::Dir, fcntl::OFlag, sys::stat::Mode};
+    require_fusefs!();
+
+    let root_md = fs::metadata(harness.d.path()).unwrap();
+    let dir_md = fs::metadata(harness.d.path().join(d)).unwrap();
+
+    let dpath = harness.d.path().join(d);
+    let mut dir = Dir::open(&dpath, OFlag::O_RDONLY, Mode::S_IRUSR).unwrap();
+    let mut ents = dir.iter();
+
+    // The first entry should be "."
+    let dot = ents.next().unwrap().unwrap();
+    assert_eq!(".", dot.file_name().to_str().unwrap());
+    assert_eq!(dir_md.ino(), dot.ino());
+
+    // Next should be ".."
+    let dotdot = ents.next().unwrap().unwrap();
+    assert_eq!("..", dotdot.file_name().to_str().unwrap());
+    assert_eq!(root_md.ino(), dotdot.ino());
 }
