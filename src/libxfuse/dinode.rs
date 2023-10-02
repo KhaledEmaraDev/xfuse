@@ -88,21 +88,21 @@ impl Dinode {
         superblock: &Sb,
         inode_number: XfsIno,
     ) -> Dinode {
-        let ag_no: XfsAgnumber =
-            (inode_number >> (superblock.sb_agblklog + superblock.sb_inopblog)) as u32;
-        if ag_no >= superblock.sb_agcount {
+        let ag_no: u64 =
+            inode_number >> (superblock.sb_agblklog + superblock.sb_inopblog);
+        if ag_no >= superblock.sb_agcount.into() {
             panic!("Wrong AG number!");
         }
 
-        let ag_blk: XfsAgblock =
-            ((inode_number >> superblock.sb_inopblog) & ((1 << superblock.sb_agblklog) - 1)) as u32;
-        let blk_ino = (inode_number & ((1 << superblock.sb_inopblog) - 1)) as u32;
+        let ag_blk: u64 =
+            (inode_number >> superblock.sb_inopblog) & ((1 << superblock.sb_agblklog) - 1);
+        let blk_ino = inode_number & ((1 << superblock.sb_inopblog) - 1);
 
-        let off = ag_no * superblock.sb_agblocks * superblock.sb_blocksize;
-        let off = off + ag_blk * superblock.sb_blocksize;
-        let off = off + blk_ino * (superblock.sb_inodesize as u32);
+        let off = ag_no * u64::from(superblock.sb_agblocks) * u64::from(superblock.sb_blocksize)
+            + ag_blk * u64::from(superblock.sb_blocksize)
+            + blk_ino * u64::from(superblock.sb_inodesize);
 
-        buf_reader.seek(SeekFrom::Start(off as u64)).unwrap();
+        buf_reader.seek(SeekFrom::Start(off)).unwrap();
         let di_core: DinodeCore = decode_from(buf_reader.by_ref()).unwrap();
         di_core.sanity();
 
@@ -212,7 +212,7 @@ impl Dinode {
             _ => panic!("Inode type not yet supported."),
         }
 
-        buf_reader.seek(SeekFrom::Start(off as u64)).unwrap();
+        buf_reader.seek(SeekFrom::Start(off)).unwrap();
         buf_reader
             .seek(SeekFrom::Current(
                 (LITERAL_AREA_OFFSET as i64) + ((di_core.di_forkoff as i64) * 8),
