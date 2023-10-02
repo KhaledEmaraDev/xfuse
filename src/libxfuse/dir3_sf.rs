@@ -27,14 +27,14 @@
  */
 use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, Seek};
-use std::os::unix::ffi::OsStringExt;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::time::{Duration, UNIX_EPOCH};
 
 use super::S_IFMT;
 use super::{
     definitions::*,
     dinode::Dinode,
-    dir3::Dir3,
+    dir3::{Dir3, XFS_DIR3_FT_DIR},
     sb::Sb,
     utils::{get_file_type, FileKind},
 };
@@ -45,7 +45,7 @@ use libc::{c_int, ENOENT};
 
 // pub type XfsDir2SfOff = [u8; 2];
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum XfsDir2Inou {
     XfsDir2Ino8(u64),
     XfsDir2Ino4(u32),
@@ -112,6 +112,20 @@ impl Dir2SfEntry {
             inumber,
         }
     }
+
+    pub fn new(name: &[u8], ftype: u8, offset: u16, inumber: XfsDir2Inou)
+        -> Self
+    {
+        let namelen = name.len() as u8;
+        let name = OsStr::from_bytes(name).to_owned();
+        Dir2SfEntry {
+            namelen,
+            offset,
+            name,
+            ftype,
+            inumber
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -121,10 +135,15 @@ pub struct Dir2Sf {
 }
 
 impl Dir2Sf {
-    pub fn from<T: BufRead>(buf_reader: &mut T) -> Dir2Sf {
+    pub fn from<T: BufRead>(buf_reader: &mut T, ino: XfsIno) -> Dir2Sf {
         let hdr = Dir2SfHdr::from(buf_reader.by_ref());
+        let dot_ino = XfsDir2Inou::XfsDir2Ino8(ino);
 
         let mut list = Vec::<Dir2SfEntry>::new();
+        // Alone out of all the directory types, SF directories to not store the
+        // "." and ".." entries on disk.  We must synthesize them here.
+        list.push(Dir2SfEntry::new(b".", XFS_DIR3_FT_DIR, 1, dot_ino));
+        list.push(Dir2SfEntry::new(b"..", XFS_DIR3_FT_DIR, 2, hdr.parent));
         for _i in 0..hdr.count {
             list.push(Dir2SfEntry::from(buf_reader.by_ref(), hdr.i8count))
         }

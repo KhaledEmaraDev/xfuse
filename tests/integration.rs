@@ -352,7 +352,7 @@ fn readdir(harness: Harness, #[case] d: &str) {
 // unconditionally hides the hidden entries.
 #[named]
 #[rstest]
-#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/38" ]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/39" ]
 #[case::sf("sf")]
 #[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/39" ]
 #[case::block("block")]
