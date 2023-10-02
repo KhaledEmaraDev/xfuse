@@ -254,6 +254,13 @@ impl Filesystem for Volume {
             let res = dir.next(BufReader::new(&self.device).by_ref(), &self.sb, off);
             match res {
                 Ok((ino, offset, kind, name)) => {
+                    // FUSE requires the file system's root directory to have a
+                    // fixed inode number.
+                    let ino = if ino == self.sb.sb_rootino {
+                        FUSE_ROOT_ID
+                    } else {
+                        ino
+                    };
                     let res = reply.add(ino, offset, kind, name);
                     if res {
                         reply.ok();
