@@ -103,7 +103,15 @@ impl Dinode {
             + blk_ino * u64::from(superblock.sb_inodesize);
 
         buf_reader.seek(SeekFrom::Start(off)).unwrap();
-        let di_core: DinodeCore = decode_from(buf_reader.by_ref()).unwrap();
+        let mut raw = vec![0u8; superblock.sb_inodesize.into()];
+        buf_reader.read_exact(&mut raw).unwrap();
+        let config = bincode::config::standard()
+            .with_big_endian()
+            .with_fixed_int_encoding();
+        let reader = bincode::de::read::SliceReader::new(&raw[..]);
+        let mut decoder = bincode::de::DecoderImpl::new(reader, config);
+
+        let di_core = DinodeCore::decode(&mut decoder).unwrap();
         di_core.sanity();
 
         let di_u: Option<DiU>;
@@ -112,16 +120,16 @@ impl Dinode {
                 XfsDinodeFmt::Extents => {
                     let mut bmx = Vec::<BmbtRec>::new();
                     for _i in 0..di_core.di_nextents {
-                        bmx.push(decode_from(buf_reader.by_ref()).unwrap());
+                        bmx.push(BmbtRec::decode(&mut decoder).unwrap())
                     }
                     di_u = Some(DiU::Bmx(bmx));
                 }
                 XfsDinodeFmt::Btree => {
-                    let bmbt: BmdrBlock = decode_from(buf_reader.by_ref()).unwrap();
+                    let bmbt = BmdrBlock::decode(&mut decoder).unwrap();
 
                     let mut keys = Vec::<BmbtKey>::new();
                     for _i in 0..bmbt.bb_numrecs {
-                        keys.push(decode_from(buf_reader.by_ref()).unwrap())
+                        keys.push(BmbtKey::decode(&mut decoder).unwrap())
                     }
 
                     let mut pointers = Vec::<XfsBmbtPtr>::new();
@@ -138,26 +146,18 @@ impl Dinode {
             },
             S_IFDIR => match di_core.di_format {
                 XfsDinodeFmt::Local => {
-                    let mut dir_sf = Dir2Sf::from(buf_reader.by_ref());
+                    let mut dir_sf = Dir2Sf::decode(&mut decoder).unwrap();
                     dir_sf.set_ino(inode_number);
                     di_u = Some(DiU::Dir2Sf(dir_sf));
                 }
                 XfsDinodeFmt::Extents => {
                     let mut bmx = Vec::<BmbtRec>::new();
                     for _i in 0..di_core.di_nextents {
-                        bmx.push(decode_from(buf_reader.by_ref()).unwrap());
+                        bmx.push(BmbtRec::decode(&mut decoder).unwrap())
                     }
                     di_u = Some(DiU::Bmx(bmx));
                 }
                 XfsDinodeFmt::Btree => {
-                    let mut raw = vec![0u8; superblock.sb_sectsize.into()];
-                    buf_reader.read_exact(&mut raw).unwrap();
-                    let config = bincode::config::standard()
-                        .with_big_endian()
-                        .with_fixed_int_encoding();
-                    let reader = bincode::de::read::SliceReader::new(&raw[..]);
-                    let mut decoder = bincode::de::DecoderImpl::new(reader, config);
-
                     let bmbt = BmdrBlock::decode(&mut decoder).unwrap();
 
                     let mut keys = Vec::<BmbtKey>::new();
@@ -192,16 +192,14 @@ impl Dinode {
             },
             S_IFLNK => match di_core.di_format {
                 XfsDinodeFmt::Local => {
-                    let mut data = Vec::<u8>::with_capacity(di_core.di_size as usize);
-                    for _i in 0..di_core.di_size {
-                        data.push(decode_from(buf_reader.by_ref()).unwrap());
-                    }
+                    let mut data = vec![0u8; di_core.di_size as usize];
+                    decoder.reader().read(&mut data[..]).unwrap();
                     di_u = Some(DiU::Symlink(data))
                 }
                 XfsDinodeFmt::Extents => {
                     let mut bmx = Vec::<BmbtRec>::new();
                     for _i in 0..di_core.di_nextents {
-                        bmx.push(decode_from(buf_reader.by_ref()).unwrap());
+                        bmx.push(BmbtRec::decode(&mut decoder).unwrap());
                     }
                     di_u = Some(DiU::Bmx(bmx));
                 }
@@ -212,38 +210,38 @@ impl Dinode {
             _ => panic!("Inode type not yet supported."),
         }
 
-        buf_reader.seek(SeekFrom::Start(off)).unwrap();
-        buf_reader
-            .seek(SeekFrom::Current(
-                (LITERAL_AREA_OFFSET as i64) + ((di_core.di_forkoff as i64) * 8),
-            ))
-            .unwrap();
+        let attr_fork_ofs = LITERAL_AREA_OFFSET as usize + di_core.di_forkoff as usize * 8;
+        let config = bincode::config::standard()
+            .with_big_endian()
+            .with_fixed_int_encoding();
+        let reader = bincode::de::read::SliceReader::new(&raw[attr_fork_ofs..]);
+        let mut decoder = bincode::de::DecoderImpl::new(reader, config);
 
         let di_a: Option<DiA>;
         if di_core.di_forkoff != 0 {
             match di_core.di_aformat {
                 XfsDinodeFmt::Local => {
-                    let attr_shortform: AttrShortform = decode_from(buf_reader.by_ref()).unwrap();
+                    let attr_shortform = AttrShortform::decode(&mut decoder).unwrap();
                     di_a = Some(DiA::Attrsf(attr_shortform));
                 }
                 XfsDinodeFmt::Extents => {
                     let mut bmx = Vec::<BmbtRec>::new();
                     for _i in 0..di_core.di_anextents {
-                        bmx.push(decode_from(buf_reader.by_ref()).unwrap());
+                        bmx.push(BmbtRec::decode(&mut decoder).unwrap());
                     }
                     di_a = Some(DiA::Abmx(bmx));
                 }
                 XfsDinodeFmt::Btree => {
-                    let bmbt: BmdrBlock = decode_from(buf_reader.by_ref()).unwrap();
+                    let bmbt = BmdrBlock::decode(&mut decoder).unwrap();
 
                     let mut keys = Vec::<BmbtKey>::new();
                     for _i in 0..bmbt.bb_numrecs {
-                        keys.push(decode_from(buf_reader.by_ref()).unwrap());
+                        keys.push(BmbtKey::decode(&mut decoder).unwrap());
                     }
 
                     let mut pointers = Vec::<XfsBmbtPtr>::new();
                     for _i in 0..bmbt.bb_numrecs {
-                        pointers.push(decode_from(buf_reader.by_ref()).unwrap());
+                        pointers.push(XfsBmbtPtr::decode(&mut decoder).unwrap());
                     }
 
                     di_a = Some(DiA::Abmbt((bmbt, keys, pointers)));

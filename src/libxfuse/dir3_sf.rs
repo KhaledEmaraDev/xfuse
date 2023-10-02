@@ -233,25 +233,6 @@ pub struct Dir2Sf {
 }
 
 impl Dir2Sf {
-    pub fn from<T: BufRead>(buf_reader: &mut T) -> Dir2Sf {
-        let hdr = Dir2SfHdr::from(buf_reader.by_ref());
-
-        let mut list = Vec::<Dir2SfEntry64>::new();
-        // Alone out of all the directory types, SF directories to not store the
-        // "." and ".." entries on disk.  We must synthesize them here.
-        list.push(Dir2SfEntry64::new(b".", XFS_DIR3_FT_DIR, 1, u64::MAX));
-        list.push(Dir2SfEntry64::new(b"..", XFS_DIR3_FT_DIR, 2, hdr.parent));
-        for _i in 0..hdr.count {
-            if hdr.i8count > 0 {
-                list.push(Dir2SfEntry64::from(buf_reader.by_ref()));
-            } else {
-                list.push(Dir2SfEntry32::from(buf_reader.by_ref()).into());
-            }
-        }
-
-        Dir2Sf { hdr, list }
-    }
-
     /// Set the inode of this directory.  Annoyingly, we need to know it, but it
     /// isn't stored on disk in this header.
     pub fn set_ino(&mut self, ino: XfsIno) {
