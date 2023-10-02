@@ -112,7 +112,7 @@ impl Dinode {
                 XfsDinodeFmt::Extents => {
                     let mut bmx = Vec::<BmbtRec>::new();
                     for _i in 0..di_core.di_nextents {
-                        bmx.push(BmbtRec::from(buf_reader.by_ref()))
+                        bmx.push(decode_from(buf_reader.by_ref()).unwrap());
                     }
                     di_u = Some(DiU::Bmx(bmx));
                 }
@@ -144,7 +144,7 @@ impl Dinode {
                 XfsDinodeFmt::Extents => {
                     let mut bmx = Vec::<BmbtRec>::new();
                     for _i in 0..di_core.di_nextents {
-                        bmx.push(BmbtRec::from(buf_reader.by_ref()))
+                        bmx.push(decode_from(buf_reader.by_ref()).unwrap());
                     }
                     di_u = Some(DiU::Bmx(bmx));
                 }
@@ -201,7 +201,7 @@ impl Dinode {
                 XfsDinodeFmt::Extents => {
                     let mut bmx = Vec::<BmbtRec>::new();
                     for _i in 0..di_core.di_nextents {
-                        bmx.push(BmbtRec::from(buf_reader.by_ref()))
+                        bmx.push(decode_from(buf_reader.by_ref()).unwrap());
                     }
                     di_u = Some(DiU::Bmx(bmx));
                 }
@@ -229,7 +229,7 @@ impl Dinode {
                 XfsDinodeFmt::Extents => {
                     let mut bmx = Vec::<BmbtRec>::new();
                     for _i in 0..di_core.di_anextents {
-                        bmx.push(BmbtRec::from(buf_reader.by_ref()))
+                        bmx.push(decode_from(buf_reader.by_ref()).unwrap());
                     }
                     di_a = Some(DiA::Abmx(bmx));
                 }
