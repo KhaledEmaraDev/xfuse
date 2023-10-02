@@ -223,7 +223,7 @@ impl Dinode {
         if di_core.di_forkoff != 0 {
             match di_core.di_aformat {
                 XfsDinodeFmt::Local => {
-                    let attr_shortform = AttrShortform::from(buf_reader.by_ref());
+                    let attr_shortform: AttrShortform = decode_from(buf_reader.by_ref()).unwrap();
                     di_a = Some(DiA::Attrsf(attr_shortform));
                 }
                 XfsDinodeFmt::Extents => {
