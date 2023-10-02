@@ -346,3 +346,40 @@ fn readdir(harness: Harness, #[case] d: &str) {
     }
     assert_eq!(count, ents_per_dir(d));
 }
+
+/// List a directory's hidden contents with readdir
+// Use Nix::dir::Dir instead of std::fs::read_dir, because the latter
+// unconditionally hides the hidden entries.
+#[named]
+#[rstest]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/38" ]
+#[case::sf("sf")]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/39" ]
+#[case::block("block")]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/39" ]
+#[case::leaf("leaf")]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/39" ]
+#[case::node("node")]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/39" ]
+#[case::btree("btree")]
+fn readdir_dots(harness: Harness, #[case] d: &str) {
+    use nix::{dir::Dir, fcntl::OFlag, sys::stat::Mode};
+    require_fusefs!();
+
+    let root_md = fs::metadata(harness.d.path()).unwrap();
+    let dir_md = fs::metadata(harness.d.path().join(d)).unwrap();
+
+    let dpath = harness.d.path().join(d);
+    let mut dir = Dir::open(&dpath, OFlag::O_RDONLY, Mode::S_IRUSR).unwrap();
+    let mut ents = dir.iter();
+
+    // The first entry should be "."
+    let dot = ents.next().unwrap().unwrap();
+    assert_eq!(".", dot.file_name().to_str().unwrap());
+    assert_eq!(dir_md.ino(), dot.ino());
+
+    // Next should be ".."
+    let dotdot = ents.next().unwrap().unwrap();
+    assert_eq!("..", dotdot.file_name().to_str().unwrap());
+    assert_eq!(root_md.ino(), dotdot.ino());
+}
