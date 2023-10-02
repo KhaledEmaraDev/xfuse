@@ -303,7 +303,12 @@ fn lookup(harness: Harness, #[case] d: &str) {
 
 /// Lookup a directory's "." and ".." entries.  Verify their inode numbers
 #[named]
-#[apply(all_dir_types)]
+#[rstest]
+#[case::sf("sf")]
+#[case::block("block")]
+#[case::leaf("leaf")]
+#[case::node("node")]
+#[case::btree("btree")]
 fn lookup_dots(harness: Harness, #[case] d: &str) {
     require_fusefs!();
 
