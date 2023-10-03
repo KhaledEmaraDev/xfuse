@@ -78,15 +78,6 @@ pub struct AttrLeafMap {
     pub size: u16,
 }
 
-impl AttrLeafMap {
-    pub fn from<R: BufRead>(buf_reader: &mut R) -> AttrLeafMap {
-        let base = buf_reader.read_u16::<BigEndian>().unwrap();
-        let size = buf_reader.read_u16::<BigEndian>().unwrap();
-
-        AttrLeafMap { base, size }
-    }
-}
-
 #[derive(Debug, Decode)]
 pub struct AttrLeafHdr {
     pub info: XfsDa3Blkinfo,

@@ -306,12 +306,6 @@ pub struct Dir2LeafTail {
 
 impl Dir2LeafTail {
     pub const SIZE: usize = 4;
-
-    pub fn from<T: BufRead>(buf_reader: &mut T) -> Dir2LeafTail {
-        let bestcount = buf_reader.read_u32::<BigEndian>().unwrap();
-
-        Dir2LeafTail { bestcount }
-    }
 }
 
 #[derive(Debug)]
@@ -321,18 +315,6 @@ pub struct Dir2LeafNDisk {
 }
 
 impl Dir2LeafNDisk {
-    pub fn from<T: BufRead + Seek>(buf_reader: &mut T, super_block: &Sb) -> Dir2LeafNDisk {
-        let hdr = Dir3LeafHdr::from(buf_reader.by_ref(), super_block);
-
-        let mut ents = Vec::<Dir2LeafEntry>::new();
-        for _i in 0..hdr.count {
-            let leaf_entry = Dir2LeafEntry::from(buf_reader.by_ref());
-            ents.push(leaf_entry);
-        }
-
-        Dir2LeafNDisk { hdr, ents }
-    }
-
     pub fn get_address(&self, hash: XfsDahash) -> Result<XfsDir2Dataptr, c_int> {
         let mut low: i64 = 0;
         let mut high: i64 = (self.ents.len() - 1) as i64;
