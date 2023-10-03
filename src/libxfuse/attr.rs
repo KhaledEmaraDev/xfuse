@@ -43,7 +43,7 @@ use uuid::Uuid;
 
 use super::{
     da_btree::XfsDa3Blkinfo,
-    definitions::{XfsFileoff, XfsFsblock},
+    definitions::{XFS_ATTR3_LEAF_MAGIC, XfsFileoff, XfsFsblock},
     sb::Sb,
     utils::decode_from
 };
@@ -101,7 +101,8 @@ pub struct AttrLeafHdr {
 
 impl AttrLeafHdr {
     pub fn sanity(&self, super_block: &Sb) {
-        self.info.sanity(super_block)
+        self.info.sanity(super_block);
+        assert_eq!(self.info.magic, XFS_ATTR3_LEAF_MAGIC);
     }
 }
 
@@ -267,7 +268,7 @@ impl AttrLeafblock {
                 .seek(SeekFrom::Current(i64::from(entry.nameidx)))
                 .unwrap();
 
-            if entry.flags & XFS_ATTR_LOCAL == 0 {
+            if entry.flags & XFS_ATTR_LOCAL != 0 {
                 let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
 
                 list.extend_from_slice(get_namespace_from_flags(entry.flags));
