@@ -270,7 +270,6 @@ fn all_dir_types(d: &str) {}
 #[template]
 #[rstest]
 #[case::local("local")]
-#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/45" ]
 #[case::extents("extents")]
 fn all_xattr_fork_types(d: &str) {}
 
@@ -309,6 +308,43 @@ fn getextattr(harness: Harness, #[case] d: &str) {
         let binary_value = xattr::get(&p, attrname).unwrap().unwrap();
         let value = OsStr::from_bytes(&binary_value[..]);
         assert_eq!(expected_value, value);
+    }
+}
+
+/// Lookup the size of an extended attribute without fetching it.
+// This test is freebsd-specific because the relevant syscall is.  It could be
+// implemented for Linux too, but I haven't done so.
+#[cfg(target_os = "freebsd")]
+#[named]
+#[apply(all_xattr_fork_types)]
+fn getextattr_size(harness: Harness, #[case] d: &str) {
+    use std::{convert::TryFrom, ffi::CString, ptr};
+
+    require_fusefs!();
+
+    let ns = libc::EXTATTR_NAMESPACE_USER;
+    let p = harness.d.path().join("xattrs").join(d);
+    let expected_len = "value.000000".len();
+    let cpath = CString::new(p.as_os_str().as_bytes()).unwrap();
+
+    for i in 0..attrs_per_file(d) {
+        let s = format!("attr.{:06}", i);
+        let attrname = OsStr::new(s.as_str());
+        let cattrname = CString::new(attrname.as_bytes()).unwrap();
+        let r = unsafe {
+            libc::extattr_get_file(
+                cpath.as_ptr(),
+                ns,
+                cattrname.as_ptr(),
+                ptr::null_mut(),
+                0
+            )
+        };
+        if let Ok(r) = usize::try_from(r) {
+            assert_eq!(expected_len, r);
+        } else {
+            panic!("{}", io::Error::last_os_error());
+        }
     }
 }
 
@@ -358,9 +394,7 @@ fn lookup_dots(harness: Harness, #[case] d: &str) {
 }
 
 #[named]
-#[rstest]
-#[case::local("local")]
-#[case::extents("extents")]
+#[apply(all_xattr_fork_types)]
 fn lsextattr(harness: Harness, #[case] d: &str) {
     require_fusefs!();
 
@@ -376,6 +410,38 @@ fn lsextattr(harness: Harness, #[case] d: &str) {
         count += 1;
     }
     assert_eq!(count, attrs_per_file(d));
+}
+
+/// Lookup the size of the extended attribute list of a file, without fetching
+/// it.
+// This test is freebsd-specific because the relevant syscall is.  It could be
+// implemented for Linux too, but I haven't done so.
+#[cfg(target_os = "freebsd")]
+#[named]
+#[apply(all_xattr_fork_types)]
+fn lsextattr_size(harness: Harness, #[case] d: &str) {
+    use std::{convert::TryFrom, ffi::CString, ptr};
+    require_fusefs!();
+
+    let ns = libc::EXTATTR_NAMESPACE_USER;
+    let p = harness.d.path().join("xattrs").join(d);
+    let bytes_per_attr = "attr.000000".len() + 1;
+    let expected_len = bytes_per_attr * attrs_per_file(d);
+    let cpath = CString::new(p.as_os_str().as_bytes()).unwrap();
+
+    let r = unsafe {
+        libc::extattr_list_file(
+            cpath.as_ptr(),
+            ns,
+            ptr::null_mut(),
+            0
+        )
+    };
+    if let Ok(r) = usize::try_from(r) {
+        assert_eq!(expected_len, r);
+    } else {
+        panic!("{}", io::Error::last_os_error());
+    }
 }
 
 /// List a directory's contents with readdir
