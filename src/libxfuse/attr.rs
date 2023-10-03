@@ -35,7 +35,8 @@ use std::{
 
 use bincode::{
     Decode,
-    de::{Decoder, read::Reader}
+    de::{Decoder, read::Reader},
+    error::DecodeError
 };
 use byteorder::{BigEndian, ReadBytesExt};
 use uuid::Uuid;
@@ -104,7 +105,7 @@ impl AttrLeafHdr {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Decode)]
 pub struct AttrLeafEntry {
     pub hashval: u32,
     pub nameidx: u16,
@@ -360,6 +361,23 @@ impl AttrLeafblock {
         }
 
         panic!("Couldn't find the attribute entry");
+    }
+
+    pub fn sanity(&self, super_block: &Sb) {
+        self.hdr.sanity(super_block)
+    }
+}
+
+impl Decode for AttrLeafblock {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let hdr: AttrLeafHdr = Decode::decode(decoder)?;
+
+        let mut entries = Vec::<AttrLeafEntry>::with_capacity(hdr.count.into());
+        for _i in 0..entries.capacity() {
+            entries.push(Decode::decode(decoder)?);
+        }
+
+        Ok(AttrLeafblock {hdr, entries})
     }
 }
 
