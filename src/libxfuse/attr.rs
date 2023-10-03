@@ -189,7 +189,7 @@ impl AttrLeafblock {
                 .seek(SeekFrom::Current(i64::from(entry.nameidx)))
                 .unwrap();
 
-            if entry.flags & XFS_ATTR_LOCAL == 0 {
+            if entry.flags & XFS_ATTR_LOCAL != 0 {
                 let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
                 total_size +=
                     get_namespace_size_from_flags(entry.flags) + u32::from(name_entry.namelen) + 1;
@@ -242,7 +242,7 @@ impl AttrLeafblock {
                         .seek(SeekFrom::Current(i64::from(entry.nameidx)))
                         .unwrap();
 
-                    if entry.flags & XFS_ATTR_LOCAL == 0 {
+                    if entry.flags & XFS_ATTR_LOCAL != 0 {
                         let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
                         return name_entry.valuelen.into();
                     } else {
