@@ -213,6 +213,9 @@ impl Sb {
         if sb_versionnum & 0xF != 5 {
             panic!("Unsupported filesystem version number {}", sb_versionnum & 0xF);
         }
+        if sb_features2 & XFS_SB_VERSION2_ATTR2BIT == 0 {
+            panic!("Version 1 extended attributes are not supported");
+        }
 
         Sb {
             sb_magicnum,
