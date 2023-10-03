@@ -329,7 +329,7 @@ impl Dinode {
         }
     }
 
-    pub fn get_attrs<R: BufRead + Seek>(
+    pub fn get_attrs<R: Reader + BufRead + Seek>(
         &self,
         buf_reader: &mut R,
         superblock: &Sb,

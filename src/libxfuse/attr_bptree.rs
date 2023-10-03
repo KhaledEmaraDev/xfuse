@@ -31,6 +31,8 @@ use std::{
     io::{BufRead, Seek, SeekFrom},
 };
 
+use bincode::de::read::Reader;
+
 use super::{
     attr::{Attr, AttrLeafblock},
     btree::Btree,
@@ -45,7 +47,7 @@ pub struct AttrBtree {
     pub total_size: i64,
 }
 
-impl<R: BufRead + Seek> Attr<R> for AttrBtree {
+impl<R: Reader + BufRead + Seek> Attr<R> for AttrBtree {
     fn get_total_size(&mut self, buf_reader: &mut R, super_block: &Sb) -> u32 {
         if self.total_size == -1 {
             let mut total_size: u32 = 0;

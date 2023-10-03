@@ -33,6 +33,10 @@ use std::{
     mem::size_of,
 };
 
+use bincode::{
+    Decode,
+    de::{Decoder, read::Reader}
+};
 use byteorder::{BigEndian, ReadBytesExt};
 use uuid::Uuid;
 
@@ -40,6 +44,7 @@ use super::{
     da_btree::XfsDa3Blkinfo,
     definitions::{XfsFileoff, XfsFsblock},
     sb::Sb,
+    utils::decode_from
 };
 
 pub const XFS_ATTR_LOCAL_BIT: u8 = 0;
@@ -66,7 +71,7 @@ pub const fn get_namespace_size_from_flags(flags: u8) -> u32 {
     get_namespace_from_flags(flags).len() as u32
 }
 
-#[derive(Debug)]
+#[derive(Debug, Decode)]
 pub struct AttrLeafMap {
     pub base: u16,
     pub size: u16,
@@ -81,7 +86,7 @@ impl AttrLeafMap {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Decode)]
 pub struct AttrLeafHdr {
     pub info: XfsDa3Blkinfo,
     pub count: u16,
@@ -94,32 +99,8 @@ pub struct AttrLeafHdr {
 }
 
 impl AttrLeafHdr {
-    pub fn from<R: BufRead + Seek>(buf_reader: &mut R, super_block: &Sb) -> AttrLeafHdr {
-        let info = XfsDa3Blkinfo::from(buf_reader.by_ref(), super_block);
-        let count = buf_reader.read_u16::<BigEndian>().unwrap();
-        let usedbytes = buf_reader.read_u16::<BigEndian>().unwrap();
-        let firstused = buf_reader.read_u16::<BigEndian>().unwrap();
-        let holes = buf_reader.read_u8().unwrap();
-        let pad1 = buf_reader.read_u8().unwrap();
-
-        let freemap: [AttrLeafMap; 3] = [
-            AttrLeafMap::from(buf_reader.by_ref()),
-            AttrLeafMap::from(buf_reader.by_ref()),
-            AttrLeafMap::from(buf_reader.by_ref()),
-        ];
-
-        let pad2 = buf_reader.read_u32::<BigEndian>().unwrap();
-
-        AttrLeafHdr {
-            info,
-            count,
-            usedbytes,
-            firstused,
-            holes,
-            pad1,
-            freemap,
-            pad2,
-        }
+    pub fn sanity(&self, super_block: &Sb) {
+        self.info.sanity(super_block)
     }
 }
 
@@ -181,8 +162,9 @@ pub struct AttrLeafblock {
 }
 
 impl AttrLeafblock {
-    pub fn from<R: BufRead + Seek>(buf_reader: &mut R, super_block: &Sb) -> AttrLeafblock {
-        let hdr = AttrLeafHdr::from(buf_reader.by_ref(), super_block);
+    pub fn from<R: Reader + BufRead + Seek>(buf_reader: &mut R, super_block: &Sb) -> AttrLeafblock {
+        let hdr: AttrLeafHdr = decode_from(buf_reader.by_ref()).unwrap();
+        hdr.sanity(super_block);
 
         let mut entries = Vec::<AttrLeafEntry>::with_capacity(hdr.count.into());
         for _i in 0..entries.capacity() {
