@@ -31,13 +31,17 @@ use std::{
     io::{BufRead, Seek, SeekFrom},
 };
 
+use bincode::de::read::Reader;
+
 use super::{
     attr::{Attr, AttrLeafblock},
     bmbt_rec::BmbtRec,
     da_btree::hashname,
     definitions::{XfsFileoff, XfsFsblock},
     sb::Sb,
+    utils::decode_from
 };
+
 
 #[derive(Debug)]
 pub struct AttrLeaf {
@@ -49,7 +53,7 @@ pub struct AttrLeaf {
 }
 
 impl AttrLeaf {
-    pub fn from<R: BufRead + Seek>(
+    pub fn from<R: Reader + BufRead + Seek>(
         buf_reader: &mut R,
         superblock: &Sb,
         bmx: Vec<BmbtRec>,
@@ -58,7 +62,8 @@ impl AttrLeaf {
             let leaf_offset = rec.br_startblock * u64::from(superblock.sb_blocksize);
             buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
 
-            let leaf = AttrLeafblock::from(buf_reader.by_ref(), superblock);
+            let leaf: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
+            leaf.sanity(superblock);
 
             AttrLeaf {
                 bmx,

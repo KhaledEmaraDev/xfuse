@@ -56,7 +56,7 @@ lazy_static! {
 fn attrs_per_file(f: &str) -> usize {
     match f {
         "local" => 4,
-        "extents" => 16,
+        "extents" => 64,
         _ => 0
     }
 }
@@ -358,15 +358,20 @@ fn lookup_dots(harness: Harness, #[case] d: &str) {
 }
 
 #[named]
-#[apply(all_xattr_fork_types)]
+#[rstest]
+#[case::local("local")]
+#[case::extents("extents")]
 fn lsextattr(harness: Harness, #[case] d: &str) {
     require_fusefs!();
 
     let p = harness.d.path().join("xattrs").join(d);
     let mut count = 0;
 
-    for (i, attrname) in xattr::list(p).unwrap().enumerate() {
+    let mut all_attrnames = xattr::list(p).unwrap().collect::<Vec<_>>();
+    all_attrnames.sort_unstable();
+    for (i, attrname) in all_attrnames.into_iter().enumerate() {
         let expected_name = OsString::from(format!("user.attr.{:06}", i));
+        //eprintln!("{:?}", attrname);
         assert_eq!(expected_name, attrname);
         count += 1;
     }

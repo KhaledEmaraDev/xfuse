@@ -54,8 +54,6 @@ use bincode::{
     Decode,
     de::{Decoder, read::Reader}
 };
-use byteorder::BigEndian;
-use byteorder::ReadBytesExt;
 use libc::{mode_t, S_IFDIR, S_IFLNK, S_IFMT, S_IFREG};
 
 pub const LITERAL_AREA_OFFSET: u8 = 0xb0;
@@ -329,7 +327,7 @@ impl Dinode {
         }
     }
 
-    pub fn get_attrs<R: BufRead + Seek>(
+    pub fn get_attrs<R: Reader + BufRead + Seek>(
         &self,
         buf_reader: &mut R,
         superblock: &Sb,
@@ -338,27 +336,12 @@ impl Dinode {
             Some(DiA::Attrsf(attr)) => Some(Box::new(attr.clone())),
             Some(DiA::Abmx(bmx)) => {
                 if self.di_core.di_anextents > 0 {
-                    buf_reader.seek(SeekFrom::Current(8)).unwrap();
-                    let magic = buf_reader.read_u16::<BigEndian>().unwrap();
-                    buf_reader.seek(SeekFrom::Current(-8)).unwrap();
-
-                    match magic {
-                        XFS_ATTR3_LEAF_MAGIC => {
-                            return Some(Box::new(AttrLeaf::from(
-                                buf_reader.by_ref(),
-                                superblock,
-                                bmx.clone(),
-                            )));
-                        }
-                        XFS_DA3_NODE_MAGIC => {
-                            return Some(Box::new(AttrLeaf::from(
-                                buf_reader.by_ref(),
-                                superblock,
-                                bmx.clone(),
-                            )));
-                        }
-                        _ => panic!("Unknown magic number!"),
-                    }
+                    // TODO: handle AttrNode, too.
+                    return Some(Box::new(AttrLeaf::from(
+                        buf_reader.by_ref(),
+                        superblock,
+                        bmx.clone(),
+                    )));
                 } else {
                     None
                 }
