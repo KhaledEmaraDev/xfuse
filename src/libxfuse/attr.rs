@@ -327,7 +327,7 @@ impl AttrLeafblock {
                         .seek(SeekFrom::Current(i64::from(entry.nameidx)))
                         .unwrap();
 
-                    if entry.flags & XFS_ATTR_LOCAL == 0 {
+                    if entry.flags & XFS_ATTR_LOCAL != 0 {
                         let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
 
                         let namelen = name_entry.namelen as usize;

@@ -270,7 +270,6 @@ fn all_dir_types(d: &str) {}
 #[template]
 #[rstest]
 #[case::local("local")]
-#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/45" ]
 #[case::extents("extents")]
 fn all_xattr_fork_types(d: &str) {}
 
@@ -358,9 +357,7 @@ fn lookup_dots(harness: Harness, #[case] d: &str) {
 }
 
 #[named]
-#[rstest]
-#[case::local("local")]
-#[case::extents("extents")]
+#[apply(all_xattr_fork_types)]
 fn lsextattr(harness: Harness, #[case] d: &str) {
     require_fusefs!();
 
