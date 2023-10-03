@@ -34,27 +34,17 @@ use super::{
     sb::Sb,
 };
 
-use byteorder::{BigEndian, ReadBytesExt};
+use bincode::{
+    Decode,
+    de::{Decoder, read::Reader},
+    error::DecodeError
+};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Decode)]
 pub struct AttrSfHdr {
     pub totsize: u16,
     pub count: u8,
-    pub padding: u8,
-}
-
-impl AttrSfHdr {
-    pub fn from<R: BufRead>(buf_reader: &mut R) -> AttrSfHdr {
-        let totsize = buf_reader.read_u16::<BigEndian>().unwrap();
-        let count = buf_reader.read_u8().unwrap();
-        let padding = buf_reader.read_u8().unwrap();
-
-        AttrSfHdr {
-            totsize,
-            count,
-            padding,
-        }
-    }
+    _padding: u8,
 }
 
 #[derive(Debug, Clone)]
@@ -65,23 +55,20 @@ pub struct AttrSfEntry {
     pub nameval: Vec<u8>,
 }
 
-impl AttrSfEntry {
-    pub fn from<R: BufRead>(buf_reader: &mut R) -> AttrSfEntry {
-        let namelen = buf_reader.read_u8().unwrap();
-        let valuelen = buf_reader.read_u8().unwrap();
-        let flags = buf_reader.read_u8().unwrap();
+impl Decode for AttrSfEntry {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let namelen: u8 = Decode::decode(decoder)?;
+        let valuelen: u8 = Decode::decode(decoder)?;
+        let flags: u8 = Decode::decode(decoder)?;
+        let mut nameval = vec![0u8; usize::from(namelen + valuelen)];
+        decoder.reader().read(&mut nameval[..])?;
 
-        let mut nameval = Vec::<u8>::new();
-        for _i in 0..(namelen + valuelen) {
-            nameval.push(buf_reader.read_u8().unwrap());
-        }
-
-        AttrSfEntry {
+        Ok(AttrSfEntry {
             namelen,
             valuelen,
             flags,
-            nameval,
-        }
+            nameval
+        })
     }
 }
 
@@ -93,24 +80,24 @@ pub struct AttrShortform {
     pub total_size: u32,
 }
 
-impl AttrShortform {
-    pub fn from<R: BufRead>(buf_reader: &mut R) -> AttrShortform {
-        let hdr = AttrSfHdr::from(buf_reader.by_ref());
+impl Decode for AttrShortform {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let hdr: AttrSfHdr = Decode::decode(decoder)?;
 
         let mut list = Vec::<AttrSfEntry>::new();
         let mut total_size: u32 = 0;
-        for _i in 0..hdr.count {
-            let entry = AttrSfEntry::from(buf_reader.by_ref());
 
+        for _ in 0..hdr.count {
+            let entry: AttrSfEntry = Decode::decode(decoder)?;
             total_size += get_namespace_size_from_flags(entry.flags) + u32::from(entry.namelen) + 1;
             list.push(entry);
         }
 
-        AttrShortform {
+        Ok(AttrShortform {
             hdr,
             list,
-            total_size,
-        }
+            total_size
+        })
     }
 }
 

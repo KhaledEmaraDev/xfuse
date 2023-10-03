@@ -29,6 +29,11 @@ use std::io::prelude::*;
 
 use super::definitions::*;
 
+use bincode::{
+    Decode,
+    de::Decoder,
+    error::DecodeError
+};
 use byteorder::{BigEndian, ReadBytesExt};
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
@@ -69,5 +74,29 @@ impl BmbtRec {
             br_blockcount,
             br_state,
         }
+    }
+}
+
+impl Decode for BmbtRec {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let br: u128 = Decode::decode(decoder)?;
+
+        let br_blockcount = (br & ((1 << 21) - 1)) as u64;
+        let br = br >> 21;
+
+        let br_startblock = (br & ((1 << 52) - 1)) as u64;
+        let br = br >> 52;
+
+        let br_startoff = (br & ((1 << 54) - 1)) as u64;
+        let br = br >> 54;
+
+        let br_state = XfsExntst::from_u8((br & 1) as u8).unwrap();
+
+        Ok(BmbtRec {
+            br_startoff,
+            br_startblock,
+            br_blockcount,
+            br_state,
+        })
     }
 }

@@ -39,23 +39,22 @@ use super::{
     utils::{get_file_type, FileKind},
 };
 
+use bincode::{
+    Decode,
+    de::{Decoder, read::Reader},
+    error::DecodeError
+};
 use byteorder::{BigEndian, ReadBytesExt};
 use fuser::{FileAttr, FileType};
 use libc::{c_int, ENOENT};
 
 // pub type XfsDir2SfOff = [u8; 2];
 
-#[derive(Debug, Clone, Copy)]
-pub enum XfsDir2Inou {
-    XfsDir2Ino8(u64),
-    XfsDir2Ino4(u32),
-}
-
 #[derive(Debug, Clone)]
 pub struct Dir2SfHdr {
     pub count: u8,
     pub i8count: u8,
-    pub parent: XfsDir2Inou,
+    pub parent: XfsIno,
 }
 
 impl Dir2SfHdr {
@@ -64,9 +63,9 @@ impl Dir2SfHdr {
         let i8count = buf_reader.read_u8().unwrap();
 
         let parent = if i8count > 0 {
-            XfsDir2Inou::XfsDir2Ino8(buf_reader.read_u64::<BigEndian>().unwrap())
+            buf_reader.read_u64::<BigEndian>().unwrap()
         } else {
-            XfsDir2Inou::XfsDir2Ino4(buf_reader.read_u32::<BigEndian>().unwrap())
+            buf_reader.read_u32::<BigEndian>().unwrap().into()
         };
 
         Dir2SfHdr {
@@ -77,17 +76,34 @@ impl Dir2SfHdr {
     }
 }
 
+impl Decode for Dir2SfHdr {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let count = Decode::decode(decoder)?;
+        let i8count = Decode::decode(decoder)?;
+        let parent = if i8count > 0 {
+            <u64 as Decode>::decode(decoder)?
+        } else {
+            <u32 as Decode>::decode(decoder)?.into()
+        };
+        Ok(Dir2SfHdr {
+            count,
+            i8count,
+            parent,
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
-pub struct Dir2SfEntry {
+pub struct Dir2SfEntry32 {
     pub namelen: u8,
     pub offset: u16,
     pub name: OsString,
     pub ftype: u8,
-    pub inumber: XfsDir2Inou,
+    pub inumber: u32,
 }
 
-impl Dir2SfEntry {
-    pub fn from<T: BufRead>(buf_reader: &mut T, i8count: u8) -> Dir2SfEntry {
+impl Dir2SfEntry32 {
+    pub fn from<T: BufRead>(buf_reader: &mut T) -> Dir2SfEntry32 {
         let namelen = buf_reader.read_u8().unwrap();
 
         let offset = buf_reader.read_u16::<BigEndian>().unwrap();
@@ -98,13 +114,61 @@ impl Dir2SfEntry {
 
         let ftype = buf_reader.read_u8().unwrap();
 
-        let inumber = if i8count > 0 {
-            XfsDir2Inou::XfsDir2Ino8(buf_reader.read_u64::<BigEndian>().unwrap())
-        } else {
-            XfsDir2Inou::XfsDir2Ino4(buf_reader.read_u32::<BigEndian>().unwrap())
-        };
+        let inumber = buf_reader.read_u32::<BigEndian>().unwrap();
 
-        Dir2SfEntry {
+        Dir2SfEntry32 {
+            namelen,
+            offset,
+            name,
+            ftype,
+            inumber,
+        }
+    }
+}
+
+impl Decode for Dir2SfEntry32 {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let namelen: u8 = Decode::decode(decoder)?;
+        let offset: u16 = Decode::decode(decoder)?;
+        let mut namebytes = vec![0u8; namelen.into()];
+        decoder.reader().read(&mut namebytes[..])?;
+        let name = OsString::from_vec(namebytes);
+        let ftype: u8 = Decode::decode(decoder)?;
+        let inumber: u32 = Decode::decode(decoder)?;
+        Ok(Dir2SfEntry32 {
+            namelen,
+            offset,
+            name,
+            ftype,
+            inumber,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Dir2SfEntry64 {
+    pub namelen: u8,
+    pub offset: u16,
+    pub name: OsString,
+    pub ftype: u8,
+    pub inumber: XfsIno,
+}
+
+impl Dir2SfEntry64 {
+    pub fn from<T: BufRead>(buf_reader: &mut T) -> Dir2SfEntry64 {
+        let namelen = buf_reader.read_u8().unwrap();
+
+        let offset = buf_reader.read_u16::<BigEndian>().unwrap();
+
+        let mut namebytes = vec![0u8; namelen.into()];
+        buf_reader.read_exact(&mut namebytes).unwrap();
+        let name = OsString::from_vec(namebytes);
+
+        let ftype = buf_reader.read_u8().unwrap();
+
+        let inumber = buf_reader.read_u64::<BigEndian>().unwrap();
+
+        Dir2SfEntry64 {
             namelen,
             offset,
             name,
@@ -113,12 +177,12 @@ impl Dir2SfEntry {
         }
     }
 
-    pub fn new(name: &[u8], ftype: u8, offset: u16, inumber: XfsDir2Inou)
+    pub fn new(name: &[u8], ftype: u8, offset: u16, inumber: XfsIno)
         -> Self
     {
         let namelen = name.len() as u8;
         let name = OsStr::from_bytes(name).to_owned();
-        Dir2SfEntry {
+        Self {
             namelen,
             offset,
             name,
@@ -128,27 +192,73 @@ impl Dir2SfEntry {
     }
 }
 
+impl Decode for Dir2SfEntry64 {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let namelen: u8 = Decode::decode(decoder)?;
+        let offset: u16 = Decode::decode(decoder)?;
+        let mut namebytes = vec![0u8; namelen.into()];
+        decoder.reader().read(&mut namebytes[..])?;
+        let name = OsString::from_vec(namebytes);
+        let ftype: u8 = Decode::decode(decoder)?;
+        let inumber: XfsIno = Decode::decode(decoder)?;
+        Ok(Dir2SfEntry64 {
+            namelen,
+            offset,
+            name,
+            ftype,
+            inumber,
+        })
+    }
+}
+
+// Since xfs-fuse is a read-only implementation, we needn't worry about
+// preserving the on-disk size of the inode.  We can just convert all of the
+// entries into the 64-bit type.
+impl From<Dir2SfEntry32> for Dir2SfEntry64 {
+    fn from(e32: Dir2SfEntry32) -> Self {
+        Self {
+            namelen: e32.namelen,
+            offset: e32.offset,
+            name: e32.name,
+            ftype: e32.ftype,
+            inumber: e32.inumber.into(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Dir2Sf {
     pub hdr: Dir2SfHdr,
-    pub list: Vec<Dir2SfEntry>,
+    pub list: Vec<Dir2SfEntry64>,
 }
 
 impl Dir2Sf {
-    pub fn from<T: BufRead>(buf_reader: &mut T, ino: XfsIno) -> Dir2Sf {
-        let hdr = Dir2SfHdr::from(buf_reader.by_ref());
-        let dot_ino = XfsDir2Inou::XfsDir2Ino8(ino);
+    /// Set the inode of this directory.  Annoyingly, we need to know it, but it
+    /// isn't stored on disk in this header.
+    pub fn set_ino(&mut self, ino: XfsIno) {
+        self.list[0].inumber = ino;
+    }
+}
 
-        let mut list = Vec::<Dir2SfEntry>::new();
+impl Decode for Dir2Sf {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let hdr: Dir2SfHdr = Decode::decode(decoder)?;
+
+        let mut list = Vec::<Dir2SfEntry64>::new();
         // Alone out of all the directory types, SF directories to not store the
         // "." and ".." entries on disk.  We must synthesize them here.
-        list.push(Dir2SfEntry::new(b".", XFS_DIR3_FT_DIR, 1, dot_ino));
-        list.push(Dir2SfEntry::new(b"..", XFS_DIR3_FT_DIR, 2, hdr.parent));
+        list.push(Dir2SfEntry64::new(b".", XFS_DIR3_FT_DIR, 1, u64::MAX));
+        list.push(Dir2SfEntry64::new(b"..", XFS_DIR3_FT_DIR, 2, hdr.parent));
         for _i in 0..hdr.count {
-            list.push(Dir2SfEntry::from(buf_reader.by_ref(), hdr.i8count))
+            if hdr.i8count > 0 {
+                list.push(Decode::decode(decoder)?);
+            } else {
+                let e32: Dir2SfEntry32 = Decode::decode(decoder)?;
+                list.push(e32.into());
+            }
         }
 
-        Dir2Sf { hdr, list }
+        Ok(Dir2Sf { hdr, list })
     }
 }
 
@@ -163,10 +273,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Sf {
 
         for entry in self.list.iter() {
             if entry.name == name {
-                inode = match entry.inumber {
-                    XfsDir2Inou::XfsDir2Ino8(inumber) => Some(inumber),
-                    XfsDir2Inou::XfsDir2Ino4(inumber) => Some(inumber as u64),
-                };
+                inode = Some(entry.inumber);
             }
         }
 
@@ -219,10 +326,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Sf {
                 continue;
             }
 
-            let ino = match entry.inumber {
-                XfsDir2Inou::XfsDir2Ino8(inumber) => inumber,
-                XfsDir2Inou::XfsDir2Ino4(inumber) => inumber as u64,
-            };
+            let ino = entry.inumber;
 
             let kind = get_file_type(FileKind::Type(entry.ftype))?;
 
