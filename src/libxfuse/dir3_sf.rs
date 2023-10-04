@@ -44,7 +44,6 @@ use bincode::{
     de::{Decoder, read::Reader},
     error::DecodeError
 };
-use byteorder::{BigEndian, ReadBytesExt};
 use fuser::{FileAttr, FileType};
 use libc::{c_int, ENOENT};
 
@@ -55,25 +54,6 @@ pub struct Dir2SfHdr {
     pub count: u8,
     pub i8count: u8,
     pub parent: XfsIno,
-}
-
-impl Dir2SfHdr {
-    pub fn from<T: BufRead>(buf_reader: &mut T) -> Dir2SfHdr {
-        let count = buf_reader.read_u8().unwrap();
-        let i8count = buf_reader.read_u8().unwrap();
-
-        let parent = if i8count > 0 {
-            buf_reader.read_u64::<BigEndian>().unwrap()
-        } else {
-            buf_reader.read_u32::<BigEndian>().unwrap().into()
-        };
-
-        Dir2SfHdr {
-            count,
-            i8count,
-            parent,
-        }
-    }
 }
 
 impl Decode for Dir2SfHdr {
@@ -100,30 +80,6 @@ pub struct Dir2SfEntry32 {
     pub name: OsString,
     pub ftype: u8,
     pub inumber: u32,
-}
-
-impl Dir2SfEntry32 {
-    pub fn from<T: BufRead>(buf_reader: &mut T) -> Dir2SfEntry32 {
-        let namelen = buf_reader.read_u8().unwrap();
-
-        let offset = buf_reader.read_u16::<BigEndian>().unwrap();
-
-        let mut namebytes = vec![0u8; namelen.into()];
-        buf_reader.read_exact(&mut namebytes).unwrap();
-        let name = OsString::from_vec(namebytes);
-
-        let ftype = buf_reader.read_u8().unwrap();
-
-        let inumber = buf_reader.read_u32::<BigEndian>().unwrap();
-
-        Dir2SfEntry32 {
-            namelen,
-            offset,
-            name,
-            ftype,
-            inumber,
-        }
-    }
 }
 
 impl Decode for Dir2SfEntry32 {
@@ -155,28 +111,6 @@ pub struct Dir2SfEntry64 {
 }
 
 impl Dir2SfEntry64 {
-    pub fn from<T: BufRead>(buf_reader: &mut T) -> Dir2SfEntry64 {
-        let namelen = buf_reader.read_u8().unwrap();
-
-        let offset = buf_reader.read_u16::<BigEndian>().unwrap();
-
-        let mut namebytes = vec![0u8; namelen.into()];
-        buf_reader.read_exact(&mut namebytes).unwrap();
-        let name = OsString::from_vec(namebytes);
-
-        let ftype = buf_reader.read_u8().unwrap();
-
-        let inumber = buf_reader.read_u64::<BigEndian>().unwrap();
-
-        Dir2SfEntry64 {
-            namelen,
-            offset,
-            name,
-            ftype,
-            inumber,
-        }
-    }
-
     pub fn new(name: &[u8], ftype: u8, offset: u16, inumber: XfsIno)
         -> Self
     {

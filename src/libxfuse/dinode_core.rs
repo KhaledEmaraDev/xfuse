@@ -25,8 +25,6 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use std::io::BufRead;
-
 use super::definitions::*;
 use super::utils::Uuid;
 
@@ -36,7 +34,6 @@ use bincode::{
     error::DecodeError,
     impl_borrow_decode
 };
-use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 
@@ -123,112 +120,6 @@ pub struct DinodeCore {
 
 impl DinodeCore {
     pub const SIZE: usize = 0xb0;   // For inode version 3
-
-    pub fn from<R: BufRead>(buf_reader: &mut R) -> DinodeCore {
-        let di_magic = buf_reader.read_u16::<BigEndian>().unwrap();
-        if di_magic != XFS_DINODE_MAGIC {
-            panic!("Agi magic number is invalid");
-        }
-
-        let di_mode = buf_reader.read_u16::<BigEndian>().unwrap();
-        let di_version = buf_reader.read_i8().unwrap();
-        let di_format = XfsDinodeFmt::from_u8(buf_reader.read_u8().unwrap()).unwrap();
-        let di_onlink = buf_reader.read_u16::<BigEndian>().unwrap();
-        let di_uid = buf_reader.read_u32::<BigEndian>().unwrap();
-        let di_gid = buf_reader.read_u32::<BigEndian>().unwrap();
-        let di_nlink = buf_reader.read_u32::<BigEndian>().unwrap();
-        let di_projid = buf_reader.read_u16::<BigEndian>().unwrap();
-        let di_projid_hi = buf_reader.read_u16::<BigEndian>().unwrap();
-
-        let mut buf_pad = [0u8; 6];
-        buf_reader.read_exact(&mut buf_pad[..]).unwrap();
-        let di_pad = buf_pad;
-
-        let di_flushiter = buf_reader.read_u16::<BigEndian>().unwrap();
-
-        let di_atime = XfsTimestamp {
-            t_sec: buf_reader.read_i32::<BigEndian>().unwrap(),
-            t_nsec: buf_reader.read_u32::<BigEndian>().unwrap(),
-        };
-        let di_mtime = XfsTimestamp {
-            t_sec: buf_reader.read_i32::<BigEndian>().unwrap(),
-            t_nsec: buf_reader.read_u32::<BigEndian>().unwrap(),
-        };
-        let di_ctime = XfsTimestamp {
-            t_sec: buf_reader.read_i32::<BigEndian>().unwrap(),
-            t_nsec: buf_reader.read_u32::<BigEndian>().unwrap(),
-        };
-
-        let di_size = buf_reader.read_i64::<BigEndian>().unwrap();
-        let di_nblocks = buf_reader.read_u64::<BigEndian>().unwrap();
-        let di_extsize = buf_reader.read_u32::<BigEndian>().unwrap();
-        let di_nextents = buf_reader.read_i32::<BigEndian>().unwrap();
-        let di_anextents = buf_reader.read_i16::<BigEndian>().unwrap();
-        let di_forkoff = buf_reader.read_u8().unwrap();
-        let di_aformat = XfsDinodeFmt::from_u8(buf_reader.read_u8().unwrap()).unwrap();
-        let di_dmevmask = buf_reader.read_u32::<BigEndian>().unwrap();
-        let di_dmstate = buf_reader.read_u16::<BigEndian>().unwrap();
-        let di_flags = buf_reader.read_u16::<BigEndian>().unwrap();
-        let di_gen = buf_reader.read_u32::<BigEndian>().unwrap();
-        let di_next_unlinked = buf_reader.read_u32::<BigEndian>().unwrap();
-
-        let di_crc = buf_reader.read_u32::<LittleEndian>().unwrap();
-        let di_changecount = buf_reader.read_u64::<BigEndian>().unwrap();
-        let di_lsn = buf_reader.read_u64::<BigEndian>().unwrap();
-        let di_flags2 = buf_reader.read_u64::<BigEndian>().unwrap();
-        let di_cowextsize = buf_reader.read_u32::<BigEndian>().unwrap();
-
-        let mut buf_pad2 = [0u8; 12];
-        buf_reader.read_exact(&mut buf_pad2[..]).unwrap();
-        let di_pad2 = buf_pad2;
-
-        let di_crtime = XfsTimestamp {
-            t_sec: buf_reader.read_i32::<BigEndian>().unwrap(),
-            t_nsec: buf_reader.read_u32::<BigEndian>().unwrap(),
-        };
-
-        let di_ino = buf_reader.read_u64::<BigEndian>().unwrap();
-        let di_uuid = Uuid::from_u128(buf_reader.read_u128::<BigEndian>().unwrap());
-
-        DinodeCore {
-            di_magic,
-            di_mode,
-            di_version,
-            di_format,
-            di_onlink,
-            di_uid,
-            di_gid,
-            di_nlink,
-            di_projid,
-            di_projid_hi,
-            di_pad,
-            di_flushiter,
-            di_atime,
-            di_mtime,
-            di_ctime,
-            di_size,
-            di_nblocks,
-            di_extsize,
-            di_nextents,
-            di_anextents,
-            di_forkoff,
-            di_aformat,
-            di_dmevmask,
-            di_dmstate,
-            di_flags,
-            di_gen,
-            di_next_unlinked,
-            di_crc,
-            di_changecount,
-            di_lsn,
-            di_flags2,
-            di_cowextsize,
-            di_pad2,
-            di_crtime,
-            di_ino,
-            di_uuid,
-        }
-    }
 
     pub fn sanity(&self) {
         assert_eq!(self.di_magic, XFS_DINODE_MAGIC,
