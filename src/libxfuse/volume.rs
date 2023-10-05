@@ -170,7 +170,7 @@ impl Filesystem for Volume {
         reply.data(
             dinode
                 .get_link_data(buf_reader.by_ref(), &self.sb)
-                .as_bytes_with_nul(),
+                .as_bytes(),
         );
     }
 
