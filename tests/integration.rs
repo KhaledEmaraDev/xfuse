@@ -4,7 +4,7 @@ use std::{
     fs,
     io,
     os::unix::{
-        ffi::OsStrExt,
+        ffi::{OsStrExt, OsStringExt},
         fs::{DirEntryExt, MetadataExt}
     },
     path::{Path, PathBuf},
@@ -213,9 +213,28 @@ fn harness() -> Harness {
 
 impl Drop for Harness {
     fn drop(&mut self) {
-        let _ = Command::new("umount")
-            .arg(self.d.path())
-            .output();
+        loop {
+            let cmd = Command::new("umount")
+                .arg(self.d.path())
+                .output();
+            match cmd {
+                Err(e) => {
+                    eprintln!("Executing umount failed: {}", e);
+                    if std::thread::panicking() {
+                        // Can't double panic
+                        return;
+                    }
+                    panic!("Executing umount failed");
+                },
+                Ok(output) => {
+                    if output.status.success() {
+                        break;
+                    }
+                    println!("{:?}", OsString::from_vec(output.stderr));
+                }
+            }
+            sleep(Duration::from_millis(50));
+        }
         let _ = self.child.wait();
     }
 }
