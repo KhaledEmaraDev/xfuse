@@ -212,6 +212,7 @@ fn harness() -> Harness {
 }
 
 impl Drop for Harness {
+    #[allow(clippy::if_same_then_else)]
     fn drop(&mut self) {
         loop {
             let cmd = Command::new("umount")
@@ -227,10 +228,25 @@ impl Drop for Harness {
                     panic!("Executing umount failed");
                 },
                 Ok(output) => {
+                    let errmsg = OsString::from_vec(output.stderr)
+                        .into_string()
+                        .unwrap();
                     if output.status.success() {
                         break;
+                    } else if errmsg.contains("not a file system root directory")
+                    {
+                        // The daemon probably crashed.
+                        break;
+                    } else if errmsg.contains("Device busy") {
+                        println!("{}", errmsg);
+                    } else {
+                        if std::thread::panicking() {
+                            // Can't double panic
+                            println!("{}", errmsg);
+                            return;
+                        }
+                        panic!("{}", errmsg);
                     }
-                    println!("{:?}", OsString::from_vec(output.stderr));
                 }
             }
             sleep(Duration::from_millis(50));
