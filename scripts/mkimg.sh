@@ -23,7 +23,7 @@ mkattrs() {
 }
 
 truncate -s 32m resources/xfs.img
-mkfs.xfs -n size=8192 -f resources/xfs.img
+mkfs.xfs --unsupported -n size=8192 -f resources/xfs.img
 MNTDIR=`mktemp -d`
 mount -t xfs resources/xfs.img $MNTDIR
 
