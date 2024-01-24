@@ -312,7 +312,6 @@ fn all_xattr_fork_types(d: &str) {}
 /// with devices that require all accesses to be sector size aligned.
 // Regression test for https://github.com/KhaledEmaraDev/xfuse/issues/15
 #[rstest]
-#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/46" ]
 #[named]
 fn dev() {
     require_fusefs!();
