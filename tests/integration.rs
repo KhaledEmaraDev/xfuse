@@ -1,4 +1,5 @@
 use std::{
+    convert::TryFrom,
     ffi::{OsStr, OsString},
     fmt,
     fs,
@@ -16,10 +17,7 @@ use std::{
 use assert_cmd::cargo::CommandCargoExt;
 use function_name::named;
 use lazy_static::lazy_static;
-use nix::{
-    sys::statfs::statfs,
-    unistd::{AccessFlags, access}
-};
+use nix::unistd::{AccessFlags, access};
 use rstest::{fixture, rstest};
 use rstest_reuse::{self, apply, template};
 use tempfile::{tempdir, TempDir};
@@ -201,7 +199,7 @@ fn harness() -> Harness {
         .unwrap();
 
     waitfor(Duration::from_secs(5), || {
-        let s = statfs(d.path()).unwrap();
+        let s = nix::sys::statfs::statfs(d.path()).unwrap();
         s.filesystem_type_name() == "fusefs.xfs"
     }).unwrap();
 
@@ -272,7 +270,7 @@ fn mdharness() -> MdHarness {
         .unwrap();
 
     waitfor(Duration::from_secs(5), || {
-        let s = statfs(d.path()).unwrap();
+        let s = nix::sys::statfs::statfs(d.path()).unwrap();
         s.filesystem_type_name() == "fusefs.xfs"
     }).unwrap();
 
@@ -620,6 +618,34 @@ mod stat {
         assert_eq!(1, stat.st_nlink, "AT_SYMLINK_NOFOLLOW was ignored");
         assert_eq!(ino, stat.st_ino);
     }
+}
+
+#[named]
+#[rstest]
+fn statfs(harness: Harness) {
+    require_fusefs!();
+
+    let sfs = nix::sys::statfs::statfs(harness.d.path()).unwrap();
+
+    assert_eq!(sfs.blocks(), 6824);
+    assert_eq!(sfs.block_size(), 4096);
+
+    // Linux's calculation for blocks available and free is complicated and the
+    // docs indicate that it's approximate.  So don't assert on the exact value.
+    assert_eq!(sfs.blocks_available(), i64::try_from(sfs.blocks_free()).unwrap());
+
+    // Linux's calculation for f_files is very confusing and not supported by
+    // the XFS documentation.  I think it may be wrong.  So don't assert on it
+    // here.
+    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 9650);
+
+    // There are legitimate questions about what the correct value for
+    // optimal_transfer_size
+    // really is.  Until that's decided, don't assert on it.
+    // https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=253424
+
+    // svfs.f_fsid is not very useful, and can't even be read if we aren't root.
+    // So ignore it.
 }
 
 #[named]
