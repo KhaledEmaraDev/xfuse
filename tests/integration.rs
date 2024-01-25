@@ -615,6 +615,34 @@ mod stat {
         assert_eq!(stat.st_nlink, 2);
     }
 
+    /// Timestamps from before the Epoch should work
+    #[named]
+    #[rstest]
+    fn pre_epoch(harness: Harness) {
+        require_fusefs!();
+
+        let path = harness.d.path().join("files").join("old.txt");
+
+        let stat = nix::sys::stat::stat(&path).unwrap();
+        assert_eq!(stat.st_mtime, -1613800129);
+        assert_eq!(stat.st_atime, -1613800129);
+    }
+
+    #[named]
+    #[rstest]
+    #[case::blockdev("blockdev", libc::S_IFBLK)]
+    #[case::chardev("chardev", libc::S_IFCHR)]
+    #[case::fifo("fifo", libc::S_IFIFO)]
+    #[case::socket("sock", libc::S_IFSOCK)]
+    fn devs(harness: Harness, #[case] filename: &str, #[case] devtype: u16) {
+        require_fusefs!();
+
+        let path = harness.d.path().join("files").join(filename);
+        
+        let stat = nix::sys::stat::stat(&path).unwrap();
+        assert_eq!(stat.st_mode & libc::S_IFMT, devtype);
+    }
+
     /// stat should work on symlinks
     #[named]
     #[rstest]
@@ -651,7 +679,7 @@ fn statfs(harness: Harness) {
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
     // here.
-    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 9650);
+    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 9655);
 
     // There are legitimate questions about what the correct value for
     // optimal_transfer_size
@@ -676,7 +704,7 @@ fn statvfs(harness: Harness) {
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
     // here.
-    assert_eq!(svfs.files() - svfs.files_free(), 9650);
+    assert_eq!(svfs.files() - svfs.files_free(), 9655);
     assert_eq!(svfs.files_free(), svfs.files_available());
 
     // Linux's calculation for blocks available and free is complicated and the

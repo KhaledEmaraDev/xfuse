@@ -54,15 +54,19 @@ use bincode::{
     Decode,
     de::{Decoder, read::Reader}
 };
-use libc::{mode_t, S_IFDIR, S_IFLNK, S_IFMT, S_IFREG};
+use libc::{mode_t, S_IFDIR, S_IFLNK, S_IFMT, S_IFREG, S_IFSOCK, S_IFIFO, S_IFCHR, S_IFBLK};
 
 pub const LITERAL_AREA_OFFSET: u8 = 0xb0;
 
 #[derive(Debug)]
 pub enum DiU {
-    Dir2Sf(Dir2Sf),
-    Bmx(Vec<BmbtRec>),
+    Blk,
     Bmbt((BmdrBlock, Vec<BmbtKey>, Vec<XfsBmbtPtr>)),
+    Bmx(Vec<BmbtRec>),
+    Chr,
+    Dir2Sf(Dir2Sf),
+    Fifo,
+    Socket,
     Symlink(Vec<u8>),
 }
 
@@ -204,6 +208,18 @@ impl Dinode {
                 _ => {
                     panic!("Unexpected format for symlink");
                 }
+            },
+            S_IFBLK => {
+                di_u = Some(DiU::Blk)
+            },
+            S_IFCHR => {
+                di_u = Some(DiU::Chr)
+            },
+            S_IFIFO => {
+                di_u = Some(DiU::Fifo)
+            },
+            S_IFSOCK => {
+                di_u = Some(DiU::Socket)
             },
             _ => panic!("Inode type not yet supported."),
         }

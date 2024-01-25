@@ -27,9 +27,9 @@
  */
 use fuser::FileType;
 
-use super::dir3::{XFS_DIR3_FT_DIR, XFS_DIR3_FT_REG_FILE, XFS_DIR3_FT_SYMLINK};
+use super::dir3::{XFS_DIR3_FT_DIR, XFS_DIR3_FT_REG_FILE, XFS_DIR3_FT_SYMLINK, XFS_DIR3_FT_SOCK, XFS_DIR3_FT_CHRDEV, XFS_DIR3_FT_BLKDEV, XFS_DIR3_FT_FIFO};
 
-use libc::{c_int, mode_t, ENOENT, S_IFDIR, S_IFLNK, S_IFMT, S_IFREG};
+use libc::{c_int, mode_t, ENOENT, S_IFDIR, S_IFLNK, S_IFMT, S_IFREG, S_IFSOCK, S_IFCHR, S_IFBLK, S_IFIFO};
 use bincode::{
     Decode,
     de::{
@@ -88,6 +88,10 @@ pub fn get_file_type(kind: FileKind) -> Result<FileType, c_int> {
             XFS_DIR3_FT_REG_FILE => Ok(FileType::RegularFile),
             XFS_DIR3_FT_DIR => Ok(FileType::Directory),
             XFS_DIR3_FT_SYMLINK => Ok(FileType::Symlink),
+            XFS_DIR3_FT_SOCK => Ok(FileType::Socket),
+            XFS_DIR3_FT_CHRDEV => Ok(FileType::CharDevice),
+            XFS_DIR3_FT_BLKDEV => Ok(FileType::BlockDevice),
+            XFS_DIR3_FT_FIFO => Ok(FileType::NamedPipe),
             _ => {
                 error!("Unknown file type {:?}.", file_type);
                 Err(ENOENT)
@@ -97,6 +101,10 @@ pub fn get_file_type(kind: FileKind) -> Result<FileType, c_int> {
             S_IFREG => Ok(FileType::RegularFile),
             S_IFDIR => Ok(FileType::Directory),
             S_IFLNK => Ok(FileType::Symlink),
+            S_IFSOCK => Ok(FileType::Socket),
+            S_IFCHR => Ok(FileType::CharDevice),
+            S_IFBLK => Ok(FileType::BlockDevice),
+            S_IFIFO => Ok(FileType::NamedPipe),
             _ => {
                 error!("Unknown file type {:?}.", (file_mode as mode_t) & S_IFMT);
                 Err(ENOENT)
