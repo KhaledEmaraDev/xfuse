@@ -621,3 +621,34 @@ mod stat {
         assert_eq!(ino, stat.st_ino);
     }
 }
+
+#[named]
+#[rstest]
+fn statvfs(harness: Harness) {
+    require_fusefs!();
+
+    let svfs = nix::sys::statvfs::statvfs(harness.d.path()).unwrap();
+    // xfuse is always read-only.
+    assert!(svfs.flags().contains(nix::sys::statvfs::FsFlags::ST_RDONLY));
+    assert_eq!(svfs.fragment_size(), 4096);
+    assert_eq!(svfs.blocks(), 6824);
+    
+    // Linux's calculation for f_files is very confusing and not supported by
+    // the XFS documentation.  I think it may be wrong.  So don't assert on it
+    // here.
+    assert_eq!(svfs.files() - svfs.files_free(), 9650);
+    assert_eq!(svfs.files_free(), svfs.files_available());
+
+    // Linux's calculation for blocks available and free is complicated and the
+    // docs indicate that it's approximate.  So don't assert on the exact value.
+    assert_eq!(svfs.blocks_available(), svfs.blocks_free());
+
+    // There are legitimate questions about what the correct value for f_bsize
+    // really is.  Until that's decided, don't assert on it.
+    // https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=253424
+
+    // svfs.f_fsid is not meaningful.  Use stat().f_fsid instead
+
+    // svfs.f_namemax is DONTCARE.  This information should be retrieved via
+    // pathconf instead.
+}
