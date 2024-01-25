@@ -1,4 +1,5 @@
 use std::{
+    convert::TryFrom,
     ffi::{OsStr, OsString},
     fmt,
     fs,
@@ -16,10 +17,7 @@ use std::{
 use assert_cmd::cargo::CommandCargoExt;
 use function_name::named;
 use lazy_static::lazy_static;
-use nix::{
-    sys::statfs::statfs,
-    unistd::{AccessFlags, access}
-};
+use nix::unistd::{AccessFlags, access};
 use rstest::{fixture, rstest};
 use rstest_reuse::{self, apply, template};
 use tempfile::{tempdir, TempDir};
@@ -201,7 +199,7 @@ fn harness() -> Harness {
         .unwrap();
 
     waitfor(Duration::from_secs(5), || {
-        let s = statfs(d.path()).unwrap();
+        let s = nix::sys::statfs::statfs(d.path()).unwrap();
         s.filesystem_type_name() == "fusefs.xfs"
     }).unwrap();
 
@@ -272,7 +270,7 @@ fn mdharness() -> MdHarness {
         .unwrap();
 
     waitfor(Duration::from_secs(5), || {
-        let s = statfs(d.path()).unwrap();
+        let s = nix::sys::statfs::statfs(d.path()).unwrap();
         s.filesystem_type_name() == "fusefs.xfs"
     }).unwrap();
 
@@ -493,6 +491,20 @@ fn lsextattr_size(harness: Harness, #[case] d: &str) {
     }
 }
 
+mod pathconf {
+    use super::*;
+
+    #[named]
+    #[rstest]
+    fn name_max(harness: Harness) {
+        require_fusefs!();
+
+        let var = nix::unistd::PathconfVar::NAME_MAX;
+        let r = nix::unistd::pathconf(harness.d.path(), var).unwrap();
+        assert_eq!(Some(255), r);
+    }
+}
+
 /// List a directory's contents with readdir
 #[named]
 #[rstest]
@@ -620,4 +632,63 @@ mod stat {
         assert_eq!(1, stat.st_nlink, "AT_SYMLINK_NOFOLLOW was ignored");
         assert_eq!(ino, stat.st_ino);
     }
+}
+
+#[named]
+#[rstest]
+fn statfs(harness: Harness) {
+    require_fusefs!();
+
+    let sfs = nix::sys::statfs::statfs(harness.d.path()).unwrap();
+
+    assert_eq!(sfs.blocks(), 6824);
+    assert_eq!(sfs.block_size(), 4096);
+
+    // Linux's calculation for blocks available and free is complicated and the
+    // docs indicate that it's approximate.  So don't assert on the exact value.
+    assert_eq!(sfs.blocks_available(), i64::try_from(sfs.blocks_free()).unwrap());
+
+    // Linux's calculation for f_files is very confusing and not supported by
+    // the XFS documentation.  I think it may be wrong.  So don't assert on it
+    // here.
+    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 9650);
+
+    // There are legitimate questions about what the correct value for
+    // optimal_transfer_size
+    // really is.  Until that's decided, don't assert on it.
+    // https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=253424
+
+    // svfs.f_fsid is not very useful, and can't even be read if we aren't root.
+    // So ignore it.
+}
+
+#[named]
+#[rstest]
+fn statvfs(harness: Harness) {
+    require_fusefs!();
+
+    let svfs = nix::sys::statvfs::statvfs(harness.d.path()).unwrap();
+    // xfuse is always read-only.
+    assert!(svfs.flags().contains(nix::sys::statvfs::FsFlags::ST_RDONLY));
+    assert_eq!(svfs.fragment_size(), 4096);
+    assert_eq!(svfs.blocks(), 6824);
+    
+    // Linux's calculation for f_files is very confusing and not supported by
+    // the XFS documentation.  I think it may be wrong.  So don't assert on it
+    // here.
+    assert_eq!(svfs.files() - svfs.files_free(), 9650);
+    assert_eq!(svfs.files_free(), svfs.files_available());
+
+    // Linux's calculation for blocks available and free is complicated and the
+    // docs indicate that it's approximate.  So don't assert on the exact value.
+    assert_eq!(svfs.blocks_available(), svfs.blocks_free());
+
+    // There are legitimate questions about what the correct value for f_bsize
+    // really is.  Until that's decided, don't assert on it.
+    // https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=253424
+
+    // svfs.f_fsid is not meaningful.  Use stat().f_fsid instead
+
+    // svfs.f_namemax is DONTCARE.  This information should be retrieved via
+    // pathconf instead.
 }

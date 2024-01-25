@@ -58,7 +58,8 @@ fn main() {
 
     let mut opts = vec![
         MountOption::FSName("fusefs".to_string()),
-        MountOption::Subtype("xfs".to_string())
+        MountOption::Subtype("xfs".to_string()),
+        MountOption::RO
     ];
     for o in app.options.iter() {
         opts.push(match o.as_str() {
@@ -70,8 +71,6 @@ fn main() {
             "nodev" => MountOption::NoDev,
             "suid" => MountOption::Suid,
             "nosuid" => MountOption::NoSuid,
-            "ro" => MountOption::RO,
-            "rw" => MountOption::RW,
             "exec" => MountOption::Exec,
             "noexec" => MountOption::NoExec,
             "atime" => MountOption::Atime,

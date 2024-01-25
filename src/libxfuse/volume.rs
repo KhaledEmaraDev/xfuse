@@ -282,7 +282,7 @@ impl Filesystem for Volume {
 
     fn statfs(&mut self, _req: &Request, _ino: u64, reply: ReplyStatfs) {
         reply.statfs(
-            self.sb.sb_dblocks,
+            self.sb.sb_dblocks - u64::from(self.sb.sb_logblocks),
             self.sb.sb_fdblocks,
             self.sb.sb_fdblocks,
             self.sb.sb_icount,
