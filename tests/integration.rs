@@ -551,3 +551,36 @@ fn readlink(harness: Harness, #[case] linkname: &str, #[case] destname: &str)
     let dest = fs::read_link(path).unwrap();
     assert_eq!(dest.as_os_str(), destname);
 }
+
+/// Verify all of an inode's metadata
+// This may need to be updated whenever the golden image gets rebuilt.
+#[named]
+#[rstest]
+fn stat(harness: Harness) {
+    require_fusefs!();
+
+    let path = harness.d.path().join("files").join("hello.txt");
+
+    // Due to the interaction of two bugs, we can't use std::fs::metadata here.
+    // Instead, we'll use the lower-level nix::sys::stat::stat
+    // https://github.com/rust-lang/rust/issues/108277
+    // https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=276602
+    let stat = nix::sys::stat::stat(&path).unwrap();
+
+    assert_eq!(stat.st_mtime, 401526123);
+    assert_eq!(stat.st_mtime_nsec, 0);  // mkimg.sh can't set nsec
+    assert_eq!(stat.st_atime, 1332497106);
+    assert_eq!(stat.st_atime_nsec, 0);  // mkimg.sh can't set nsec
+    // mkimg.sh doesn't have a way to set ctime.  So just check that it's
+    // greater than mtime.
+    assert!(stat.st_ctime > stat.st_mtime || 
+            stat.st_ctime_nsec > stat.st_mtime_nsec);
+    assert_eq!(stat.st_ino, 44966);
+    assert_eq!(stat.st_size, 14);
+    assert_eq!(stat.st_blksize, 4096);
+    assert_eq!(stat.st_blocks, 1);
+    assert_eq!(stat.st_uid, 1234);
+    assert_eq!(stat.st_gid, 5678);
+    assert_eq!(stat.st_mode, libc::S_IFREG | 0o1234);
+    assert_eq!(stat.st_nlink, 2);
+}
