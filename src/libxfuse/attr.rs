@@ -199,7 +199,7 @@ impl AttrLeafblock {
         buf_reader: &mut R,
         hash: u32,
         leaf_offset: u64,
-    ) -> u32 {
+    ) -> Result<u32, libc::c_int> {
         let mut low: u32 = 0;
         let mut high: u32 = self.hdr.count.into();
 
@@ -235,16 +235,16 @@ impl AttrLeafblock {
 
                     if entry.flags & XFS_ATTR_LOCAL != 0 {
                         let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
-                        return name_entry.valuelen.into();
+                        return Ok(name_entry.valuelen.into());
                     } else {
                         let name_entry = AttrLeafNameRemote::from(buf_reader.by_ref());
-                        return name_entry.valuelen;
+                        return Ok(name_entry.valuelen);
                     }
                 }
             }
         }
 
-        panic!("Couldn't find the attribute entry");
+        Err(libc::ENOATTR)
     }
 
     pub fn list<R: BufRead + Seek>(
@@ -454,7 +454,7 @@ impl AttrRmtHdr {
 pub trait Attr<R: BufRead + Seek> {
     fn get_total_size(&mut self, buf_reader: &mut R, super_block: &Sb) -> u32;
 
-    fn get_size(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> u32;
+    fn get_size(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Result<u32, libc::c_int>;
 
     fn list(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8>;
 

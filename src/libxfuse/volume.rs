@@ -309,26 +309,27 @@ impl Filesystem for Volume {
         let attrs = dinode.get_attrs(buf_reader.by_ref(), &self.sb);
         match attrs {
             Some(attrs) => {
-                let attrs_size = attrs.get_size(buf_reader.by_ref(), &self.sb, name);
-
-                if size == 0 {
-                    reply.size(attrs_size);
-                    return;
+                // TODO: make this part more efficient by omitting the
+                // "get_size" step.  It doesn't need to be a separate step
+                // because we aren't using a user-supplied buffer.  Instead,
+                // just get the whole value and check its size right here.
+                match attrs.get_size(buf_reader.by_ref(), &self.sb, name) {
+                    Ok(attrs_size) => {
+                        if size == 0 {
+                            reply.size(attrs_size);
+                        } else if attrs_size > size {
+                            reply.error(ERANGE);
+                        } else {
+                            reply.data(attrs.get(buf_reader.by_ref(), &self.sb, name).as_slice());
+                        }
+                    }
+                    Err(e) => {
+                        reply.error(e)
+                    }
                 }
-
-                if attrs_size > size {
-                    reply.error(ERANGE);
-                    return;
-                }
-
-                reply.data(attrs.get(buf_reader.by_ref(), &self.sb, name).as_slice());
             }
             None => {
-                if size == 0 {
-                    reply.size(0);
-                } else {
-                    panic!("No attributes!");
-                }
+                reply.error(libc::ENOATTR);
             }
         }
     }
@@ -360,11 +361,7 @@ impl Filesystem for Volume {
                 reply.data(attrs.list(buf_reader.by_ref(), &self.sb).as_slice());
             }
             None => {
-                if size == 0 {
-                    reply.size(0);
-                } else {
-                    panic!("No attributes!");
-                }
+                reply.size(0);
             }
         }
     }

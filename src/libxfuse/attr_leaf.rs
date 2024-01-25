@@ -100,7 +100,7 @@ impl<R: BufRead + Seek> Attr<R> for AttrLeaf {
         }
     }
 
-    fn get_size(&self, buf_reader: &mut R, _super_block: &Sb, name: &OsStr) -> u32 {
+    fn get_size(&self, buf_reader: &mut R, _super_block: &Sb, name: &OsStr) -> Result<u32, libc::c_int> {
         let hash = hashname(name);
 
         self.leaf
