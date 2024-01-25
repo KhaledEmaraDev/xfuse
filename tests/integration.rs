@@ -491,6 +491,20 @@ fn lsextattr_size(harness: Harness, #[case] d: &str) {
     }
 }
 
+mod pathconf {
+    use super::*;
+
+    #[named]
+    #[rstest]
+    fn name_max(harness: Harness) {
+        require_fusefs!();
+
+        let var = nix::unistd::PathconfVar::NAME_MAX;
+        let r = nix::unistd::pathconf(harness.d.path(), var).unwrap();
+        assert_eq!(Some(255), r);
+    }
+}
+
 /// List a directory's contents with readdir
 #[named]
 #[rstest]
