@@ -382,6 +382,21 @@ fn getextattr_size(harness: Harness, #[case] d: &str) {
     }
 }
 
+/// Hardlinks work. stat should return the same metadata for each and the link
+/// count should be correct. lookup via both paths should return the same ino.
+#[named]
+#[rstest]
+fn hardlink(harness: Harness) {
+    require_fusefs!();
+
+    let path1 = harness.d.path().join("files").join("hello.txt");
+    let path2 = harness.d.path().join("files").join("hello2.txt");
+
+    let stat1 = nix::sys::stat::stat(&path1).unwrap();
+    let stat2 = nix::sys::stat::stat(&path2).unwrap();
+    assert_eq!(stat1, stat2);
+}
+
 /// Mount and unmount the golden image
 #[rstest]
 #[named]
