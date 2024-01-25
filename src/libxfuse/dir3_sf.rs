@@ -28,9 +28,7 @@
 use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, Seek};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
-use std::time::{Duration, UNIX_EPOCH};
 
-use super::S_IFMT;
 use super::{
     definitions::*,
     dinode::Dinode,
@@ -214,34 +212,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Sf {
         if let Some(ino) = inode {
             let dinode = Dinode::from(buf_reader.by_ref(), super_block, ino);
 
-            let kind = get_file_type(FileKind::Mode(dinode.di_core.di_mode))?;
-
-            let attr = FileAttr {
-                ino,
-                size: dinode.di_core.di_size as u64,
-                blocks: dinode.di_core.di_nblocks,
-                atime: UNIX_EPOCH + Duration::new(
-                    dinode.di_core.di_atime.t_sec as u64,
-                    dinode.di_core.di_atime.t_nsec,
-                ),
-                mtime: UNIX_EPOCH + Duration::new(
-                    dinode.di_core.di_mtime.t_sec as u64,
-                    dinode.di_core.di_mtime.t_nsec,
-                ),
-                ctime: UNIX_EPOCH + Duration::new(
-                    dinode.di_core.di_ctime.t_sec as u64,
-                    dinode.di_core.di_ctime.t_nsec,
-                ),
-                crtime: UNIX_EPOCH,
-                kind,
-                perm: dinode.di_core.di_mode & !S_IFMT,
-                nlink: dinode.di_core.di_nlink,
-                uid: dinode.di_core.di_uid,
-                gid: dinode.di_core.di_gid,
-                rdev: 0,
-                blksize: 0,
-                flags: 0,
-            };
+            let attr = dinode.di_core.stat(ino)?;
 
             Ok((attr, dinode.di_core.di_gen.into()))
         } else {

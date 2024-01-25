@@ -26,7 +26,10 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 use super::definitions::*;
-use super::utils::Uuid;
+use super::utils::{get_file_type, FileKind, Uuid};
+use super::S_IFMT;
+
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bincode::{
     Decode,
@@ -34,8 +37,11 @@ use bincode::{
     error::DecodeError,
     impl_borrow_decode
 };
+use fuser::FileAttr;
+use libc::c_int;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
+
 
 #[derive(Debug, FromPrimitive)]
 pub enum XfsDinodeFmt {
@@ -76,6 +82,8 @@ pub const XFS_DIFLAG_EXTSIZE: u16 = 1 << 11;
 pub const XFS_DIFLAG_EXTSZINHERIT: u16 = 1 << 12;
 pub const XFS_DIFLAG_NODEFRAG: u16 = 1 << 13;
 pub const XFS_DIFLAG_FILESTREAMS: u16 = 1 << 14;
+
+pub const XFS_DIFLAG2_BITTIME: u64 = 1 << 3;
 
 #[derive(Debug, bincode::Decode)]
 pub struct DinodeCore {
@@ -124,5 +132,44 @@ impl DinodeCore {
     pub fn sanity(&self) {
         assert_eq!(self.di_magic, XFS_DINODE_MAGIC,
                    "Agi magic number is invalid");
+    }
+
+    pub fn stat(&self, ino: XfsIno) -> Result<FileAttr, c_int> {
+        let kind = get_file_type(FileKind::Mode(self.di_mode))?;
+        Ok(FileAttr {
+                ino,
+                size: self.di_size as u64,
+                blocks: self.di_nblocks,
+                atime: self.timestamp(&self.di_atime),
+                mtime: self.timestamp(&self.di_mtime),
+                ctime: self.timestamp(&self.di_ctime),
+                crtime: self.timestamp(&self.di_crtime),
+                kind,
+                perm: self.di_mode & !S_IFMT,
+                nlink: self.di_nlink,
+                uid: self.di_uid,
+                gid: self.di_gid,
+                rdev: 0,
+                blksize: 0,
+                flags: 0,
+        })
+    }
+
+    fn timestamp(&self, ts: &XfsTimestamp) -> SystemTime {
+        if self.di_version >= 3 && (self.di_flags2 & XFS_DIFLAG2_BITTIME != 0) {
+            // XXX this could be made a const if the Rust const_trait_impl
+            // feature stabilizes.
+            let classic_epoch: SystemTime = UNIX_EPOCH - Duration::from_secs(i32::MAX as u64 + 1);
+
+            classic_epoch + Duration::from_nanos(
+                u64::from(ts.t_sec as u32) * (1u64 << 32) + 
+                u64::from(ts.t_nsec)
+            )
+        } else {
+            UNIX_EPOCH + Duration::new(
+                ts.t_sec as u64,
+                ts.t_nsec,
+            )
+        }
     }
 }

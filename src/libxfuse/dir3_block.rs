@@ -29,9 +29,7 @@ use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, Seek, SeekFrom};
 use std::mem;
-use std::time::{Duration, UNIX_EPOCH};
 
-use super::S_IFMT;
 use super::da_btree::hashname;
 use super::definitions::*;
 use super::dinode::Dinode;
@@ -148,34 +146,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Block {
 
             let dinode = Dinode::from(buf_reader.by_ref(), super_block, entry.inumber);
 
-            let kind = get_file_type(FileKind::Mode(dinode.di_core.di_mode))?;
-
-            let attr = FileAttr {
-                ino: entry.inumber,
-                size: dinode.di_core.di_size as u64,
-                blocks: dinode.di_core.di_nblocks,
-                atime: UNIX_EPOCH + Duration::new(
-                    dinode.di_core.di_atime.t_sec as u64,
-                    dinode.di_core.di_atime.t_nsec,
-                ),
-                mtime: UNIX_EPOCH + Duration::new(
-                    dinode.di_core.di_mtime.t_sec as u64,
-                    dinode.di_core.di_mtime.t_nsec,
-                ),
-                ctime: UNIX_EPOCH + Duration::new(
-                    dinode.di_core.di_ctime.t_sec as u64,
-                    dinode.di_core.di_ctime.t_nsec,
-                ),
-                crtime: UNIX_EPOCH,
-                kind,
-                perm: dinode.di_core.di_mode & !S_IFMT,
-                nlink: dinode.di_core.di_nlink,
-                uid: dinode.di_core.di_uid,
-                gid: dinode.di_core.di_gid,
-                rdev: 0,
-                blksize: 0,
-                flags: 0,
-            };
+            let attr = dinode.di_core.stat(entry.inumber)?;
 
             Ok((attr, dinode.di_core.di_gen.into()))
         } else {
