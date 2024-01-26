@@ -81,7 +81,7 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrBtree {
         self.total_size.try_into().unwrap()
     }
 
-    fn get_size(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> u32 {
+    fn get_size(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Result<u32, libc::c_int> {
         let hash = hashname(name);
 
         let blk = self.btree.map_block(buf_reader.by_ref(), super_block, 0);

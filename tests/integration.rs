@@ -326,20 +326,89 @@ fn dev() {
     }
 }
 
-#[named]
-#[apply(all_xattr_fork_types)]
-fn getextattr(harness: Harness, #[case] d: &str) {
-    require_fusefs!();
+mod getextattr {
+    use super::*;
 
-    let p = harness.d.path().join("xattrs").join(d);
+    #[named]
+    #[apply(all_xattr_fork_types)]
+    fn ok(harness: Harness, #[case] d: &str) {
+        require_fusefs!();
 
-    for i in 0..attrs_per_file(d) {
-        let s = format!("user.attr.{:06}", i);
-        let attrname = OsStr::new(s.as_str());
-        let expected_value = OsString::from(format!("value.{:06}", i));
-        let binary_value = xattr::get(&p, attrname).unwrap().unwrap();
-        let value = OsStr::from_bytes(&binary_value[..]);
-        assert_eq!(expected_value, value);
+        let p = harness.d.path().join("xattrs").join(d);
+
+        for i in 0..attrs_per_file(d) {
+            let s = format!("user.attr.{:06}", i);
+            let attrname = OsStr::new(s.as_str());
+            let expected_value = OsString::from(format!("value.{:06}", i));
+            let binary_value = xattr::get(&p, attrname).unwrap().unwrap();
+            let value = OsStr::from_bytes(&binary_value[..]);
+            assert_eq!(expected_value, value);
+        }
+    }
+
+    /// Try to get the value of an extended attribute that doesn't exist.
+    // This test is freebsd-specific because the relevant syscall is.  It could
+    // be implemented for Linux too, but I haven't done so.
+    #[cfg(target_os = "freebsd")]
+    #[named]
+    #[rstest]
+    #[case::none("files/hello.txt")]
+    #[case::local("xattrs/local")]
+    #[case::extents("xattrs/extents")]
+    fn enoattr(harness: Harness, #[case] d: &str) {
+        use std::ffi::CString;
+
+        require_fusefs!();
+
+        let ns = libc::EXTATTR_NAMESPACE_USER;
+        let p = harness.d.path().join(d);
+        let cpath = CString::new(p.as_os_str().as_bytes()).unwrap();
+        let attrname = OsStr::new("user.nonexistent");
+        let cattrname = CString::new(attrname.as_bytes()).unwrap();
+        let mut v = Vec::<u8>::with_capacity(80);
+        let r = unsafe {
+            libc::extattr_get_file(
+                cpath.as_ptr(),
+                ns,
+                cattrname.as_ptr(),
+                v.as_mut_ptr().cast(),
+                v.capacity()
+            )
+        };
+        assert!(r < 0);
+        assert_eq!(libc::ENOATTR, io::Error::last_os_error().raw_os_error().unwrap());
+    }
+
+    /// Try to get the size of an extended attribute that doesn't exist.
+    // This test is freebsd-specific because the relevant syscall is.  It could
+    // be implemented for Linux too, but I haven't done so.
+    #[cfg(target_os = "freebsd")]
+    #[named]
+    #[rstest]
+    #[case::none("files/hello.txt")]
+    #[case::local("xattrs/local")]
+    #[case::extents("xattrs/extents")]
+    fn enoattr_size(harness: Harness, #[case] d: &str) {
+        use std::{ffi::CString, ptr};
+
+        require_fusefs!();
+
+        let ns = libc::EXTATTR_NAMESPACE_USER;
+        let p = harness.d.path().join(d);
+        let cpath = CString::new(p.as_os_str().as_bytes()).unwrap();
+        let attrname = OsStr::new("user.nonexistent");
+        let cattrname = CString::new(attrname.as_bytes()).unwrap();
+        let r = unsafe {
+            libc::extattr_get_file(
+                cpath.as_ptr(),
+                ns,
+                cattrname.as_ptr(),
+                ptr::null_mut(),
+                0
+            )
+        };
+        assert!(r < 0);
+        assert_eq!(libc::ENOATTR, io::Error::last_os_error().raw_os_error().unwrap());
     }
 }
 
@@ -440,54 +509,108 @@ fn lookup_dots(harness: Harness, #[case] d: &str) {
     assert_eq!(root_md.ino(), dotdot_md.ino());
 }
 
-#[named]
-#[apply(all_xattr_fork_types)]
-fn lsextattr(harness: Harness, #[case] d: &str) {
-    require_fusefs!();
+mod lsextattr {
+    use super::*;
 
-    let p = harness.d.path().join("xattrs").join(d);
-    let mut count = 0;
+    #[named]
+    #[apply(all_xattr_fork_types)]
+    fn ok(harness: Harness, #[case] d: &str) {
+        require_fusefs!();
 
-    let mut all_attrnames = xattr::list(p).unwrap().collect::<Vec<_>>();
-    all_attrnames.sort_unstable();
-    for (i, attrname) in all_attrnames.into_iter().enumerate() {
-        let expected_name = OsString::from(format!("user.attr.{:06}", i));
-        //eprintln!("{:?}", attrname);
-        assert_eq!(expected_name, attrname);
-        count += 1;
+        let p = harness.d.path().join("xattrs").join(d);
+        let mut count = 0;
+
+        let mut all_attrnames = xattr::list(p).unwrap().collect::<Vec<_>>();
+        all_attrnames.sort_unstable();
+        for (i, attrname) in all_attrnames.into_iter().enumerate() {
+            let expected_name = OsString::from(format!("user.attr.{:06}", i));
+            assert_eq!(expected_name, attrname);
+            count += 1;
+        }
+        assert_eq!(count, attrs_per_file(d));
     }
-    assert_eq!(count, attrs_per_file(d));
-}
 
-/// Lookup the size of the extended attribute list of a file, without fetching
-/// it.
-// This test is freebsd-specific because the relevant syscall is.  It could be
-// implemented for Linux too, but I haven't done so.
-#[cfg(target_os = "freebsd")]
-#[named]
-#[apply(all_xattr_fork_types)]
-fn lsextattr_size(harness: Harness, #[case] d: &str) {
-    use std::{convert::TryFrom, ffi::CString, ptr};
-    require_fusefs!();
+    #[named]
+    #[rstest]
+    fn empty(harness: Harness) {
+        use std::{convert::TryFrom, ffi::CString};
+        require_fusefs!();
 
-    let ns = libc::EXTATTR_NAMESPACE_USER;
-    let p = harness.d.path().join("xattrs").join(d);
-    let bytes_per_attr = "attr.000000".len() + 1;
-    let expected_len = bytes_per_attr * attrs_per_file(d);
-    let cpath = CString::new(p.as_os_str().as_bytes()).unwrap();
+        let ns = libc::EXTATTR_NAMESPACE_USER;
+        let p = harness.d.path().join("files/hello.txt");
+        let cpath = CString::new(p.as_os_str().as_bytes()).unwrap();
+        let mut v = Vec::<u8>::with_capacity(1024);
 
-    let r = unsafe {
-        libc::extattr_list_file(
-            cpath.as_ptr(),
-            ns,
-            ptr::null_mut(),
-            0
-        )
-    };
-    if let Ok(r) = usize::try_from(r) {
-        assert_eq!(expected_len, r);
-    } else {
-        panic!("{}", io::Error::last_os_error());
+        let r = unsafe {
+            libc::extattr_list_file(
+                cpath.as_ptr(),
+                ns,
+                v.as_mut_ptr().cast(),
+                v.capacity()
+            )
+        };
+        if let Ok(r) = usize::try_from(r) {
+            assert_eq!(0, r);
+        } else {
+            panic!("{}", io::Error::last_os_error());
+        }
+    }
+
+    #[named]
+    #[rstest]
+    fn empty_size(harness: Harness) {
+        use std::{convert::TryFrom, ffi::CString, ptr};
+        require_fusefs!();
+
+        let ns = libc::EXTATTR_NAMESPACE_USER;
+        let p = harness.d.path().join("files/hello.txt");
+        let cpath = CString::new(p.as_os_str().as_bytes()).unwrap();
+
+        let r = unsafe {
+            libc::extattr_list_file(
+                cpath.as_ptr(),
+                ns,
+                ptr::null_mut(),
+                0
+            )
+        };
+        if let Ok(r) = usize::try_from(r) {
+            assert_eq!(0, r);
+        } else {
+            panic!("{}", io::Error::last_os_error());
+        }
+    }
+
+    /// Lookup the size of the extended attribute list of a file, without
+    /// fetching it.
+    // This test is freebsd-specific because the relevant syscall is.  It could
+    // be implemented for Linux too, but I haven't done so.
+    #[cfg(target_os = "freebsd")]
+    #[named]
+    #[apply(all_xattr_fork_types)]
+    fn size(harness: Harness, #[case] d: &str) {
+        use std::{convert::TryFrom, ffi::CString, ptr};
+        require_fusefs!();
+
+        let ns = libc::EXTATTR_NAMESPACE_USER;
+        let p = harness.d.path().join("xattrs").join(d);
+        let bytes_per_attr = "attr.000000".len() + 1;
+        let expected_len = bytes_per_attr * attrs_per_file(d);
+        let cpath = CString::new(p.as_os_str().as_bytes()).unwrap();
+
+        let r = unsafe {
+            libc::extattr_list_file(
+                cpath.as_ptr(),
+                ns,
+                ptr::null_mut(),
+                0
+            )
+        };
+        if let Ok(r) = usize::try_from(r) {
+            assert_eq!(expected_len, r);
+        } else {
+            panic!("{}", io::Error::last_os_error());
+        }
     }
 }
 

@@ -188,7 +188,7 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrNode {
         self.total_size.try_into().unwrap()
     }
 
-    fn get_size(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> u32 {
+    fn get_size(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Result<u32, libc::c_int> {
         let hash = hashname(name);
 
         let node = XfsDa3Intnode::from(buf_reader.by_ref(), super_block);
