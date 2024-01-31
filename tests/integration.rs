@@ -3,10 +3,10 @@ use std::{
     ffi::{OsStr, OsString},
     fmt,
     fs,
-    io,
+    io::{self, ErrorKind, Read},
     os::unix::{
         ffi::{OsStrExt, OsStringExt},
-        fs::{DirEntryExt, MetadataExt}
+        fs::{DirEntryExt, MetadataExt, FileExt}
     },
     path::{Path, PathBuf},
     process::{Child, Command},
@@ -309,6 +309,7 @@ fn all_xattr_fork_types(d: &str) {}
 /// Mount the image via md(4) and read all its metadata, to verify that we work
 /// with devices that require all accesses to be sector size aligned.
 // Regression test for https://github.com/KhaledEmaraDev/xfuse/issues/15
+// TODO: Read all data as well as metadata
 #[rstest]
 #[named]
 fn dev() {
@@ -628,6 +629,97 @@ mod pathconf {
     }
 }
 
+mod read {
+    use super::*;
+
+    #[template]
+    #[rstest]
+    #[case::single_extent("single_extent.txt", 80)]
+    #[case::four_extents("four_extents.txt", 16384)]
+    #[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/66" ]
+    #[case::btree("btree.txt", 65536)]
+    fn all_files(d: &str) {}
+
+    /// Attempting to read across eof should return the correct amount of data
+    #[named]
+    #[apply(all_files)]
+    fn across_eof(harness: Harness, #[case] filename: &str, #[case] size: usize) {
+        require_fusefs!();
+
+        let path = harness.d.path().join("files").join(filename);
+        let f = fs::File::open(path).unwrap();
+        let mut buf = [0u8; 16];
+        assert_eq!(1, f.read_at(&mut buf[..], size as u64 - 1).unwrap());
+    }
+
+    /// Read a whole file in a single syscall
+    #[named]
+    #[apply(all_files)]
+    fn all(harness: Harness, #[case] filename: &str, #[case] size: usize) {
+        require_fusefs!();
+
+        let path = harness.d.path().join("files").join(filename);
+        let mut buf = vec![0; size];
+        let mut f = fs::File::open(path).unwrap();
+        f.read_exact(&mut buf[..]).unwrap();
+
+        // Verify contents
+        let mut ofs = 0;
+        while ofs < size {
+            let expected = format!("{:016x}", ofs);
+            assert_eq!(&buf[ofs..ofs + 16], expected.as_bytes());
+            ofs += 16;
+        }
+    }
+
+    /// Read a whole file 16 bytes at a time
+    // XXX Even though read(2) only reads 16 bytes at a time, in-kernel
+    // buffering may result in different read sizes at the fuse daemon.  We
+    // should parameterize this test on all different cacheing types.
+    #[named]
+    #[apply(all_files)]
+    fn by16(harness: Harness, #[case] filename: &str, #[case] size: usize) {
+        require_fusefs!();
+
+        const BUFSIZE: usize = 16;
+        let path = harness.d.path().join("files").join(filename);
+        let mut f = fs::File::open(path).unwrap();
+
+        // Verify contents
+        let mut ofs = 0;
+        while ofs < size {
+            let mut buf = [0; BUFSIZE];
+            if let Err(e) = f.read_exact(&mut buf[..]) {
+                if e.kind() == ErrorKind::UnexpectedEof {
+                    break
+                } else {
+                    panic!("read: {:?}", e);
+                }
+            } else {
+                let expected = format!("{:016x}", ofs);
+                assert_eq!(&buf[..], expected.as_bytes());
+                ofs += BUFSIZE;
+            }
+        }
+        assert_eq!(ofs, size);
+    }
+
+    /// Attempt to read past eof should return 0
+    #[named]
+    #[apply(all_files)]
+    fn past_eof(harness: Harness, #[case] filename: &str, #[case] size: usize) {
+        require_fusefs!();
+
+        let path = harness.d.path().join("files").join(filename);
+        let f = fs::File::open(path).unwrap();
+        let mut buf = [0u8; 1];
+        assert_eq!(0, f.read_at(&mut buf[..], size as u64 + 1).unwrap());
+    }
+
+    // TODO: add a test case for reading with direct I/O where the image is on a
+    // device, not a file
+}
+
 /// List a directory's contents with readdir
 #[named]
 #[rstest]
@@ -802,7 +894,7 @@ fn statfs(harness: Harness) {
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
     // here.
-    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 9655);
+    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 9658);
 
     // There are legitimate questions about what the correct value for
     // optimal_transfer_size
@@ -827,7 +919,7 @@ fn statvfs(harness: Harness) {
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
     // here.
-    assert_eq!(svfs.files() - svfs.files_free(), 9655);
+    assert_eq!(svfs.files() - svfs.files_free(), 9658);
     assert_eq!(svfs.files_free(), svfs.files_available());
 
     // Linux's calculation for blocks available and free is complicated and the

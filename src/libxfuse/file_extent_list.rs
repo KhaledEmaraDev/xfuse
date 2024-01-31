@@ -58,13 +58,8 @@ impl FileExtentList {
 
 impl<R: BufRead + Seek> File<R> for FileExtentList {
     fn read(&mut self, buf_reader: &mut R, _super_block: &Sb, offset: i64, size: u32) -> Vec<u8> {
-        let mut data = Vec::<u8>::with_capacity(size as usize);
-
         let mut remaining_size = min(size as i64, self.size - offset);
-
-        if remaining_size < 0 {
-            panic!("Offset is too large!");
-        }
+        let mut data = Vec::<u8>::with_capacity(remaining_size.max(0) as usize);
 
         let mut logical_block = offset / i64::from(self.block_size);
         let mut block_offset = offset % i64::from(self.block_size);
