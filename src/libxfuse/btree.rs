@@ -143,7 +143,7 @@ pub struct Btree {
 }
 
 impl Btree {
-    pub fn map_block<R: BufRead + Seek>(
+    pub fn map_block<R: bincode::de::read::Reader + BufRead + Seek>(
         &self,
         buf_reader: &mut R,
         super_block: &Sb,
@@ -236,46 +236,16 @@ impl Btree {
             }
         }
 
-        let recs_offset = buf_reader.stream_position().unwrap();
+        let recs = (0..bmbt_block.bb_numrecs).map(|_| {
+            crate::libxfuse::utils::decode_from(buf_reader.by_ref()).unwrap()
+        }).collect::<Vec<BmbtRec>>();
 
-        let mut low: i64 = 0;
-        let mut high: i64 = (bmbt_block.bb_numrecs - 1) as i64;
-
-        let mut predecessor = 0;
-
-        while low <= high {
-            let mid = low + ((high - low) / 2);
-
-            buf_reader.seek(SeekFrom::Start(recs_offset)).unwrap();
-            buf_reader
-                .seek(SeekFrom::Current(mid * (mem::size_of::<BmbtRec>() as i64)))
-                .unwrap();
-
-            let key = BmbtRec::from(buf_reader.by_ref()).br_startoff;
-
-            match key.cmp(&logical_block) {
-                Ordering::Greater => {
-                    high = mid - 1;
-                }
-                Ordering::Less => {
-                    low = mid + 1;
-                    predecessor = mid;
-                }
-                Ordering::Equal => {
-                    predecessor = mid;
-                    break;
-                }
-            }
-        }
-
-        buf_reader.seek(SeekFrom::Start(recs_offset)).unwrap();
-        buf_reader
-            .seek(SeekFrom::Current(
-                predecessor * (mem::size_of::<BmbtRec>() as i64),
-            ))
-            .unwrap();
-
-        let rec = BmbtRec::from(buf_reader.by_ref());
+        let r = recs.binary_search_by_key(&logical_block, |r| r.br_startoff);
+        let i = match r {
+            Ok(i) => i,
+            Err(i) => i - 1
+        };
+        let rec = &recs[i];
 
         rec.br_startblock + (logical_block - rec.br_startoff)
     }
