@@ -31,7 +31,7 @@ use std::io::{BufRead, Seek, SeekFrom};
 use std::mem;
 
 use super::bmbt_rec::BmbtRec;
-use super::btree::{BmbtKey, BmdrBlock, XfsBmbtBlock, XfsBmbtPtr};
+use super::btree::{BmbtKey, BmdrBlock, XfsBmbtLblock, XfsBmbtPtr};
 use super::da_btree::{hashname, XfsDa3NodeEntry, XfsDa3NodeHdr};
 use super::definitions::*;
 use super::dinode::Dinode;
@@ -71,8 +71,8 @@ impl Dir2Btree {
         buf_reader: &mut R,
         super_block: &Sb,
         dblock: XfsDablk,
-    ) -> (Option<XfsBmbtBlock>, Option<BmbtRec>) {
-        let mut bmbt: Option<XfsBmbtBlock> = None;
+    ) -> (Option<XfsBmbtLblock>, Option<BmbtRec>) {
+        let mut bmbt: Option<XfsBmbtLblock> = None;
         let mut bmbt_rec: Option<BmbtRec> = None;
         let mut bmbt_block_offset = 0;
 
@@ -81,7 +81,7 @@ impl Dir2Btree {
                 bmbt_block_offset = self.pointers[i] * (self.block_size as u64);
                 buf_reader.seek(SeekFrom::Start(bmbt_block_offset)).unwrap();
 
-                bmbt = Some(XfsBmbtBlock::from(buf_reader.by_ref(), super_block))
+                bmbt = Some(XfsBmbtLblock::from(buf_reader.by_ref(), super_block))
             }
         }
 
@@ -101,7 +101,7 @@ impl Dir2Btree {
                 buf_reader
                     .seek(SeekFrom::Start(
                         bmbt_block_offset
-                            + (mem::size_of::<XfsBmbtBlock>() as u64)
+                            + (mem::size_of::<XfsBmbtLblock>() as u64)
                             + ((m as u64) * (mem::size_of::<BmbtKey>() as u64)),
                     ))
                     .unwrap();
@@ -125,7 +125,7 @@ impl Dir2Btree {
             buf_reader
                 .seek(SeekFrom::Start(
                     bmbt_block_offset
-                        + (mem::size_of::<XfsBmbtBlock>() as u64)
+                        + (mem::size_of::<XfsBmbtLblock>() as u64)
                         + ((bmbt_some.bb_numrecs as u64) * (mem::size_of::<BmbtKey>() as u64))
                         + ((predecessor as u64) * (mem::size_of::<XfsBmbtPtr>() as u64)),
                 ))
@@ -134,7 +134,7 @@ impl Dir2Btree {
 
             bmbt_block_offset = pointer * (self.block_size as u64);
             buf_reader.seek(SeekFrom::Start(bmbt_block_offset)).unwrap();
-            bmbt = Some(XfsBmbtBlock::from(buf_reader.by_ref(), super_block));
+            bmbt = Some(XfsBmbtLblock::from(buf_reader.by_ref(), super_block));
         }
 
         if let Some(bmbt_some) = &bmbt {
@@ -149,7 +149,7 @@ impl Dir2Btree {
                 buf_reader
                     .seek(SeekFrom::Start(
                         bmbt_block_offset
-                            + (mem::size_of::<XfsBmbtBlock>() as u64)
+                            + (mem::size_of::<XfsBmbtLblock>() as u64)
                             + ((m as u64) * (mem::size_of::<BmbtRec>() as u64)),
                     ))
                     .unwrap();
@@ -173,7 +173,7 @@ impl Dir2Btree {
             buf_reader
                 .seek(SeekFrom::Start(
                     bmbt_block_offset
-                        + (mem::size_of::<XfsBmbtBlock>() as u64)
+                        + (mem::size_of::<XfsBmbtLblock>() as u64)
                         + ((predecessor as u64) * (mem::size_of::<BmbtRec>() as u64)),
                 ))
                 .unwrap();
@@ -365,7 +365,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
             } else {
                 bmbt_block_offset = bmbt_some.bb_rightsib * (self.block_size as u64);
                 buf_reader.seek(SeekFrom::Start(bmbt_block_offset)).unwrap();
-                bmbt = Some(XfsBmbtBlock::from(buf_reader.by_ref(), super_block));
+                bmbt = Some(XfsBmbtLblock::from(buf_reader.by_ref(), super_block));
 
                 bmbt_rec = Some(BmbtRec::from(buf_reader.by_ref()));
 

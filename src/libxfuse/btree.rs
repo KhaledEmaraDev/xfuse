@@ -133,7 +133,7 @@ impl BmbtKey {
 
 pub type XfsBmbtPtr = XfsFsblock;
 pub type XfsBmdrPtr = XfsFsblock;
-pub type XfsBmbtBlock = BtreeBlock<u64>;
+pub type XfsBmbtLblock = BtreeBlock<u64>;
 
 #[derive(Debug, Clone)]
 pub struct Btree {
@@ -180,7 +180,7 @@ impl Btree {
             ))
             .unwrap();
 
-        let mut bmbt_block = XfsBmbtBlock::from(buf_reader.by_ref(), super_block);
+        let mut bmbt_block = XfsBmbtLblock::from(buf_reader.by_ref(), super_block);
         let mut keys_offset = buf_reader.stream_position().unwrap();
 
         loop {
@@ -219,7 +219,7 @@ impl Btree {
 
                 buf_reader
                     .seek(SeekFrom::Start(
-                        keys_offset - (mem::size_of::<XfsBmbtBlock>() as u64)
+                        keys_offset - (mem::size_of::<XfsBmbtLblock>() as u64)
                             + u64::from(POINTERS_AREA_OFFSET),
                     ))
                     .unwrap();
@@ -231,7 +231,7 @@ impl Btree {
                     .seek(SeekFrom::Start(ptr * u64::from(super_block.sb_blocksize)))
                     .unwrap();
 
-                bmbt_block = XfsBmbtBlock::from(buf_reader.by_ref(), super_block);
+                bmbt_block = XfsBmbtLblock::from(buf_reader.by_ref(), super_block);
                 keys_offset = buf_reader.stream_position().unwrap();
             }
         }
