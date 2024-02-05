@@ -47,7 +47,6 @@ use super::file::File;
 use super::file_btree::FileBtree;
 use super::file_extent_list::FileExtentList;
 use super::sb::Sb;
-use super::utils::decode_from;
 use super::symlink_extent::SymlinkExtents;
 
 use bincode::{
@@ -134,9 +133,27 @@ impl Dinode {
                         keys.push(BmbtKey::decode(&mut decoder).unwrap())
                     }
 
+                    // The XFS Algorithms and Data Structures document contains
+                    // an error here.  It says that the array of xfs_bmbt_ptr_t
+                    // values immediately follows the array of xfs_bmbt_key_t
+                    // values, and the size of both arrays is specified by
+                    // bb_numrecs.  HOWEVER, there is actually a gap.  The space
+                    // from the end of bmbt to the beginning of the attribute
+                    // fork is split in half.  Half for keys and half for
+                    // pointers.  The remaining space is padded with zeros.  the
+                    // beginning of the attribute fork is given as di_forkoff *
+                    // 8 bytes from the start of the literal area, which is
+                    // where BmdrBlock is located.
+                    assert_ne!(di_core.di_forkoff, 0, "TODO");
+                    let gap = di_core.di_forkoff as usize * 8 / 2 -
+                        bmbt.bb_numrecs as usize * BmbtKey::SIZE -
+                        BmdrBlock::SIZE -
+                        /* XXX Why does it need this extra 4? */ 4;
+                    decoder.reader().consume(gap as usize);
+
                     let mut pointers = Vec::<XfsBmbtPtr>::new();
                     for _i in 0..bmbt.bb_numrecs {
-                        let pointer = decode_from(buf_reader.by_ref()).unwrap();
+                        let pointer = u64::decode(&mut decoder).unwrap();
                         pointers.push(pointer)
                     }
 
@@ -307,7 +324,7 @@ impl Dinode {
         }
     }
 
-    pub fn get_file<R: BufRead + Seek>(
+    pub fn get_file<R: bincode::de::read::Reader + BufRead + Seek>(
         &self,
         _buf_reader: &mut R,
         superblock: &Sb,

@@ -39,7 +39,7 @@ pub struct FileBtree {
     pub block_size: u32,
 }
 
-impl<R: BufRead + Seek> File<R> for FileBtree {
+impl<R: bincode::de::read::Reader + BufRead + Seek> File<R> for FileBtree {
     fn read(&mut self, buf_reader: &mut R, super_block: &Sb, offset: i64, size: u32) -> Vec<u8> {
         let mut data = Vec::<u8>::with_capacity(size as usize);
 

@@ -634,10 +634,11 @@ mod read {
 
     #[template]
     #[rstest]
-    #[case::single_extent("single_extent.txt", 80)]
+    #[case::single_extent("single_extent.txt", 4096)]
     #[case::four_extents("four_extents.txt", 16384)]
-    #[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/66" ]
-    #[case::btree("btree.txt", 65536)]
+    #[case::two_height_btree("btree2.txt", 65536)]
+    #[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/68" ]
+    #[case::three_height_btree("btree3.txt", 1048576)]
     fn all_files(d: &str) {}
 
     /// Attempting to read across eof should return the correct amount of data
@@ -820,7 +821,7 @@ mod stat {
         // greater than mtime.
         assert!(stat.st_ctime > stat.st_mtime || 
                 stat.st_ctime_nsec > stat.st_mtime_nsec);
-        assert_eq!(stat.st_ino, 44966);
+        assert_eq!(stat.st_ino, 99586);
         assert_eq!(stat.st_size, 14);
         assert_eq!(stat.st_blksize, 4096);
         assert_eq!(stat.st_blocks, 1);
@@ -861,8 +862,8 @@ mod stat {
     /// stat should work on symlinks
     #[named]
     #[rstest]
-    #[case::sf("sf", 9353)]
-    #[case::extent("max", 9354)]
+    #[case::sf("sf", 76994)]
+    #[case::extent("max", 76995)]
     fn symlink(harness: Harness, #[case] linkname: &str, #[case] ino: libc::ino_t)
     {
         require_fusefs!();
@@ -884,7 +885,7 @@ fn statfs(harness: Harness) {
 
     let sfs = nix::sys::statfs::statfs(harness.d.path()).unwrap();
 
-    assert_eq!(sfs.blocks(), 6824);
+    assert_eq!(sfs.blocks(), 15016);
     assert_eq!(sfs.block_size(), 4096);
 
     // Linux's calculation for blocks available and free is complicated and the
@@ -894,7 +895,7 @@ fn statfs(harness: Harness) {
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
     // here.
-    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 9658);
+    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 9659);
 
     // There are legitimate questions about what the correct value for
     // optimal_transfer_size
@@ -914,12 +915,12 @@ fn statvfs(harness: Harness) {
     // xfuse is always read-only.
     assert!(svfs.flags().contains(nix::sys::statvfs::FsFlags::ST_RDONLY));
     assert_eq!(svfs.fragment_size(), 4096);
-    assert_eq!(svfs.blocks(), 6824);
+    assert_eq!(svfs.blocks(), 15016);
     
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
     // here.
-    assert_eq!(svfs.files() - svfs.files_free(), 9658);
+    assert_eq!(svfs.files() - svfs.files_free(), 9659);
     assert_eq!(svfs.files_free(), svfs.files_available());
 
     // Linux's calculation for blocks available and free is complicated and the
