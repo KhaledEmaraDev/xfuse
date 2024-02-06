@@ -34,7 +34,7 @@ use super::attr_bptree::AttrBtree;
 use super::attr_leaf::AttrLeaf;
 use super::attr_shortform::AttrShortform;
 use super::bmbt_rec::BmbtRec;
-use super::btree::{BmbtKey, BmdrBlock, Btree, XfsBmbtPtr};
+use super::btree::{BmbtKey, BmdrBlock, BtreeRoot, XfsBmbtPtr};
 use super::definitions::*;
 use super::dinode_core::{DinodeCore, XfsDinodeFmt};
 use super::dir3::Dir3;
@@ -336,7 +336,7 @@ impl Dinode {
                 block_size: superblock.sb_blocksize,
             }),
             DiU::Bmbt((bmdr, keys, pointers)) => Box::new(FileBtree {
-                btree: Btree {
+                btree: BtreeRoot {
                     bmdr: bmdr.clone(),
                     keys: keys.clone(),
                     ptrs: pointers.clone(),
@@ -380,7 +380,7 @@ impl Dinode {
                 }
             }
             Some(DiA::Abmbt((bmdr, keys, pointers))) => Some(Box::new(AttrBtree {
-                btree: Btree {
+                btree: BtreeRoot {
                     bmdr: bmdr.clone(),
                     keys: keys.clone(),
                     ptrs: pointers.clone(),

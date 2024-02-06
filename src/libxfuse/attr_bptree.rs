@@ -35,14 +35,14 @@ use bincode::de::read::Reader;
 
 use super::{
     attr::{Attr, AttrLeafblock},
-    btree::Btree,
+    btree::{Btree, BtreeRoot},
     da_btree::{hashname, XfsDa3Intnode},
     sb::Sb,
 };
 
 #[derive(Debug)]
 pub struct AttrBtree {
-    pub btree: Btree,
+    pub btree: BtreeRoot,
 
     pub total_size: i64,
 }
