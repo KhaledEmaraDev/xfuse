@@ -149,34 +149,11 @@ impl Btree {
         super_block: &Sb,
         logical_block: XfsFileoff,
     ) -> XfsFsblock {
-        let mut low: i64 = 0;
-        let mut high: i64 = (self.bmdr.bb_numrecs - 1) as i64;
-
-        let mut predecessor = 0;
-
-        while low <= high {
-            let mid = low + ((high - low) / 2);
-
-            let key = self.keys[mid as usize].br_startoff;
-
-            match key.cmp(&logical_block) {
-                Ordering::Greater => {
-                    high = mid - 1;
-                }
-                Ordering::Less => {
-                    low = mid + 1;
-                    predecessor = mid;
-                }
-                Ordering::Equal => {
-                    predecessor = mid;
-                    break;
-                }
-            }
-        }
+        let idx = self.keys.partition_point(|k| k.br_startoff <= logical_block) - 1;
 
         buf_reader
             .seek(SeekFrom::Start(
-                self.ptrs[predecessor as usize] * u64::from(super_block.sb_blocksize),
+                self.ptrs[idx] * u64::from(super_block.sb_blocksize),
             ))
             .unwrap();
 
