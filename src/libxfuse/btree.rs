@@ -240,11 +240,7 @@ impl Btree {
             crate::libxfuse::utils::decode_from(buf_reader.by_ref()).unwrap()
         }).collect::<Vec<BmbtRec>>();
 
-        let r = recs.binary_search_by_key(&logical_block, |r| r.br_startoff);
-        let i = match r {
-            Ok(i) => i,
-            Err(i) => i - 1
-        };
+        let i = recs.partition_point(|k| k.br_startoff <= logical_block) - 1;
         let rec = &recs[i];
 
         rec.br_startblock + (logical_block - rec.br_startoff)
