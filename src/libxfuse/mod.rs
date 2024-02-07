@@ -25,30 +25,30 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-pub mod agi;
-pub mod attr;
-pub mod attr_bptree;
-pub mod attr_leaf;
-pub mod attr_node;
-pub mod attr_shortform;
-pub mod bmbt_rec;
-pub mod btree;
-pub mod da_btree;
-pub mod definitions;
-pub mod dinode;
-pub mod dinode_core;
-pub mod dir3;
-pub mod dir3_block;
-pub mod dir3_bptree;
-pub mod dir3_leaf;
-pub mod dir3_node;
-pub mod dir3_sf;
-pub mod file;
-pub mod file_btree;
-pub mod file_extent_list;
-pub mod sb;
-pub mod symlink_extent;
-pub mod utils;
+mod agi;
+mod attr;
+mod attr_bptree;
+mod attr_leaf;
+mod attr_node;
+mod attr_shortform;
+mod bmbt_rec;
+mod btree;
+mod da_btree;
+mod definitions;
+mod dinode;
+mod dinode_core;
+mod dir3;
+mod dir3_block;
+mod dir3_bptree;
+mod dir3_leaf;
+mod dir3_node;
+mod dir3_sf;
+mod file;
+mod file_btree;
+mod file_extent_list;
+mod sb;
+mod symlink_extent;
+mod utils;
 pub mod volume;
 
 #[allow(clippy::unnecessary_cast)]  // It isn't unnecessary on all platforms.
