@@ -30,11 +30,11 @@ use std::{
     io::{BufRead, Seek, SeekFrom},
 };
 
-use super::{btree::Btree, definitions::XfsFsize, file::File, sb::Sb};
+use super::{btree::{Btree, BtreeRoot}, definitions::XfsFsize, file::File, sb::Sb};
 
 #[derive(Debug)]
 pub struct FileBtree {
-    pub btree: Btree,
+    pub btree: BtreeRoot,
     pub size: XfsFsize,
     pub block_size: u32,
 }

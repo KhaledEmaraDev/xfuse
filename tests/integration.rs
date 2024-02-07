@@ -637,8 +637,8 @@ mod read {
     #[case::single_extent("single_extent.txt", 4096)]
     #[case::four_extents("four_extents.txt", 16384)]
     #[case::two_height_btree("btree2.txt", 65536)]
-    #[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/68" ]
-    #[case::three_height_btree("btree3.txt", 1048576)]
+    #[case::wide_two_height_btree("btree2.4.txt", 8388608)]
+    #[case::three_height_btree("btree3.txt", 16777216)]
     fn all_files(d: &str) {}
 
     /// Attempting to read across eof should return the correct amount of data
@@ -895,7 +895,7 @@ fn statfs(harness: Harness) {
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
     // here.
-    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 9659);
+    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 9660);
 
     // There are legitimate questions about what the correct value for
     // optimal_transfer_size
@@ -920,7 +920,7 @@ fn statvfs(harness: Harness) {
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
     // here.
-    assert_eq!(svfs.files() - svfs.files_free(), 9659);
+    assert_eq!(svfs.files() - svfs.files_free(), 9660);
     assert_eq!(svfs.files_free(), svfs.files_available());
 
     // Linux's calculation for blocks available and free is complicated and the

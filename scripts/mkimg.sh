@@ -83,6 +83,7 @@ mknod ${MNTDIR}/files/chardev c 1 2
 fill_file ${MNTDIR}/files/single_extent.txt 1
 fill_file ${MNTDIR}/files/four_extents.txt 4
 fill_file ${MNTDIR}/files/btree2.txt 16
+fill_file ${MNTDIR}/files/btree2.4.txt 2048
 fill_file ${MNTDIR}/files/btree3.txt 4096
 
 umount ${MNTDIR}
