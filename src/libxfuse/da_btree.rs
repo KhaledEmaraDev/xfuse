@@ -1,4 +1,4 @@
-/**
+/*
  * BSD 2-Clause License
  *
  * Copyright (c) 2021, Khaled Emara
@@ -187,11 +187,6 @@ impl XfsDa3NodeEntry {
 
         XfsDa3NodeEntry { hashval, before }
     }
-}
-
-pub enum LookupResponse {
-    Intermediate,
-    Result(XfsFsblock),
 }
 
 #[derive(Debug)]

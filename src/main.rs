@@ -1,5 +1,4 @@
-#![allow(dead_code)]
-/**
+/*
  * BSD 2-Clause License
  *
  * Copyright (c) 2021, Khaled Emara

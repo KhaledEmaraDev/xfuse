@@ -1,4 +1,4 @@
-/**
+/*
  * BSD 2-Clause License
  *
  * Copyright (c) 2021, Khaled Emara
@@ -54,18 +54,6 @@ pub struct Uuid(uuid::Uuid);
 impl Uuid {
     pub const fn from_u128(x: u128) -> Self {
         Self(uuid::Uuid::from_u128(x))
-    }
-
-    pub const fn from_uuid(uuid: uuid::Uuid) -> Self {
-        Self(uuid)
-    }
-
-    pub fn nil() -> Self {
-        Self(uuid::Uuid::nil())
-    }
-
-    pub fn parse_str(input: &str) -> std::result::Result<Uuid, uuid::Error> {
-        uuid::Uuid::parse_str(input).map(Uuid)
     }
 }
 

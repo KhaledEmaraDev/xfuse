@@ -1,4 +1,4 @@
-/**
+/*
  * BSD 2-Clause License
  *
  * Copyright (c) 2021, Khaled Emara
@@ -25,6 +25,7 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+#![allow(dead_code)]
 pub const XFS_SB_MAGIC: u32 = 0x58465342; // Superblock
 pub const XFS_AGF_MAGIC: u32 = 0x58414746; // Free Space
 pub const XFS_AGI_MAGIC: u32 = 0x58414749; // Inode Information

@@ -1,4 +1,4 @@
-/**
+/*
  * BSD 2-Clause License
  *
  * Copyright (c) 2021, Khaled Emara
@@ -174,7 +174,7 @@ mod tests {
                     crc: 0,
                     blkno: 0,
                     lsn: 0,
-                    uuid: Uuid::nil(),
+                    uuid: Uuid::default(),
                     owner: 0,
                 },
                 count: 0,

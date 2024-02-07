@@ -1,4 +1,4 @@
-/**
+/*
  * BSD 2-Clause License
  *
  * Copyright (c) 2021, Khaled Emara
@@ -42,8 +42,6 @@ use super::utils::{decode, get_file_type, FileKind};
 use bincode::Decode;
 use fuser::{FileAttr, FileType};
 use libc::{c_int, ENOENT};
-
-pub const XFS_DIR2_DATA_FD_COUNT: usize = 3;
 
 #[derive(Debug, Decode)]
 pub struct Dir2BlockTail {

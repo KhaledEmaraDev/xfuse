@@ -1,4 +1,4 @@
-/**
+/*
  * BSD 2-Clause License
  *
  * Copyright (c) 2021, Khaled Emara
@@ -48,20 +48,23 @@ use super::{
     utils::decode_from
 };
 
-pub const XFS_ATTR_LOCAL_BIT: u8 = 0;
-pub const XFS_ATTR_ROOT_BIT: u8 = 1;
-pub const XFS_ATTR_SECURE_BIT: u8 = 2;
-pub const XFS_ATTR_INCOMPLETE_BIT: u8 = 7;
-pub const XFS_ATTR_LOCAL: u8 = 1 << XFS_ATTR_LOCAL_BIT;
-pub const XFS_ATTR_ROOT: u8 = 1 << XFS_ATTR_ROOT_BIT;
-pub const XFS_ATTR_SECURE: u8 = 1 << XFS_ATTR_SECURE_BIT;
-pub const XFS_ATTR_INCOMPLETE: u8 = 1 << XFS_ATTR_INCOMPLETE_BIT;
-pub const XFS_ATTR_NSP_ONDISK_MASK: u8 = XFS_ATTR_ROOT | XFS_ATTR_SECURE;
+#[allow(dead_code)]
+mod constants {
+    pub const XFS_ATTR_LOCAL_BIT: u8 = 0;
+    pub const XFS_ATTR_ROOT_BIT: u8 = 1;
+    pub const XFS_ATTR_SECURE_BIT: u8 = 2;
+    pub const XFS_ATTR_INCOMPLETE_BIT: u8 = 7;
+    pub const XFS_ATTR_LOCAL: u8 = 1 << XFS_ATTR_LOCAL_BIT;
+    pub const XFS_ATTR_ROOT: u8 = 1 << XFS_ATTR_ROOT_BIT;
+    pub const XFS_ATTR_SECURE: u8 = 1 << XFS_ATTR_SECURE_BIT;
+    pub const XFS_ATTR_INCOMPLETE: u8 = 1 << XFS_ATTR_INCOMPLETE_BIT;
+    pub const XFS_ATTR_NSP_ONDISK_MASK: u8 = XFS_ATTR_ROOT | XFS_ATTR_SECURE;
+}
 
 pub const fn get_namespace_from_flags(flags: u8) -> &'static [u8] {
-    if flags & XFS_ATTR_SECURE != 0 {
+    if flags & constants::XFS_ATTR_SECURE != 0 {
         b"secure."
-    } else if flags & XFS_ATTR_ROOT != 0 {
+    } else if flags & constants::XFS_ATTR_ROOT != 0 {
         b"trusted."
     } else {
         b"user."
@@ -180,7 +183,7 @@ impl AttrLeafblock {
                 .seek(SeekFrom::Current(i64::from(entry.nameidx)))
                 .unwrap();
 
-            if entry.flags & XFS_ATTR_LOCAL != 0 {
+            if entry.flags & constants::XFS_ATTR_LOCAL != 0 {
                 let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
                 total_size +=
                     get_namespace_size_from_flags(entry.flags) + u32::from(name_entry.namelen) + 1;
@@ -233,7 +236,7 @@ impl AttrLeafblock {
                         .seek(SeekFrom::Current(i64::from(entry.nameidx)))
                         .unwrap();
 
-                    if entry.flags & XFS_ATTR_LOCAL != 0 {
+                    if entry.flags & constants::XFS_ATTR_LOCAL != 0 {
                         let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
                         return Ok(name_entry.valuelen.into());
                     } else {
@@ -259,7 +262,7 @@ impl AttrLeafblock {
                 .seek(SeekFrom::Current(i64::from(entry.nameidx)))
                 .unwrap();
 
-            if entry.flags & XFS_ATTR_LOCAL != 0 {
+            if entry.flags & constants::XFS_ATTR_LOCAL != 0 {
                 let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
 
                 list.extend_from_slice(get_namespace_from_flags(entry.flags));
@@ -318,7 +321,7 @@ impl AttrLeafblock {
                         .seek(SeekFrom::Current(i64::from(entry.nameidx)))
                         .unwrap();
 
-                    if entry.flags & XFS_ATTR_LOCAL != 0 {
+                    if entry.flags & constants::XFS_ATTR_LOCAL != 0 {
                         let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
 
                         let namelen = name_entry.namelen as usize;

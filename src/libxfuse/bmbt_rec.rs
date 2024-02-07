@@ -1,4 +1,4 @@
-/**
+/*
  * BSD 2-Clause License
  *
  * Copyright (c) 2021, Khaled Emara
@@ -54,8 +54,6 @@ pub struct BmbtRec {
 }
 
 impl BmbtRec {
-    pub const SIZE: usize = 16;
-
     pub fn from<T: BufRead>(buf_reader: &mut T) -> BmbtRec {
         let br = buf_reader.read_u128::<BigEndian>().unwrap();
 
