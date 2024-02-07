@@ -22,32 +22,37 @@ use rstest::{fixture, rstest};
 use rstest_reuse::{self, apply, template};
 use tempfile::{tempdir, TempDir};
 
-lazy_static! {
-    static ref GOLDEN: PathBuf = {
-        let mut zimg = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        zimg.push("resources/xfs.img.zst");
-        let mut img = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
-        img.push("xfs.img");
+fn prepare_image(filename: &str) -> PathBuf {
+    let mut zimg = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    zimg.push("resources");
+    zimg.push(filename);
+    zimg.set_extension("img.zst");
+    let mut img = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    img.push(filename);
 
-        // If the golden image doesn't exist, or is out of date, rebuild it
-        // Note: we can't accurately compare the two timestamps with less than 1
-        // second granularity due to a zstd bug.
-        // https://github.com/facebook/zstd/issues/3748
-        let zmtime = fs::metadata(&zimg).unwrap().modified().unwrap();
-        let mtime = fs::metadata(&img);
-        if mtime.is_err() || (mtime.unwrap().modified().unwrap() +
-                              Duration::from_secs(1)) < zmtime
-        {
-            Command::new("unzstd")
-                .arg("-f")
-                .arg("-o")
-                .arg(&img)
-                .arg(&zimg)
-                .output()
-                .expect("Uncompressing golden image failed");
-        }
-        img
-    };
+    // If the golden image doesn't exist, or is out of date, rebuild it
+    // Note: we can't accurately compare the two timestamps with less than 1
+    // second granularity due to a zstd bug.
+    // https://github.com/facebook/zstd/issues/3748
+    let zmtime = fs::metadata(&zimg).unwrap().modified().unwrap();
+    let mtime = fs::metadata(&img);
+    if mtime.is_err() || (mtime.unwrap().modified().unwrap() +
+                          Duration::from_secs(1)) < zmtime
+    {
+        Command::new("unzstd")
+            .arg("-f")
+            .arg("-o")
+            .arg(&img)
+            .arg(&zimg)
+            .output()
+            .expect("Uncompressing golden image failed");
+    }
+    img
+}
+
+lazy_static! {
+    static ref GOLDEN1K: PathBuf = prepare_image("xfs1024.img");
+    static ref GOLDEN4K: PathBuf = prepare_image("xfs4096.img");
 }
 
 /// How many extended attributes are present on each file?
@@ -55,20 +60,33 @@ fn attrs_per_file(f: &str) -> usize {
     match f {
         "local" => 4,
         "extents" => 64,
-        _ => 0
+        "btree2" => 256,
+        "btree2.3" => 2048,
+        "btree3" => 8192,
+        _ => unimplemented!()
     }
 }
 
 /// How many directory entries are in each directory?
 // This is a function of the golden image creation.
-fn ents_per_dir(d: &str) -> usize {
+fn ents_per_dir_1k(d: &str) -> usize {
+    match d {
+        "btree2.3" => 8192,
+        "btree3" => 131072,
+        _ => unimplemented!()
+    }
+}
+
+/// How many directory entries are in each directory?
+// This is a function of the golden image creation.
+fn ents_per_dir_4k(d: &str) -> usize {
     match d {
         "sf" => 2,
         "block" => 32,
         "leaf" => 384,
         "node" => 1024,
         "btree" => 8192,
-        _ => 0
+        _ => unimplemented!()
     }
 }
 
@@ -189,11 +207,10 @@ struct Harness {
     child: Child
 }
 
-#[fixture]
-fn harness() -> Harness {
+fn harness(img: &Path) -> Harness {
     let d = tempdir().unwrap();
     let child = Command::cargo_bin("xfs-fuse").unwrap()
-        .arg(GOLDEN.as_path())
+        .arg(img)
         .arg(d.path())
         .spawn()
         .unwrap();
@@ -207,6 +224,16 @@ fn harness() -> Harness {
         d,
         child
     }
+}
+
+#[fixture]
+fn harness1k() -> Harness {
+    harness(GOLDEN1K.as_path())
+}
+
+#[fixture]
+fn harness4k() -> Harness {
+    harness(GOLDEN4K.as_path())
 }
 
 impl Drop for Harness {
@@ -261,7 +288,7 @@ struct MdHarness {
 
 #[fixture]
 fn mdharness() -> MdHarness {
-    let md = Md::new(GOLDEN.as_path()).unwrap();
+    let md = Md::new(GOLDEN4K.as_path()).unwrap();
     let d = tempdir().unwrap();
     let child = Command::cargo_bin("xfs-fuse").unwrap()
         .arg(md.0.as_path())
@@ -292,19 +319,46 @@ impl Drop for MdHarness {
 
 #[template]
 #[rstest]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/74" ]
+#[case::btree_2_3("btree2.3")]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/73" ]
+#[case::btree_3("btree3")]
+fn all_dir_types_1k(d: &str) {}
+
+#[template]
+#[rstest]
 #[case::sf("sf")]
 #[case::block("block")]
 #[case::leaf("leaf")]
 #[case::node("node")]
 #[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/30" ]
 #[case::btree("btree")]
-fn all_dir_types(d: &str) {}
+fn all_dir_types_4k(d: &str) {}
 
 #[template]
 #[rstest]
-#[case::local("local")]
-#[case::extents("extents")]
-fn all_xattr_fork_types(d: &str) {}
+#[case::local(harness4k, "local")]
+#[case::extents(harness4k, "extents")]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/75" ]
+#[case::btree2(harness1k, "btree2")]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/76" ]
+#[case::btree2_3(harness1k, "btree2.3")]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/77" ]
+#[case::btree3(harness1k, "btree3")]
+fn all_xattr_fork_types(h: fn() -> Harness, d: &str) {}
+
+#[template]
+#[rstest]
+#[case::none(harness4k, "files/hello.txt")]
+#[case::local(harness4k, "xattrs/local")]
+#[case::extents(harness4k, "xattrs/extents")]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/75" ]
+#[case::btree2(harness1k, "xattrs/btree2")]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/77" ]
+#[case::btree2_3(harness1k, "xattrs/btree2.3")]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/77" ]
+#[case::btree3(harness1k, "xattrs/btree3")]
+fn all_xattr_fork_types_with_none(h: fn() -> Harness, d: &str) {}
 
 /// Mount the image via md(4) and read all its metadata, to verify that we work
 /// with devices that require all accesses to be sector size aligned.
@@ -332,9 +386,10 @@ mod getextattr {
 
     #[named]
     #[apply(all_xattr_fork_types)]
-    fn ok(harness: Harness, #[case] d: &str) {
+    fn ok(#[case] h: fn() -> Harness, #[case] d: &str) {
         require_fusefs!();
 
+        let harness = h();
         let p = harness.d.path().join("xattrs").join(d);
 
         for i in 0..attrs_per_file(d) {
@@ -352,15 +407,13 @@ mod getextattr {
     // be implemented for Linux too, but I haven't done so.
     #[cfg(target_os = "freebsd")]
     #[named]
-    #[rstest]
-    #[case::none("files/hello.txt")]
-    #[case::local("xattrs/local")]
-    #[case::extents("xattrs/extents")]
-    fn enoattr(harness: Harness, #[case] d: &str) {
+    #[apply(all_xattr_fork_types_with_none)]
+    fn enoattr(#[case] h: fn() -> Harness, #[case] d: &str) {
         use std::ffi::CString;
 
         require_fusefs!();
 
+        let harness = h();
         let ns = libc::EXTATTR_NAMESPACE_USER;
         let p = harness.d.path().join(d);
         let cpath = CString::new(p.as_os_str().as_bytes()).unwrap();
@@ -385,15 +438,13 @@ mod getextattr {
     // be implemented for Linux too, but I haven't done so.
     #[cfg(target_os = "freebsd")]
     #[named]
-    #[rstest]
-    #[case::none("files/hello.txt")]
-    #[case::local("xattrs/local")]
-    #[case::extents("xattrs/extents")]
-    fn enoattr_size(harness: Harness, #[case] d: &str) {
+    #[apply(all_xattr_fork_types_with_none)]
+    fn enoattr_size(#[case] h: fn() -> Harness, #[case] d: &str) {
         use std::{ffi::CString, ptr};
 
         require_fusefs!();
 
+        let harness = h();
         let ns = libc::EXTATTR_NAMESPACE_USER;
         let p = harness.d.path().join(d);
         let cpath = CString::new(p.as_os_str().as_bytes()).unwrap();
@@ -419,11 +470,12 @@ mod getextattr {
 #[cfg(target_os = "freebsd")]
 #[named]
 #[apply(all_xattr_fork_types)]
-fn getextattr_size(harness: Harness, #[case] d: &str) {
+fn getextattr_size(#[case] h: fn() -> Harness, #[case] d: &str) {
     use std::{convert::TryFrom, ffi::CString, ptr};
 
     require_fusefs!();
 
+    let harness = h();
     let ns = libc::EXTATTR_NAMESPACE_USER;
     let p = harness.d.path().join("xattrs").join(d);
     let expected_len = "value.000000".len();
@@ -454,11 +506,11 @@ fn getextattr_size(harness: Harness, #[case] d: &str) {
 /// count should be correct. lookup via both paths should return the same ino.
 #[named]
 #[rstest]
-fn hardlink(harness: Harness) {
+fn hardlink(harness4k: Harness) {
     require_fusefs!();
 
-    let path1 = harness.d.path().join("files").join("hello.txt");
-    let path2 = harness.d.path().join("files").join("hello2.txt");
+    let path1 = harness4k.d.path().join("files").join("hello.txt");
+    let path2 = harness4k.d.path().join("files").join("hello2.txt");
 
     let stat1 = nix::sys::stat::stat(&path1).unwrap();
     let stat2 = nix::sys::stat::stat(&path2).unwrap();
@@ -468,21 +520,37 @@ fn hardlink(harness: Harness) {
 /// Mount and unmount the golden image
 #[rstest]
 #[named]
-fn mount(harness: Harness) {
+fn mount(harness4k: Harness) {
     require_fusefs!();
 
-    drop(harness);
+    drop(harness4k);
+}
+
+/// Lookup all entries in a directory
+//
+// In the 1k blocksize golden image, they use a different naming convention.
+#[named]
+#[apply(all_dir_types_1k)]
+fn lookup_1k(harness1k: Harness, #[case] d: &str) {
+    require_fusefs!();
+
+    let amode = AccessFlags::F_OK;
+    for i in 0..ents_per_dir_1k(d) {
+        let p = harness1k.d.path().join(format!("{d}/frame__________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________{i:08}"));
+        access(p.as_path(), amode)
+            .unwrap_or_else(|_| panic!("Lookup failed: {}", p.display()));
+    }
 }
 
 /// Lookup all entries in a directory
 #[named]
-#[apply(all_dir_types)]
-fn lookup(harness: Harness, #[case] d: &str) {
+#[apply(all_dir_types_4k)]
+fn lookup_4k(harness4k: Harness, #[case] d: &str) {
     require_fusefs!();
 
     let amode = AccessFlags::F_OK;
-    for i in 0..ents_per_dir(d) {
-        let p = harness.d.path().join(format!("{d}/frame{i:06}"));
+    for i in 0..ents_per_dir_4k(d) {
+        let p = harness4k.d.path().join(format!("{d}/frame{i:06}"));
         access(p.as_path(), amode)
             .unwrap_or_else(|_| panic!("Lookup failed: {}", p.display()));
     }
@@ -491,14 +559,17 @@ fn lookup(harness: Harness, #[case] d: &str) {
 /// Lookup a directory's "." and ".." entries.  Verify their inode numbers
 #[named]
 #[rstest]
-#[case::sf("sf")]
-#[case::block("block")]
-#[case::leaf("leaf")]
-#[case::node("node")]
-#[case::btree("btree")]
-fn lookup_dots(harness: Harness, #[case] d: &str) {
+#[case::sf(harness4k, "sf")]
+#[case::block(harness4k, "block")]
+#[case::leaf(harness4k, "leaf")]
+#[case::node(harness4k, "node")]
+#[case::btree(harness4k, "btree")]
+#[case::btree2_3(harness1k, "btree2.3")]
+#[case::btree3(harness1k, "btree3")]
+fn lookup_dots(#[case] h: fn() -> Harness, #[case] d: &str) {
     require_fusefs!();
 
+    let harness = h();
     let root_md = fs::metadata(harness.d.path()).unwrap();
     let dir_md = fs::metadata(harness.d.path().join(d)).unwrap();
     let dotpath = harness.d.path().join(format!("{d}/."));
@@ -515,9 +586,10 @@ mod lsextattr {
 
     #[named]
     #[apply(all_xattr_fork_types)]
-    fn ok(harness: Harness, #[case] d: &str) {
+    fn ok(#[case] h: fn() -> Harness, #[case] d: &str) {
         require_fusefs!();
 
+        let harness = h();
         let p = harness.d.path().join("xattrs").join(d);
         let mut count = 0;
 
@@ -533,12 +605,12 @@ mod lsextattr {
 
     #[named]
     #[rstest]
-    fn empty(harness: Harness) {
+    fn empty(harness4k: Harness) {
         use std::{convert::TryFrom, ffi::CString};
         require_fusefs!();
 
         let ns = libc::EXTATTR_NAMESPACE_USER;
-        let p = harness.d.path().join("files/hello.txt");
+        let p = harness4k.d.path().join("files/hello.txt");
         let cpath = CString::new(p.as_os_str().as_bytes()).unwrap();
         let mut v = Vec::<u8>::with_capacity(1024);
 
@@ -559,12 +631,12 @@ mod lsextattr {
 
     #[named]
     #[rstest]
-    fn empty_size(harness: Harness) {
+    fn empty_size(harness4k: Harness) {
         use std::{convert::TryFrom, ffi::CString, ptr};
         require_fusefs!();
 
         let ns = libc::EXTATTR_NAMESPACE_USER;
-        let p = harness.d.path().join("files/hello.txt");
+        let p = harness4k.d.path().join("files/hello.txt");
         let cpath = CString::new(p.as_os_str().as_bytes()).unwrap();
 
         let r = unsafe {
@@ -589,10 +661,11 @@ mod lsextattr {
     #[cfg(target_os = "freebsd")]
     #[named]
     #[apply(all_xattr_fork_types)]
-    fn size(harness: Harness, #[case] d: &str) {
+    fn size(#[case] h: fn() -> Harness, #[case] d: &str) {
         use std::{convert::TryFrom, ffi::CString, ptr};
         require_fusefs!();
 
+        let harness = h();
         let ns = libc::EXTATTR_NAMESPACE_USER;
         let p = harness.d.path().join("xattrs").join(d);
         let bytes_per_attr = "attr.000000".len() + 1;
@@ -620,11 +693,11 @@ mod pathconf {
 
     #[named]
     #[rstest]
-    fn name_max(harness: Harness) {
+    fn name_max(harness4k: Harness) {
         require_fusefs!();
 
         let var = nix::unistd::PathconfVar::NAME_MAX;
-        let r = nix::unistd::pathconf(harness.d.path(), var).unwrap();
+        let r = nix::unistd::pathconf(harness4k.d.path(), var).unwrap();
         assert_eq!(Some(255), r);
     }
 }
@@ -634,19 +707,23 @@ mod read {
 
     #[template]
     #[rstest]
-    #[case::single_extent("single_extent.txt", 4096)]
-    #[case::four_extents("four_extents.txt", 16384)]
-    #[case::two_height_btree("btree2.txt", 65536)]
-    #[case::wide_two_height_btree("btree2.4.txt", 8388608)]
-    #[case::three_height_btree("btree3.txt", 16777216)]
-    fn all_files(d: &str) {}
+    #[case::single_extent(harness4k, "single_extent.txt", 4096)]
+    #[case::four_extents(harness4k, "four_extents.txt", 16384)]
+    #[case::two_height_btree(harness4k, "btree2.txt", 65536)]
+    #[case::wide_two_height_btree(harness4k, "btree2.4.txt", 8388608)]
+    #[case::three_height_btree(harness4k, "btree3.txt", 16777216)]
+    #[case::wide_two_height_btree2(harness1k, "btree2.2.txt", 65536)]
+    #[case::wide_two_height_btree2(harness1k, "btree3.txt", 2097152)]
+    #[case::wide_two_height_btree2(harness1k, "btree3.3.txt", 8388608)]
+    fn all_files(h: fn() -> Harness, d: &str) {}
 
     /// Attempting to read across eof should return the correct amount of data
     #[named]
     #[apply(all_files)]
-    fn across_eof(harness: Harness, #[case] filename: &str, #[case] size: usize) {
+    fn across_eof(#[case] h: fn() -> Harness, #[case] filename: &str, #[case] size: usize) {
         require_fusefs!();
 
+        let harness = h();
         let path = harness.d.path().join("files").join(filename);
         let f = fs::File::open(path).unwrap();
         let mut buf = [0u8; 16];
@@ -656,9 +733,10 @@ mod read {
     /// Read a whole file in a single syscall
     #[named]
     #[apply(all_files)]
-    fn all(harness: Harness, #[case] filename: &str, #[case] size: usize) {
+    fn all(#[case] h: fn() -> Harness, #[case] filename: &str, #[case] size: usize) {
         require_fusefs!();
 
+        let harness = h();
         let path = harness.d.path().join("files").join(filename);
         let mut buf = vec![0; size];
         let mut f = fs::File::open(path).unwrap();
@@ -679,10 +757,11 @@ mod read {
     // should parameterize this test on all different cacheing types.
     #[named]
     #[apply(all_files)]
-    fn by16(harness: Harness, #[case] filename: &str, #[case] size: usize) {
+    fn by16(#[case] h: fn() -> Harness, #[case] filename: &str, #[case] size: usize) {
         require_fusefs!();
 
         const BUFSIZE: usize = 16;
+        let harness = h();
         let path = harness.d.path().join("files").join(filename);
         let mut f = fs::File::open(path).unwrap();
 
@@ -708,9 +787,10 @@ mod read {
     /// Attempt to read past eof should return 0
     #[named]
     #[apply(all_files)]
-    fn past_eof(harness: Harness, #[case] filename: &str, #[case] size: usize) {
+    fn past_eof(#[case] h: fn() -> Harness, #[case] filename: &str, #[case] size: usize) {
         require_fusefs!();
 
+        let harness = h();
         let path = harness.d.path().join("files").join(filename);
         let f = fs::File::open(path).unwrap();
         let mut buf = [0u8; 1];
@@ -722,18 +802,37 @@ mod read {
 }
 
 /// List a directory's contents with readdir
+//
+// The 1k blocksize formatted golden image uses a different naming convention than the 4k image
 #[named]
-#[rstest]
-#[case::sf("sf")]
-#[case::block("block")]
-#[case::leaf("leaf")]
-#[case::node("node")]
-#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/30" ]
-#[case::btree("btree")]
-fn readdir(harness: Harness, #[case] d: &str) {
+#[apply(all_dir_types_1k)]
+fn readdir_1k(harness1k: Harness, #[case] d: &str) {
     require_fusefs!();
 
-    let dpath = harness.d.path().join(d);
+    let dpath = harness1k.d.path().join(d);
+    let ents = std::fs::read_dir(dpath)
+        .unwrap();
+    let mut count = 0;
+    for (i, rent) in ents.enumerate() {
+        let ent = rent.unwrap();
+        let expected_name = format!("frame__________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________{i:08}");
+        assert_eq!(ent.file_name(), OsStr::new(&expected_name));
+        assert!(ent.file_type().unwrap().is_file());
+        let md = ent.metadata().unwrap();
+        assert_eq!(ent.ino(), md.ino());
+        // The other metadata fields are checked in a separate test case.
+        count += 1;
+    }
+    assert_eq!(count, ents_per_dir_4k(d));
+}
+
+/// List a directory's contents with readdir
+#[named]
+#[apply(all_dir_types_4k)]
+fn readdir_4k(harness4k: Harness, #[case] d: &str) {
+    require_fusefs!();
+
+    let dpath = harness4k.d.path().join(d);
     let ents = std::fs::read_dir(dpath)
         .unwrap();
     let mut count = 0;
@@ -747,7 +846,7 @@ fn readdir(harness: Harness, #[case] d: &str) {
         // The other metadata fields are checked in a separate test case.
         count += 1;
     }
-    assert_eq!(count, ents_per_dir(d));
+    assert_eq!(count, ents_per_dir_4k(d));
 }
 
 /// List a directory's hidden contents with readdir
@@ -755,15 +854,19 @@ fn readdir(harness: Harness, #[case] d: &str) {
 // unconditionally hides the hidden entries.
 #[named]
 #[rstest]
-#[case::sf("sf")]
-#[case::block("block")]
-#[case::leaf("leaf")]
-#[case::node("node")]
-#[case::btree("btree")]
-fn readdir_dots(harness: Harness, #[case] d: &str) {
+#[case::sf(harness4k, "sf")]
+#[case::block(harness4k, "block")]
+#[case::leaf(harness4k, "leaf")]
+#[case::node(harness4k, "node")]
+#[case::btree(harness4k, "btree")]
+#[case::btree2_3(harness1k, "btree2.3")]
+#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/73" ]
+#[case::btree3(harness1k, "btree3")]
+fn readdir_dots(#[case] h: fn() -> Harness, #[case] d: &str) {
     use nix::{dir::Dir, fcntl::OFlag, sys::stat::Mode};
     require_fusefs!();
 
+    let harness = h();
     let root_md = fs::metadata(harness.d.path()).unwrap();
     let dir_md = fs::metadata(harness.d.path().join(d)).unwrap();
 
@@ -786,11 +889,11 @@ fn readdir_dots(harness: Harness, #[case] d: &str) {
 #[rstest]
 #[case::sf("sf", "dest")]
 #[case::extent("max", "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDE")]
-fn readlink(harness: Harness, #[case] linkname: &str, #[case] destname: &str)
+fn readlink(harness4k: Harness, #[case] linkname: &str, #[case] destname: &str)
 {
     require_fusefs!();
 
-    let path = harness.d.path().join("links").join(linkname);
+    let path = harness4k.d.path().join("links").join(linkname);
     let dest = fs::read_link(path).unwrap();
     assert_eq!(dest.as_os_str(), destname);
 }
@@ -802,10 +905,10 @@ mod stat {
     // This may need to be updated whenever the golden image gets rebuilt.
     #[named]
     #[rstest]
-    fn file(harness: Harness) {
+    fn file(harness4k: Harness) {
         require_fusefs!();
 
-        let path = harness.d.path().join("files").join("hello.txt");
+        let path = harness4k.d.path().join("files").join("hello.txt");
 
         // Due to the interaction of two bugs, we can't use std::fs::metadata here.
         // Instead, we'll use the lower-level nix::sys::stat::stat
@@ -834,10 +937,10 @@ mod stat {
     /// Timestamps from before the Epoch should work
     #[named]
     #[rstest]
-    fn pre_epoch(harness: Harness) {
+    fn pre_epoch(harness4k: Harness) {
         require_fusefs!();
 
-        let path = harness.d.path().join("files").join("old.txt");
+        let path = harness4k.d.path().join("files").join("old.txt");
 
         let stat = nix::sys::stat::stat(&path).unwrap();
         assert_eq!(stat.st_mtime, -1613800129);
@@ -850,10 +953,10 @@ mod stat {
     #[case::chardev("chardev", libc::S_IFCHR)]
     #[case::fifo("fifo", libc::S_IFIFO)]
     #[case::socket("sock", libc::S_IFSOCK)]
-    fn devs(harness: Harness, #[case] filename: &str, #[case] devtype: u16) {
+    fn devs(harness4k: Harness, #[case] filename: &str, #[case] devtype: u16) {
         require_fusefs!();
 
-        let path = harness.d.path().join("files").join(filename);
+        let path = harness4k.d.path().join("files").join(filename);
         
         let stat = nix::sys::stat::stat(&path).unwrap();
         assert_eq!(stat.st_mode & libc::S_IFMT, devtype);
@@ -864,11 +967,11 @@ mod stat {
     #[rstest]
     #[case::sf("sf", 76994)]
     #[case::extent("max", 76995)]
-    fn symlink(harness: Harness, #[case] linkname: &str, #[case] ino: libc::ino_t)
+    fn symlink(harness4k: Harness, #[case] linkname: &str, #[case] ino: libc::ino_t)
     {
         require_fusefs!();
 
-        let path = harness.d.path().join("links").join(linkname);
+        let path = harness4k.d.path().join("links").join(linkname);
 
         let flags = nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW;
         let stat = nix::sys::stat::fstatat(libc::AT_FDCWD, &path,
@@ -880,10 +983,10 @@ mod stat {
 
 #[named]
 #[rstest]
-fn statfs(harness: Harness) {
+fn statfs(harness4k: Harness) {
     require_fusefs!();
 
-    let sfs = nix::sys::statfs::statfs(harness.d.path()).unwrap();
+    let sfs = nix::sys::statfs::statfs(harness4k.d.path()).unwrap();
 
     assert_eq!(sfs.blocks(), 15016);
     assert_eq!(sfs.block_size(), 4096);
@@ -908,10 +1011,10 @@ fn statfs(harness: Harness) {
 
 #[named]
 #[rstest]
-fn statvfs(harness: Harness) {
+fn statvfs(harness4k: Harness) {
     require_fusefs!();
 
-    let svfs = nix::sys::statvfs::statvfs(harness.d.path()).unwrap();
+    let svfs = nix::sys::statvfs::statvfs(harness4k.d.path()).unwrap();
     // xfuse is always read-only.
     assert!(svfs.flags().contains(nix::sys::statvfs::FsFlags::ST_RDONLY));
     assert_eq!(svfs.fragment_size(), 4096);

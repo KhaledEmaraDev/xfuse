@@ -144,10 +144,14 @@ impl Dinode {
                     // beginning of the attribute fork is given as di_forkoff *
                     // 8 bytes from the start of the literal area, which is
                     // where BmdrBlock is located.
-                    assert_ne!(di_core.di_forkoff, 0, "TODO");
-                    let gap = di_core.di_forkoff as usize * 8 / 2 -
-                        bmbt.bb_numrecs as usize * BmbtKey::SIZE -
+                    let space = if di_core.di_forkoff == 0 {
+                        (usize::from(superblock.sb_inodesize) - 0xb0) / 2
+                    } else {
+                        usize::from(di_core.di_forkoff) * 8 / 2
+                    };
+                    let gap = space -
                         BmdrBlock::SIZE -
+                        bmbt.bb_numrecs as usize * BmbtKey::SIZE -
                         /* XXX Why does it need this extra 4? */ 4;
                     decoder.reader().consume(gap as usize);
 

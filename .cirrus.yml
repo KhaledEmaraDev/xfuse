@@ -10,7 +10,7 @@ task:
   matrix:
     - name: FreeBSD stable
       env:
-        VERSION: 1.65.0
+        VERSION: 1.70.0
     - name: FreeBSD nightly
       env:
         VERSION: nightly

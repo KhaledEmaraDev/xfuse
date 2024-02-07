@@ -29,6 +29,7 @@ use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::os::unix::ffi::OsStrExt;
+use std::sync::OnceLock;
 use std::time::{Duration, UNIX_EPOCH};
 
 use super::S_IFMT;
@@ -43,6 +44,11 @@ use fuser::{
     consts::FOPEN_KEEP_CACHE
 };
 use libc::{mode_t, ERANGE, S_IFDIR, S_IFREG};
+
+/// We must store the Superblock in a global variable.  This is unfortunate, and limits us to only
+/// opening one disk image at a time, but it's necessary in order to use information from the
+/// superblock within a Decode::decode implementation.
+pub(super) static SUPERBLOCK: OnceLock<Sb> = OnceLock::new();
 
 #[derive(Debug)]
 pub struct Volume {
@@ -59,6 +65,7 @@ impl Volume {
         let mut buf_reader = BufReader::new(&device);
 
         let superblock = Sb::from(buf_reader.by_ref());
+        SUPERBLOCK.set(superblock).unwrap();
 
         buf_reader
             .seek(SeekFrom::Start(u64::from(superblock.sb_sectsize) * 2))

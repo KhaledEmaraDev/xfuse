@@ -43,12 +43,9 @@ use super::{
     bmbt_rec::BmbtRec,
     definitions::{XfsFileoff, XfsFsblock},
     sb::Sb,
-    utils::decode_from
+    utils::decode_from,
+    volume::SUPERBLOCK
 };
-
-// The XFS Algorithms & Data Structures document section 16.2 says that the pointers start at
-// offset 0x808 within the block.  But it looks to me like they really start at offset 0x820.
-pub const POINTERS_AREA_OFFSET: usize = 0x820;
 
 #[derive(Clone, Copy, Debug, Decode)]
 pub struct BtreeBlockHdr<T: PrimInt + Unsigned> {
@@ -227,7 +224,9 @@ impl Decode for BtreeIntermediate {
         // 16.2 says that they start at offset 0x808 within the block.  But it looks to me like
         // they really start at offset 0x820.
         let read_so_far = XfsBmbtLblock::SIZE + usize::from(hdr.bb_numrecs) * BmbtKey::SIZE;
-        decoder.reader().consume(POINTERS_AREA_OFFSET - read_so_far);
+        let blocksize = SUPERBLOCK.get().unwrap().sb_blocksize;
+        let pointers_area_offset = blocksize as usize / 2 + 0x20;
+        decoder.reader().consume(pointers_area_offset - read_so_far);
 
         let ptrs = (0..hdr.bb_numrecs).map(|_| {
             Decode::decode(decoder).unwrap()
