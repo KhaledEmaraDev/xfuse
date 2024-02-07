@@ -43,8 +43,6 @@ use bincode::Decode;
 use fuser::{FileAttr, FileType};
 use libc::{c_int, ENOENT};
 
-pub const XFS_DIR2_DATA_FD_COUNT: usize = 3;
-
 #[derive(Debug, Decode)]
 pub struct Dir2BlockTail {
     pub count: u32,

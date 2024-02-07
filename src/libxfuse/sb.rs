@@ -33,45 +33,48 @@ use super::utils::Uuid;
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use crc::{Crc, CRC_32_ISCSI};
 
-pub const XFS_SB_VERSION_ATTRBIT: u16 = 0x0010;
-pub const XFS_SB_VERSION_NLINKBIT: u16 = 0x0020;
-pub const XFS_SB_VERSION_QUOTABIT: u16 = 0x0040;
-pub const XFS_SB_VERSION_ALIGNBIT: u16 = 0x0080;
-pub const XFS_SB_VERSION_DALIGNBIT: u16 = 0x0100;
-pub const XFS_SB_VERSION_SHAREDBIT: u16 = 0x0200;
-pub const XFS_SB_VERSION_LOGV2BIT: u16 = 0x0400;
-pub const XFS_SB_VERSION_SECTORBIT: u16 = 0x0800;
-pub const XFS_SB_VERSION_EXTFLGBIT: u16 = 0x1000;
-pub const XFS_SB_VERSION_DIRV2BIT: u16 = 0x2000;
-pub const XFS_SB_VERSION_MOREBITSBIT: u16 = 0x4000;
+#[allow(dead_code)]
+mod constants {
+    pub const XFS_SB_VERSION_ATTRBIT: u16 = 0x0010;
+    pub const XFS_SB_VERSION_NLINKBIT: u16 = 0x0020;
+    pub const XFS_SB_VERSION_QUOTABIT: u16 = 0x0040;
+    pub const XFS_SB_VERSION_ALIGNBIT: u16 = 0x0080;
+    pub const XFS_SB_VERSION_DALIGNBIT: u16 = 0x0100;
+    pub const XFS_SB_VERSION_SHAREDBIT: u16 = 0x0200;
+    pub const XFS_SB_VERSION_LOGV2BIT: u16 = 0x0400;
+    pub const XFS_SB_VERSION_SECTORBIT: u16 = 0x0800;
+    pub const XFS_SB_VERSION_EXTFLGBIT: u16 = 0x1000;
+    pub const XFS_SB_VERSION_DIRV2BIT: u16 = 0x2000;
+    pub const XFS_SB_VERSION_MOREBITSBIT: u16 = 0x4000;
 
-pub const XFS_UQUOTA_ACCT: u16 = 0x0001;
-pub const XFS_UQUOTA_ENFD: u16 = 0x0002;
-pub const XFS_UQUOTA_CHKD: u16 = 0x0004;
-pub const XFS_PQUOTA_ACCT: u16 = 0x0008;
-pub const XFS_OQUOTA_ENFD: u16 = 0x0010;
-pub const XFS_OQUOTA_CHKD: u16 = 0x0020;
-pub const XFS_GQUOTA_ACCT: u16 = 0x0040;
-pub const XFS_GQUOTA_ENFD: u16 = 0x0080;
-pub const XFS_GQUOTA_CHKD: u16 = 0x0100;
-pub const XFS_PQUOTA_ENFD: u16 = 0x0200;
-pub const XFS_PQUOTA_CHKD: u16 = 0x0400;
+    pub const XFS_UQUOTA_ACCT: u16 = 0x0001;
+    pub const XFS_UQUOTA_ENFD: u16 = 0x0002;
+    pub const XFS_UQUOTA_CHKD: u16 = 0x0004;
+    pub const XFS_PQUOTA_ACCT: u16 = 0x0008;
+    pub const XFS_OQUOTA_ENFD: u16 = 0x0010;
+    pub const XFS_OQUOTA_CHKD: u16 = 0x0020;
+    pub const XFS_GQUOTA_ACCT: u16 = 0x0040;
+    pub const XFS_GQUOTA_ENFD: u16 = 0x0080;
+    pub const XFS_GQUOTA_CHKD: u16 = 0x0100;
+    pub const XFS_PQUOTA_ENFD: u16 = 0x0200;
+    pub const XFS_PQUOTA_CHKD: u16 = 0x0400;
 
-pub const XFS_SBF_READONLY: u8 = 0x01;
+    pub const XFS_SBF_READONLY: u8 = 0x01;
 
-pub const XFS_SB_VERSION2_LAZYSBCOUNTBIT: u32 = 0x00000002;
-pub const XFS_SB_VERSION2_ATTR2BIT: u32 = 0x00000008;
-pub const XFS_SB_VERSION2_PARENTBIT: u32 = 0x00000010;
-pub const XFS_SB_VERSION2_PROJID32BIT: u32 = 0x00000080;
-pub const XFS_SB_VERSION2_CRCBIT: u32 = 0x00000100;
-pub const XFS_SB_VERSION2_FTYPE: u32 = 0x00000200;
+    pub const XFS_SB_VERSION2_LAZYSBCOUNTBIT: u32 = 0x00000002;
+    pub const XFS_SB_VERSION2_ATTR2BIT: u32 = 0x00000008;
+    pub const XFS_SB_VERSION2_PARENTBIT: u32 = 0x00000010;
+    pub const XFS_SB_VERSION2_PROJID32BIT: u32 = 0x00000080;
+    pub const XFS_SB_VERSION2_CRCBIT: u32 = 0x00000100;
+    pub const XFS_SB_VERSION2_FTYPE: u32 = 0x00000200;
 
-pub const XFS_SB_FEAT_INCOMPAT_FTYPE: u32 = 0x00000001;
-pub const XFS_SB_FEAT_INCOMPAT_SPINODES: u32 = 0x00000002;
-pub const XFS_SB_FEAT_INCOMPAT_META_UUID: u32 = 0x00000004;
-pub const XFS_SB_FEAT_INCOMPAT_BIGTIME: u32 = 0x00000008;
-pub const XFS_SB_FEAT_INCOMPAT_NEEDSREPAIR: u32 = 0x00000010;
-pub const XFS_SB_FEAT_INCOMPAT_NREXT64: u32 = 0x00000020;
+    pub const XFS_SB_FEAT_INCOMPAT_FTYPE: u32 = 0x00000001;
+    pub const XFS_SB_FEAT_INCOMPAT_SPINODES: u32 = 0x00000002;
+    pub const XFS_SB_FEAT_INCOMPAT_META_UUID: u32 = 0x00000004;
+    pub const XFS_SB_FEAT_INCOMPAT_BIGTIME: u32 = 0x00000008;
+    pub const XFS_SB_FEAT_INCOMPAT_NEEDSREPAIR: u32 = 0x00000010;
+    pub const XFS_SB_FEAT_INCOMPAT_NREXT64: u32 = 0x00000020;
+}
 
 #[derive(Debug)]
 pub struct Sb {
@@ -213,7 +216,7 @@ impl Sb {
         if sb_versionnum & 0xF != 5 {
             panic!("Unsupported filesystem version number {}", sb_versionnum & 0xF);
         }
-        if sb_features2 & XFS_SB_VERSION2_ATTR2BIT == 0 {
+        if sb_features2 & constants::XFS_SB_VERSION2_ATTR2BIT == 0 {
             panic!("Version 1 extended attributes are not supported");
         }
 
@@ -274,10 +277,5 @@ impl Sb {
     #[inline]
     pub fn get_dir3_leaf_offset(&self) -> u64 {
         (32 * 1024 * 1024 * 1024) / (self.sb_blocksize as u64)
-    }
-
-    #[inline]
-    pub fn get_dir3_free_offset(&self) -> u64 {
-        (64 * 1024 * 1024 * 1024) / (self.sb_blocksize as u64)
     }
 }

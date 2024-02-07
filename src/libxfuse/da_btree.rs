@@ -189,11 +189,6 @@ impl XfsDa3NodeEntry {
     }
 }
 
-pub enum LookupResponse {
-    Intermediate,
-    Result(XfsFsblock),
-}
-
 #[derive(Debug)]
 pub struct XfsDa3Intnode {
     pub hdr: XfsDa3NodeHdr,

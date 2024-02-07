@@ -49,17 +49,21 @@ use libc::{c_int, ENOENT};
 pub type XfsDir2DataOff = u16;
 pub type XfsDir2Dataptr = u32;
 
-pub const XFS_DIR2_DATA_FD_COUNT: usize = 3;
+#[allow(dead_code)]
+mod constants {
+    pub const XFS_DIR2_DATA_FD_COUNT: usize = 3;
 
-pub const XFS_DIR3_FT_UNKNOWN: u8 = 0;
-pub const XFS_DIR3_FT_REG_FILE: u8 = 1;
-pub const XFS_DIR3_FT_DIR: u8 = 2;
-pub const XFS_DIR3_FT_CHRDEV: u8 = 3;
-pub const XFS_DIR3_FT_BLKDEV: u8 = 4;
-pub const XFS_DIR3_FT_FIFO: u8 = 5;
-pub const XFS_DIR3_FT_SOCK: u8 = 6;
-pub const XFS_DIR3_FT_SYMLINK: u8 = 7;
-pub const XFS_DIR3_FT_WHT: u8 = 8;
+    pub const XFS_DIR3_FT_UNKNOWN: u8 = 0;
+    pub const XFS_DIR3_FT_REG_FILE: u8 = 1;
+    pub const XFS_DIR3_FT_DIR: u8 = 2;
+    pub const XFS_DIR3_FT_CHRDEV: u8 = 3;
+    pub const XFS_DIR3_FT_BLKDEV: u8 = 4;
+    pub const XFS_DIR3_FT_FIFO: u8 = 5;
+    pub const XFS_DIR3_FT_SOCK: u8 = 6;
+    pub const XFS_DIR3_FT_SYMLINK: u8 = 7;
+    pub const XFS_DIR3_FT_WHT: u8 = 8;
+}
+pub use constants::*;
 
 #[derive(Debug, Decode)]
 pub struct Dir3BlkHdr {
@@ -88,12 +92,12 @@ impl Dir2DataFree {
 #[derive(Debug, Decode)]
 pub struct Dir3DataHdr {
     pub hdr: Dir3BlkHdr,
-    pub best_free: [Dir2DataFree; XFS_DIR2_DATA_FD_COUNT],
+    pub best_free: [Dir2DataFree; constants::XFS_DIR2_DATA_FD_COUNT],
     pub pad: u32,
 }
 
 impl Dir3DataHdr {
-    pub const SIZE: u64 = Dir3BlkHdr::SIZE + XFS_DIR2_DATA_FD_COUNT as u64 * Dir2DataFree::SIZE + 4;
+    pub const SIZE: u64 = Dir3BlkHdr::SIZE + constants::XFS_DIR2_DATA_FD_COUNT as u64 * Dir2DataFree::SIZE + 4;
 }
 
 #[derive(Debug)]
@@ -140,12 +144,6 @@ impl Dir2DataEntry {
         buf_reader.seek(SeekFrom::Current(-9)).unwrap();
 
         ((((namelen as i64) + 8 + 1 + 2) + 8 - 1) / 8) * 8
-    }
-
-    /// Return this entry's serialized length on disk
-    pub fn length(&self) -> usize {
-        let namelen = self.name.len();
-        (((namelen + 8 + 1 + 2) + 8 - 1) / 8) * 8
     }
 }
 
@@ -223,12 +221,6 @@ impl Decode for Dir2DataUnused {
             tag,
         })
     }
-}
-
-#[derive(Debug)]
-pub enum Dir2DataUnion {
-    Entry(Dir2DataEntry),
-    Unused(Dir2DataUnused),
 }
 
 #[derive(Debug)]
@@ -428,10 +420,6 @@ impl Dir2LeafDisk {
         }
 
         Err(ENOENT)
-    }
-
-    pub fn sanity(&self, super_block: &Sb) {
-        self.hdr.sanity(super_block);
     }
 }
 

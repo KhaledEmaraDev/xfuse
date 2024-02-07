@@ -46,7 +46,9 @@ use super::{
     utils::decode_from
 };
 
-pub const POINTERS_AREA_OFFSET: u16 = 0x808;
+// The XFS Algorithms & Data Structures document section 16.2 says that the pointers start at
+// offset 0x808 within the block.  But it looks to me like they really start at offset 0x820.
+pub const POINTERS_AREA_OFFSET: usize = 0x820;
 
 #[derive(Clone, Copy, Debug, Decode)]
 pub struct BtreeBlockHdr<T: PrimInt + Unsigned> {
@@ -110,16 +112,6 @@ pub struct BmdrBlock {
 
 impl BmdrBlock {
     pub const SIZE: usize = 4;
-
-    pub fn from<R: BufRead>(buf_reader: &mut R) -> BmdrBlock {
-        let bb_level = buf_reader.read_u16::<BigEndian>().unwrap();
-        let bb_numrecs = buf_reader.read_u16::<BigEndian>().unwrap();
-
-        BmdrBlock {
-            bb_level,
-            bb_numrecs,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Decode)]
@@ -182,7 +174,7 @@ pub trait Btree {
 pub struct BtreeRoot {
     pub bmdr: BmdrBlock,
     pub keys: Vec<BmbtKey>,
-    pub ptrs: Vec<XfsBmbtPtr>,
+    pub ptrs: Vec<XfsBmdrPtr>,
 }
 
 impl Btree for BtreeRoot {
@@ -194,7 +186,7 @@ impl Btree for BtreeRoot {
         self.bmdr.bb_level
     }
 
-    fn ptrs(&self) -> &[XfsBmbtPtr] {
+    fn ptrs(&self) -> &[XfsBmdrPtr] {
         &self.ptrs
     }
 }
@@ -235,7 +227,7 @@ impl Decode for BtreeIntermediate {
         // 16.2 says that they start at offset 0x808 within the block.  But it looks to me like
         // they really start at offset 0x820.
         let read_so_far = XfsBmbtLblock::SIZE + usize::from(hdr.bb_numrecs) * BmbtKey::SIZE;
-        decoder.reader().consume(0x820 - read_so_far);
+        decoder.reader().consume(POINTERS_AREA_OFFSET - read_so_far);
 
         let ptrs = (0..hdr.bb_numrecs).map(|_| {
             Decode::decode(decoder).unwrap()

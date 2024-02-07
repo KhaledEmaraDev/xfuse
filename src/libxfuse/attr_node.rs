@@ -50,30 +50,6 @@ pub struct AttrNode {
 }
 
 impl AttrNode {
-    pub fn from<R: BufRead + Seek>(
-        buf_reader: &mut R,
-        superblock: &Sb,
-        bmx: Vec<BmbtRec>,
-    ) -> AttrNode {
-        if let Some(rec) = bmx.first() {
-            buf_reader
-                .seek(SeekFrom::Start(
-                    rec.br_startblock * u64::from(superblock.sb_blocksize),
-                ))
-                .unwrap();
-
-            let node = XfsDa3Intnode::from(buf_reader.by_ref(), superblock);
-
-            AttrNode {
-                bmx,
-                node,
-                total_size: -1,
-            }
-        } else {
-            panic!("Extent records missing!");
-        }
-    }
-
     pub fn map_logical_block_to_fs_block(&self, block: XfsFileoff) -> XfsFsblock {
         for entry in self.bmx.iter().rev() {
             if block >= entry.br_startoff {

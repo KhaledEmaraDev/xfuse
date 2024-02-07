@@ -67,23 +67,26 @@ pub struct XfsTimestamp {
     pub t_nsec: u32,
 }
 
-pub const XFS_DIFLAG_REALTIME: u16 = 1 << 0;
-pub const XFS_DIFLAG_PREALLOC: u16 = 1 << 1;
-pub const XFS_DIFLAG_NEWRTBM: u16 = 1 << 2;
-pub const XFS_DIFLAG_IMMUTABLE: u16 = 1 << 3;
-pub const XFS_DIFLAG_APPEND: u16 = 1 << 4;
-pub const XFS_DIFLAG_SYNC: u16 = 1 << 5;
-pub const XFS_DIFLAG_NOATIME: u16 = 1 << 6;
-pub const XFS_DIFLAG_NODUMP: u16 = 1 << 7;
-pub const XFS_DIFLAG_RTINHERIT: u16 = 1 << 8;
-pub const XFS_DIFLAG_PROJINHERIT: u16 = 1 << 9;
-pub const XFS_DIFLAG_NOSYMLINKS: u16 = 1 << 10;
-pub const XFS_DIFLAG_EXTSIZE: u16 = 1 << 11;
-pub const XFS_DIFLAG_EXTSZINHERIT: u16 = 1 << 12;
-pub const XFS_DIFLAG_NODEFRAG: u16 = 1 << 13;
-pub const XFS_DIFLAG_FILESTREAMS: u16 = 1 << 14;
+#[allow(dead_code)]
+mod constants {
+    pub const XFS_DIFLAG_REALTIME: u16 = 1 << 0;
+    pub const XFS_DIFLAG_PREALLOC: u16 = 1 << 1;
+    pub const XFS_DIFLAG_NEWRTBM: u16 = 1 << 2;
+    pub const XFS_DIFLAG_IMMUTABLE: u16 = 1 << 3;
+    pub const XFS_DIFLAG_APPEND: u16 = 1 << 4;
+    pub const XFS_DIFLAG_SYNC: u16 = 1 << 5;
+    pub const XFS_DIFLAG_NOATIME: u16 = 1 << 6;
+    pub const XFS_DIFLAG_NODUMP: u16 = 1 << 7;
+    pub const XFS_DIFLAG_RTINHERIT: u16 = 1 << 8;
+    pub const XFS_DIFLAG_PROJINHERIT: u16 = 1 << 9;
+    pub const XFS_DIFLAG_NOSYMLINKS: u16 = 1 << 10;
+    pub const XFS_DIFLAG_EXTSIZE: u16 = 1 << 11;
+    pub const XFS_DIFLAG_EXTSZINHERIT: u16 = 1 << 12;
+    pub const XFS_DIFLAG_NODEFRAG: u16 = 1 << 13;
+    pub const XFS_DIFLAG_FILESTREAMS: u16 = 1 << 14;
 
-pub const XFS_DIFLAG2_BITTIME: u64 = 1 << 3;
+    pub const XFS_DIFLAG2_BITTIME: u64 = 1 << 3;
+}
 
 #[derive(Debug, bincode::Decode)]
 pub struct DinodeCore {
@@ -157,7 +160,7 @@ impl DinodeCore {
     }
 
     fn timestamp(&self, ts: &XfsTimestamp) -> SystemTime {
-        if self.di_version >= 3 && (self.di_flags2 & XFS_DIFLAG2_BITTIME != 0) {
+        if self.di_version >= 3 && (self.di_flags2 & constants::XFS_DIFLAG2_BITTIME != 0) {
             // XXX this could be made a const if the Rust const_trait_impl
             // feature stabilizes.
             let classic_epoch: SystemTime = UNIX_EPOCH - Duration::from_secs(i32::MAX as u64 + 1);

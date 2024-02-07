@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 /*
  * BSD 2-Clause License
  *
