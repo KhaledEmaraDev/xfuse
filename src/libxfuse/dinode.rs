@@ -55,7 +55,7 @@ use bincode::{
 };
 use libc::{mode_t, S_IFDIR, S_IFLNK, S_IFMT, S_IFREG, S_IFSOCK, S_IFIFO, S_IFCHR, S_IFBLK};
 
-pub const LITERAL_AREA_OFFSET: u8 = 0xb0;
+pub const LITERAL_AREA_OFFSET: usize = 0xb0;
 
 #[derive(Debug)]
 pub enum DiU {
@@ -145,7 +145,7 @@ impl Dinode {
                     // 8 bytes from the start of the literal area, which is
                     // where BmdrBlock is located.
                     let space = if di_core.di_forkoff == 0 {
-                        (usize::from(superblock.sb_inodesize) - 0xb0) / 2
+                        (usize::from(superblock.sb_inodesize) - LITERAL_AREA_OFFSET) / 2
                     } else {
                         usize::from(di_core.di_forkoff) * 8 / 2
                     };
@@ -245,7 +245,7 @@ impl Dinode {
             _ => panic!("Inode type not yet supported."),
         }
 
-        let attr_fork_ofs = LITERAL_AREA_OFFSET as usize + di_core.di_forkoff as usize * 8;
+        let attr_fork_ofs = LITERAL_AREA_OFFSET + di_core.di_forkoff as usize * 8;
         let config = bincode::config::standard()
             .with_big_endian()
             .with_fixed_int_encoding();
@@ -274,6 +274,17 @@ impl Dinode {
                         keys.push(BmbtKey::decode(&mut decoder).unwrap());
                     }
 
+                    // The XFS Algorithms and Data Structures document, section 15.4, isn't really
+                    // specific about where the pointers are located.  They appear to be halfway
+                    // between the start of the attribute fork and the end of the inode, minus 4
+                    // bytes.
+                    let ptr_ofs = (superblock.sb_inodesize as usize - attr_fork_ofs) / 2
+                        + attr_fork_ofs
+                        /* XXX Where does the -4 come from? */ - 4;
+                    let gap = ptr_ofs - attr_fork_ofs -
+                        BmdrBlock::SIZE -
+                        usize::from(bmbt.bb_numrecs) * BmbtKey::SIZE;
+                    decoder.reader().consume(gap as usize);
                     let mut pointers = Vec::<XfsBmbtPtr>::new();
                     for _i in 0..bmbt.bb_numrecs {
                         pointers.push(XfsBmbtPtr::decode(&mut decoder).unwrap());
