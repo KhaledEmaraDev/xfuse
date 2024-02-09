@@ -96,7 +96,7 @@ pub struct AttrLeafHdr {
 impl AttrLeafHdr {
     pub fn sanity(&self, super_block: &Sb) {
         self.info.sanity(super_block);
-        assert_eq!(self.info.magic, XFS_ATTR3_LEAF_MAGIC);
+        assert_eq!(self.info.magic, XFS_ATTR3_LEAF_MAGIC, "bad magic!  expected {:#x} but found {:#x}", XFS_ATTR3_LEAF_MAGIC, self.info.magic);
     }
 }
 

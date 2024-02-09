@@ -8,10 +8,9 @@ A read-only XFS implementation using FUSE, written for GSoC 2021.
 
 ## Golden Image
 
-A canned golden image is checked into the repository, at
-`resources/xfs.img.zstd`.  It contains five subdirectories each using a
-different on-disk implementation, with a different number of empty files inside
-of each.  Run `scripts/mkimg.sh` to rebuild it.
+Some canned golden images are checked into the repository, in the `resources`
+directory.  They contain a variety of file and directory types.  Run
+`scripts/mkimg.sh` to rebuild them.
 
 ## License
 

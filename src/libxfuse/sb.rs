@@ -76,7 +76,7 @@ mod constants {
     pub const XFS_SB_FEAT_INCOMPAT_NREXT64: u32 = 0x00000020;
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Sb {
     pub sb_magicnum: u32,
     pub sb_blocksize: u32,
