@@ -70,6 +70,7 @@ impl Dir2BlockDisk {
         buf_reader.read_exact(&mut raw).unwrap();
 
         let hdr: Dir3DataHdr = decode(&raw[..]).unwrap().0;
+        assert_eq!(hdr.hdr.magic, XFS_DIR3_BLOCK_MAGIC);
 
         let tail_offset = (size as usize) - Dir2BlockTail::SIZE;
         let tail: Dir2BlockTail = decode(&raw[tail_offset..]).unwrap().0;

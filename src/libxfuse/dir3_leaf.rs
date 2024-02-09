@@ -69,6 +69,7 @@ impl Dir2Leaf {
         let entry_size = superblock.sb_blocksize * (1 << superblock.sb_dirblklog);
 
         let leaf = Dir2LeafDisk::from(buf_reader, superblock, offset, entry_size as usize);
+        assert_eq!(leaf.hdr.info.magic, XFS_DIR3_LEAF1_MAGIC);
 
         Dir2Leaf {
             entries,

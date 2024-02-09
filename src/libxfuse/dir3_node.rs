@@ -121,6 +121,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Node {
             buf_reader.read_exact(&mut raw).unwrap();
 
             let (node, _) = decode::<XfsDa3Intnode>(&raw[..]).map_err(|_| EIO)?;
+            assert_eq!(node.hdr.info.magic, XFS_DA3_NODE_MAGIC);
             node.lookup(buf_reader.by_ref(), super_block, hash, |block, _| {
                 self.map_dblock_number(block.into())
             })

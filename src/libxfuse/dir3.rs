@@ -331,6 +331,8 @@ impl Dir2LeafNDisk {
     }
 
     pub fn sanity(&self, super_block: &Sb) {
+        assert_eq!(self.hdr.info.magic, XFS_DIR3_LEAFN_MAGIC,
+            "bad magic! expected {:#x} but found {:#x}", XFS_DIR3_LEAFN_MAGIC, self.hdr.info.magic);
         self.hdr.sanity(super_block);
     }
 }
@@ -373,6 +375,8 @@ impl Dir2LeafDisk {
         let mut decoder = bincode::de::DecoderImpl::new(reader, config);
         let hdr = Dir3LeafHdr::decode(&mut decoder).unwrap();
         hdr.sanity(super_block);
+        assert_eq!(hdr.info.magic, XFS_DIR3_LEAF1_MAGIC,
+            "bad magic! expected {:#x} but found {:#x}", XFS_DIR3_LEAF1_MAGIC, hdr.info.magic);
 
         let ents = (0..hdr.count).map(|_| {
             Dir2LeafEntry::decode(&mut decoder).unwrap()
