@@ -266,7 +266,7 @@ impl XfsDa3Intnode {
         map_da_block_to_fs_block: F,
     ) -> XfsFsblock {
         if self.hdr.level == 1 {
-            self.btree.first().unwrap().before.into()
+            map_da_block_to_fs_block(self.btree.first().unwrap().before, buf_reader.by_ref())
         } else {
             let blk =
                 map_da_block_to_fs_block(self.btree.first().unwrap().before, buf_reader.by_ref());

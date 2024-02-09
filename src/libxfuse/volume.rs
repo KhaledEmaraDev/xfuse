@@ -365,7 +365,11 @@ impl Filesystem for Volume {
                     return;
                 }
 
-                reply.data(attrs.list(buf_reader.by_ref(), &self.sb).as_slice());
+                let list = attrs.list(buf_reader.by_ref(), &self.sb);
+                // Assert that we calculated the list size correctly.  This assertion is only safe
+                // since we're a read-only file system.
+                assert_eq!(list.len(), attrs_size as usize, "size calculation was wrong!");
+                reply.data(list.as_slice());
             }
             None => {
                 reply.size(0);

@@ -52,27 +52,33 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrBtree {
         if self.total_size == -1 {
             let mut total_size: u32 = 0;
 
-            let blk = self.btree.map_block(buf_reader.by_ref(), super_block, 0);
+            // Read the first intermediate block of the btree
+            let intermediate_blk = self.btree.map_block(buf_reader.by_ref(), super_block, 0);
             buf_reader
-                .seek(SeekFrom::Start(blk * u64::from(super_block.sb_blocksize)))
+                .seek(SeekFrom::Start(intermediate_blk * u64::from(super_block.sb_blocksize)))
                 .unwrap();
 
             let node = XfsDa3Intnode::from(buf_reader.by_ref(), super_block);
 
-            let blk = node.first_block(buf_reader.by_ref(), super_block, |block, reader| {
+            // Now read the first leaf block of the btree
+            let lfblk0 = node.first_block(buf_reader.by_ref(), super_block, |block, reader| {
                 self.btree
                     .map_block(reader.by_ref(), super_block, block.into())
             });
-            let leaf_offset = blk * u64::from(super_block.sb_blocksize);
+            let leaf_offset = lfblk0 * u64::from(super_block.sb_blocksize);
 
             buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
 
-            let mut node = AttrLeafblock::from(buf_reader.by_ref(), super_block);
-            total_size += node.get_total_size(buf_reader.by_ref(), leaf_offset);
+            let mut leaf = AttrLeafblock::from(buf_reader.by_ref(), super_block);
+            total_size += leaf.get_total_size(buf_reader.by_ref(), leaf_offset);
 
-            while node.hdr.info.forw != 0 {
-                node = AttrLeafblock::from(buf_reader.by_ref(), super_block);
-                total_size += node.get_total_size(buf_reader.by_ref(), leaf_offset);
+            while leaf.hdr.info.forw != 0 {
+                let lfblk = self.btree.map_block(buf_reader.by_ref(), super_block,
+                    leaf.hdr.info.forw.into());
+                let lfofs = lfblk * u64::from(super_block.sb_blocksize);
+                buf_reader.seek(SeekFrom::Start(lfofs)).unwrap();
+                leaf = AttrLeafblock::from(buf_reader.by_ref(), super_block);
+                total_size += leaf.get_total_size(buf_reader.by_ref(), lfofs);
             }
 
             self.total_size = i64::from(total_size);
@@ -127,8 +133,12 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrBtree {
         leaf.list(buf_reader.by_ref(), &mut list, leaf_offset);
 
         while leaf.hdr.info.forw != 0 {
+            let lfblk = self.btree.map_block(buf_reader.by_ref(), super_block,
+                leaf.hdr.info.forw.into());
+            let lfofs = lfblk * u64::from(super_block.sb_blocksize);
+            buf_reader.seek(SeekFrom::Start(lfofs)).unwrap();
             leaf = AttrLeafblock::from(buf_reader.by_ref(), super_block);
-            leaf.list(buf_reader.by_ref(), &mut list, leaf_offset);
+            leaf.list(buf_reader.by_ref(), &mut list, lfofs);
         }
 
         list
