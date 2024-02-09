@@ -28,10 +28,8 @@
 use std::{
     convert::TryInto,
     ffi::OsStr,
-    io::{BufRead, Seek, SeekFrom},
+    io::{BufRead, Seek},
 };
-
-use bincode::de::read::Reader;
 
 use super::{
     attr::{Attr, AttrLeafblock},
@@ -39,7 +37,6 @@ use super::{
     da_btree::hashname,
     definitions::{XfsFileoff, XfsFsblock},
     sb::Sb,
-    utils::decode_from
 };
 
 
@@ -53,30 +50,7 @@ pub struct AttrLeaf {
 }
 
 impl AttrLeaf {
-    pub fn from<R: Reader + BufRead + Seek>(
-        buf_reader: &mut R,
-        superblock: &Sb,
-        bmx: Vec<BmbtRec>,
-    ) -> AttrLeaf {
-        if let Some(rec) = bmx.first() {
-            let leaf_offset = rec.br_startblock * u64::from(superblock.sb_blocksize);
-            buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-
-            let leaf: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
-            leaf.sanity(superblock);
-
-            AttrLeaf {
-                bmx,
-                leaf,
-                leaf_offset,
-                total_size: -1,
-            }
-        } else {
-            panic!("Extent records missing!");
-        }
-    }
-
-    pub fn map_logical_block_to_actual_block(&self, block: XfsFileoff) -> XfsFsblock {
+    fn map_logical_block_to_actual_block(&self, block: XfsFileoff) -> XfsFsblock {
         for entry in self.bmx.iter().rev() {
             if block >= entry.br_startoff {
                 return entry.br_startblock + (block - entry.br_startoff);

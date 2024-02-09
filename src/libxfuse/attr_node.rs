@@ -50,7 +50,7 @@ pub struct AttrNode {
 }
 
 impl AttrNode {
-    pub fn map_logical_block_to_fs_block(&self, block: XfsFileoff) -> XfsFsblock {
+    fn map_logical_block_to_fs_block(&self, block: XfsFileoff) -> XfsFsblock {
         for entry in self.bmx.iter().rev() {
             if block >= entry.br_startoff {
                 return entry.br_startblock + (block - entry.br_startoff);

@@ -42,8 +42,10 @@ use byteorder::{BigEndian, ReadBytesExt};
 use uuid::Uuid;
 
 use super::{
+    attr_leaf::AttrLeaf,
+    bmbt_rec::BmbtRec,
     da_btree::XfsDa3Blkinfo,
-    definitions::{XFS_ATTR3_LEAF_MAGIC, XfsFileoff, XfsFsblock},
+    definitions::{XFS_ATTR3_LEAF_MAGIC, XFS_DA3_NODE_MAGIC, XfsFileoff, XfsFsblock},
     sb::Sb,
     utils::decode_from
 };
@@ -95,7 +97,6 @@ pub struct AttrLeafHdr {
 
 impl AttrLeafHdr {
     pub fn sanity(&self, super_block: &Sb) {
-        assert_eq!(self.info.magic, XFS_ATTR3_LEAF_MAGIC, "bad magic!  expected {:#x} but found {:#x}", XFS_ATTR3_LEAF_MAGIC, self.info.magic);
         self.info.sanity(super_block);
     }
 }
@@ -462,4 +463,39 @@ pub trait Attr<R: BufRead + Seek> {
     fn list(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8>;
 
     fn get(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Vec<u8>;
+}
+
+/// Open an attribute block, whose type may be unknown until its contents are examined.
+pub fn open<R: Reader + BufRead + Seek>(
+        buf_reader: &mut R,
+        superblock: &Sb,
+        bmx: Vec<BmbtRec>,
+    ) -> Box<dyn Attr<R>>
+{
+    if let Some(rec) = bmx.first() {
+        let ofs = rec.br_startblock * u64::from(superblock.sb_blocksize);
+        buf_reader.seek(SeekFrom::Start(ofs)).unwrap();
+
+        let attr: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
+        attr.sanity(superblock);
+        match attr.hdr.info.magic {
+            XFS_ATTR3_LEAF_MAGIC => {
+                Box::new(AttrLeaf {
+                    bmx,
+                    leaf: attr,
+                    leaf_offset: ofs,
+                    total_size: -1,
+                })
+            },
+            XFS_DA3_NODE_MAGIC => {
+                todo!()
+            },
+            magic => {
+                panic!("bad magic!  expected either {:#x} or {:#x} but found {:#x}",
+                       XFS_ATTR3_LEAF_MAGIC, XFS_DA3_NODE_MAGIC, magic);
+            }
+        }
+    } else {
+        panic!("Extent records missing!");
+    }
 }

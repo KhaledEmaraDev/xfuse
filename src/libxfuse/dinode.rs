@@ -31,7 +31,6 @@ use std::mem;
 
 use super::attr::Attr;
 use super::attr_bptree::AttrBtree;
-use super::attr_leaf::AttrLeaf;
 use super::attr_shortform::AttrShortform;
 use super::bmbt_rec::BmbtRec;
 use super::btree::{BmbtKey, BmdrBlock, BtreeRoot, XfsBmbtPtr};
@@ -384,12 +383,11 @@ impl Dinode {
             Some(DiA::Attrsf(attr)) => Some(Box::new(attr.clone())),
             Some(DiA::Abmx(bmx)) => {
                 if self.di_core.di_anextents > 0 {
-                    // TODO: handle AttrNode, too.
-                    return Some(Box::new(AttrLeaf::from(
+                    Some(crate::libxfuse::attr::open(
                         buf_reader.by_ref(),
                         superblock,
                         bmx.clone(),
-                    )));
+                    ))
                 } else {
                     None
                 }
