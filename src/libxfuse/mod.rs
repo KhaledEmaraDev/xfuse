@@ -29,7 +29,6 @@ mod agi;
 mod attr;
 mod attr_bptree;
 mod attr_leaf;
-mod attr_node;
 mod attr_shortform;
 mod bmbt_rec;
 mod btree;
