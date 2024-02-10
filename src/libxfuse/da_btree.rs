@@ -198,6 +198,8 @@ pub struct XfsDa3Intnode {
 impl XfsDa3Intnode {
     pub fn from<R: BufRead + Seek>(buf_reader: &mut R, super_block: &Sb) -> XfsDa3Intnode {
         let hdr = XfsDa3NodeHdr::from(buf_reader.by_ref(), super_block);
+        assert_eq!(hdr.info.magic, XFS_DA3_NODE_MAGIC, "bad magic!  Expected {:#x}, found {:#x}",
+                   XFS_DA3_NODE_MAGIC, hdr.info.magic);
 
         let mut btree = Vec::<XfsDa3NodeEntry>::new();
         for _i in 0..hdr.count {
@@ -245,6 +247,7 @@ impl XfsDa3Intnode {
         if self.hdr.level == 1 {
             blk
         } else {
+            assert!(self.hdr.level > 1);
             buf_reader
                 .seek(SeekFrom::Start(blk * u64::from(super_block.sb_blocksize)))
                 .unwrap();

@@ -43,11 +43,12 @@ use uuid::Uuid;
 
 use super::{
     attr_leaf::AttrLeaf,
+    attr_node::AttrNode,
     bmbt_rec::BmbtRec,
-    da_btree::XfsDa3Blkinfo,
+    da_btree::{XfsDa3Blkinfo, XfsDa3Intnode},
     definitions::{XFS_ATTR3_LEAF_MAGIC, XFS_DA3_NODE_MAGIC, XfsFileoff, XfsFsblock},
     sb::Sb,
-    utils::decode_from
+    utils::{self, decode_from}
 };
 
 #[allow(dead_code)]
@@ -97,6 +98,8 @@ pub struct AttrLeafHdr {
 
 impl AttrLeafHdr {
     pub fn sanity(&self, super_block: &Sb) {
+        assert_eq!(self.info.magic, XFS_ATTR3_LEAF_MAGIC,
+           "bad magic!  expected {:#x} but found {:#x}", XFS_ATTR3_LEAF_MAGIC, self.info.magic);
         self.info.sanity(super_block);
     }
 }
@@ -475,20 +478,28 @@ pub fn open<R: Reader + BufRead + Seek>(
     if let Some(rec) = bmx.first() {
         let ofs = rec.br_startblock * u64::from(superblock.sb_blocksize);
         buf_reader.seek(SeekFrom::Start(ofs)).unwrap();
+        let mut raw = vec![0u8; superblock.sb_blocksize as usize];
+        buf_reader.read_exact(&mut raw).unwrap();
+        let info: XfsDa3Blkinfo = utils::decode(&raw).unwrap().0; 
 
-        let attr: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
-        attr.sanity(superblock);
-        match attr.hdr.info.magic {
+        match info.magic {
             XFS_ATTR3_LEAF_MAGIC => {
+                let leaf: AttrLeafblock = utils::decode(&raw).unwrap().0;
+                leaf.sanity(superblock);
                 Box::new(AttrLeaf {
                     bmx,
-                    leaf: attr,
+                    leaf,
                     leaf_offset: ofs,
                     total_size: -1,
                 })
             },
             XFS_DA3_NODE_MAGIC => {
-                todo!()
+                let node: XfsDa3Intnode = utils::decode(&raw).unwrap().0;
+                Box::new(AttrNode {
+                    bmx,
+                    node,
+                    total_size: -1
+                })
             },
             magic => {
                 panic!("bad magic!  expected either {:#x} or {:#x} but found {:#x}",
