@@ -26,7 +26,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 use std::{
-    cmp::Ordering,
     ffi::OsStr,
     io::{BufRead, Seek, SeekFrom},
     os::unix::ffi::OsStrExt
@@ -215,37 +214,18 @@ impl XfsDa3Intnode {
         super_block: &Sb,
         hash: u32,
         map_da_block_to_fs_block: F,
-    ) -> XfsFsblock {
-        let mut low: i64 = 0;
-        let mut high: i64 = (self.btree.len() - 1) as i64;
-
-        let mut successor = 0;
-
-        while low <= high {
-            let mid = low + ((high - low) / 2);
-
-            let key = self.btree[mid as usize].hashval;
-
-            match key.cmp(&hash) {
-                Ordering::Greater => {
-                    high = mid - 1;
-                    successor = mid;
-                }
-                Ordering::Less => {
-                    low = mid + 1;
-                }
-                Ordering::Equal => {
-                    successor = mid;
-                    break;
-                }
-            }
+    ) -> Result<XfsFsblock, i32> {
+        let pidx = self.btree.partition_point(|k| k.hashval < hash);
+        if pidx >= self.btree.len() {
+            return Err(libc::ENOENT);
         }
+        let before = self.btree[pidx].before;
 
         let blk =
-            map_da_block_to_fs_block(self.btree[successor as usize].before, buf_reader.by_ref());
+            map_da_block_to_fs_block(before, buf_reader.by_ref());
 
         if self.hdr.level == 1 {
-            blk
+            Ok(blk)
         } else {
             assert!(self.hdr.level > 1);
             buf_reader

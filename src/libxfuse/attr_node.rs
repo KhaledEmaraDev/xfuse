@@ -172,7 +172,13 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrNode {
 
         let blk = self.node.lookup(buf_reader.by_ref(), super_block, hash, |block, _| {
             self.map_logical_block_to_fs_block(block.into())
-        });
+        }).map_err(|e| {
+            if e == libc::ENOENT {
+                libc::ENOATTR
+            } else {
+                e
+            }
+        })?;
         let leaf_offset = blk * u64::from(super_block.sb_blocksize);
 
         buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
@@ -208,23 +214,23 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrNode {
         list
     }
 
-    fn get(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Vec<u8> {
+    fn get(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, i32> {
         let hash = hashname(name);
 
         let blk = self.node.lookup(buf_reader.by_ref(), super_block, hash, |block, _| {
             self.map_logical_block_to_fs_block(block.into())
-        });
+        })?;
         let leaf_offset = blk * u64::from(super_block.sb_blocksize);
 
         buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
         let leaf = AttrLeafblock::from(buf_reader.by_ref(), super_block);
 
-        leaf.get(
+        Ok(leaf.get(
             buf_reader.by_ref(),
             super_block,
             hash,
             leaf_offset,
             |block, _| self.map_logical_block_to_fs_block(block),
-        )
+        ))
     }
 }

@@ -125,7 +125,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Node {
             node.lookup(buf_reader.by_ref(), super_block, hash, |block, _| {
                 self.map_dblock_number(block.into())
             })
-        };
+        }?;
 
         let leaf_offset = blk * u64::from(super_block.sb_blocksize);
         buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();

@@ -91,16 +91,16 @@ impl<R: BufRead + Seek> Attr<R> for AttrLeaf {
         list
     }
 
-    fn get(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Vec<u8> {
+    fn get(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, i32> {
         let hash = hashname(name);
 
-        self.leaf.get(
+        Ok(self.leaf.get(
             buf_reader.by_ref(),
             super_block,
             hash,
             self.leaf_offset,
             |block, _| self.map_logical_block_to_actual_block(block),
-        )
+        ))
     }
 }
 
