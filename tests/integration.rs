@@ -817,7 +817,7 @@ fn readdir_1k(harness1k: Harness, #[case] d: &str) {
         // The other metadata fields are checked in a separate test case.
         count += 1;
     }
-    assert_eq!(count, ents_per_dir_4k(d));
+    assert_eq!(count, ents_per_dir_1k(d));
 }
 
 /// List a directory's contents with readdir
