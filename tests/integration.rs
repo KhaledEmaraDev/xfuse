@@ -340,9 +340,7 @@ fn all_dir_types_4k(d: &str) {}
 #[case::local(harness4k, "local")]
 #[case::extents(harness4k, "extents")]
 #[case::btree2(harness1k, "btree2")]
-#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/76" ]
 #[case::btree2_3(harness1k, "btree2.3")]
-#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/77" ]
 #[case::btree3(harness1k, "btree3")]
 fn all_xattr_fork_types(h: fn() -> Harness, d: &str) {}
 
@@ -352,9 +350,7 @@ fn all_xattr_fork_types(h: fn() -> Harness, d: &str) {}
 #[case::local(harness4k, "xattrs/local")]
 #[case::extents(harness4k, "xattrs/extents")]
 #[case::btree2(harness1k, "xattrs/btree2")]
-#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/77" ]
 #[case::btree2_3(harness1k, "xattrs/btree2.3")]
-#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/77" ]
 #[case::btree3(harness1k, "xattrs/btree3")]
 fn all_xattr_fork_types_with_none(h: fn() -> Harness, d: &str) {}
 

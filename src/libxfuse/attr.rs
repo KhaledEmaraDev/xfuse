@@ -42,10 +42,13 @@ use byteorder::{BigEndian, ReadBytesExt};
 use uuid::Uuid;
 
 use super::{
-    da_btree::XfsDa3Blkinfo,
-    definitions::{XFS_ATTR3_LEAF_MAGIC, XfsFileoff, XfsFsblock},
+    attr_leaf::AttrLeaf,
+    attr_node::AttrNode,
+    bmbt_rec::BmbtRec,
+    da_btree::{XfsDa3Blkinfo, XfsDa3Intnode},
+    definitions::{XFS_ATTR3_LEAF_MAGIC, XFS_DA3_NODE_MAGIC, XfsFileoff, XfsFsblock},
     sb::Sb,
-    utils::decode_from
+    utils::{self, decode_from}
 };
 
 #[allow(dead_code)]
@@ -95,7 +98,8 @@ pub struct AttrLeafHdr {
 
 impl AttrLeafHdr {
     pub fn sanity(&self, super_block: &Sb) {
-        assert_eq!(self.info.magic, XFS_ATTR3_LEAF_MAGIC, "bad magic!  expected {:#x} but found {:#x}", XFS_ATTR3_LEAF_MAGIC, self.info.magic);
+        assert_eq!(self.info.magic, XFS_ATTR3_LEAF_MAGIC,
+           "bad magic!  expected {:#x} but found {:#x}", XFS_ATTR3_LEAF_MAGIC, self.info.magic);
         self.info.sanity(super_block);
     }
 }
@@ -462,4 +466,47 @@ pub trait Attr<R: BufRead + Seek> {
     fn list(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8>;
 
     fn get(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Vec<u8>;
+}
+
+/// Open an attribute block, whose type may be unknown until its contents are examined.
+pub fn open<R: Reader + BufRead + Seek>(
+        buf_reader: &mut R,
+        superblock: &Sb,
+        bmx: Vec<BmbtRec>,
+    ) -> Box<dyn Attr<R>>
+{
+    if let Some(rec) = bmx.first() {
+        let ofs = rec.br_startblock * u64::from(superblock.sb_blocksize);
+        buf_reader.seek(SeekFrom::Start(ofs)).unwrap();
+        let mut raw = vec![0u8; superblock.sb_blocksize as usize];
+        buf_reader.read_exact(&mut raw).unwrap();
+        let info: XfsDa3Blkinfo = utils::decode(&raw).unwrap().0; 
+
+        match info.magic {
+            XFS_ATTR3_LEAF_MAGIC => {
+                let leaf: AttrLeafblock = utils::decode(&raw).unwrap().0;
+                leaf.sanity(superblock);
+                Box::new(AttrLeaf {
+                    bmx,
+                    leaf,
+                    leaf_offset: ofs,
+                    total_size: -1,
+                })
+            },
+            XFS_DA3_NODE_MAGIC => {
+                let node: XfsDa3Intnode = utils::decode(&raw).unwrap().0;
+                Box::new(AttrNode {
+                    bmx,
+                    node,
+                    total_size: -1
+                })
+            },
+            magic => {
+                panic!("bad magic!  expected either {:#x} or {:#x} but found {:#x}",
+                       XFS_ATTR3_LEAF_MAGIC, XFS_DA3_NODE_MAGIC, magic);
+            }
+        }
+    } else {
+        panic!("Extent records missing!");
+    }
 }
