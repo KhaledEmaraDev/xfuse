@@ -26,11 +26,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 use std::{
-    cmp::Ordering,
-    convert::TryInto,
     ffi::OsStr,
     io::{BufRead, Seek, SeekFrom},
-    mem::size_of,
 };
 
 use bincode::{
@@ -207,51 +204,25 @@ impl AttrLeafblock {
         hash: u32,
         leaf_offset: u64,
     ) -> Result<u32, libc::c_int> {
-        let mut low: u32 = 0;
-        let mut high: u32 = self.hdr.count.into();
+        match self.entries.binary_search_by_key(&hash, |entry| entry.hashval) {
+            Ok(i) => {
+                // TODO: read all of these into the struct instead of reading them here
+                let entry = &self.entries[i];
+                buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
+                buf_reader
+                    .seek(SeekFrom::Current(i64::from(entry.nameidx)))
+                    .unwrap();
 
-        while low <= high {
-            let mid = low + ((high - low) / 2);
-
-            buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-            buf_reader
-                .seek(SeekFrom::Current(
-                    size_of::<AttrLeafHdr>().try_into().unwrap(),
-                ))
-                .unwrap();
-            buf_reader
-                .seek(SeekFrom::Current(
-                    i64::from(mid) * (size_of::<AttrLeafEntry>() as i64),
-                ))
-                .unwrap();
-
-            let entry = AttrLeafEntry::from(buf_reader.by_ref());
-
-            match entry.hashval.cmp(&hash) {
-                Ordering::Greater => {
-                    high = mid - 1;
+                if entry.flags & constants::XFS_ATTR_LOCAL != 0 {
+                    let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
+                    Ok(name_entry.valuelen.into())
+                } else {
+                    let name_entry = AttrLeafNameRemote::from(buf_reader.by_ref());
+                    Ok(name_entry.valuelen)
                 }
-                Ordering::Less => {
-                    low = mid + 1;
-                }
-                Ordering::Equal => {
-                    buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-                    buf_reader
-                        .seek(SeekFrom::Current(i64::from(entry.nameidx)))
-                        .unwrap();
-
-                    if entry.flags & constants::XFS_ATTR_LOCAL != 0 {
-                        let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
-                        return Ok(name_entry.valuelen.into());
-                    } else {
-                        let name_entry = AttrLeafNameRemote::from(buf_reader.by_ref());
-                        return Ok(name_entry.valuelen);
-                    }
-                }
-            }
+            },
+            Err(_) => Err(libc::ENOATTR)
         }
-
-        Err(libc::ENOATTR)
     }
 
     pub fn list<R: BufRead + Seek>(
@@ -292,74 +263,49 @@ impl AttrLeafblock {
         leaf_offset: u64,
         map_logical_block_to_fs_block: F,
     ) -> Vec<u8> {
-        let mut low: u32 = 0;
-        let mut high: u32 = self.hdr.count.into();
+        match self.entries.binary_search_by_key(&hash, |entry| entry.hashval) {
+            Ok(i) => {
+                // TODO: read all of these into the struct instead of reading them here
+                let entry = &self.entries[i];
+                buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
+                buf_reader
+                    .seek(SeekFrom::Current(i64::from(entry.nameidx)))
+                    .unwrap();
 
-        while low <= high {
-            let mid = ((high - low) / 2) + low;
+                if entry.flags & constants::XFS_ATTR_LOCAL != 0 {
+                    let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
 
-            buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-            buf_reader
-                .seek(SeekFrom::Current(
-                    size_of::<AttrLeafHdr>().try_into().unwrap(),
-                ))
-                .unwrap();
-            buf_reader
-                .seek(SeekFrom::Current(
-                    i64::from(mid) * (size_of::<AttrLeafEntry>() as i64),
-                ))
-                .unwrap();
+                    let namelen = name_entry.namelen as usize;
 
-            let entry = AttrLeafEntry::from(buf_reader.by_ref());
+                    name_entry.nameval[namelen..].to_vec()
+                } else {
+                    let name_entry = AttrLeafNameRemote::from(buf_reader.by_ref());
 
-            match entry.hashval.cmp(&hash) {
-                Ordering::Greater => {
-                    high = mid - 1;
-                }
-                Ordering::Less => {
-                    low = mid + 1;
-                }
-                Ordering::Equal => {
-                    buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-                    buf_reader
-                        .seek(SeekFrom::Current(i64::from(entry.nameidx)))
-                        .unwrap();
+                    let mut valuelen: i64 = name_entry.valuelen.into();
+                    let mut valueblk = name_entry.valueblk;
 
-                    if entry.flags & constants::XFS_ATTR_LOCAL != 0 {
-                        let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
+                    let mut res: Vec<u8> = Vec::with_capacity(valuelen as usize);
 
-                        let namelen = name_entry.namelen as usize;
+                    while valuelen > 0 {
+                        let blk_num =
+                            map_logical_block_to_fs_block(valueblk.into(), buf_reader.by_ref());
+                        buf_reader
+                            .seek(SeekFrom::Start(
+                                blk_num * u64::from(super_block.sb_blocksize),
+                            ))
+                            .unwrap();
 
-                        return name_entry.nameval[namelen..].to_vec();
-                    } else {
-                        let name_entry = AttrLeafNameRemote::from(buf_reader.by_ref());
+                        let (_, data) = AttrRmtHdr::from(buf_reader.by_ref());
 
-                        let mut valuelen: i64 = name_entry.valuelen.into();
-                        let mut valueblk = name_entry.valueblk;
-
-                        let mut res: Vec<u8> = Vec::with_capacity(valuelen as usize);
-
-                        while valueblk > 0 {
-                            let blk_num =
-                                map_logical_block_to_fs_block(valueblk.into(), buf_reader.by_ref());
-                            buf_reader
-                                .seek(SeekFrom::Start(
-                                    blk_num * u64::from(super_block.sb_blocksize),
-                                ))
-                                .unwrap();
-
-                            let (_, data) = AttrRmtHdr::from(buf_reader.by_ref());
-
-                            valuelen -= data.len() as i64;
-                            res.extend(data);
-                            valueblk += 1;
-                        }
+                        valuelen -= data.len() as i64;
+                        res.extend(data);
+                        valueblk += 1;
                     }
+                    res
                 }
-            }
+            },
+            Err(_) => panic!("Couldn't find the attribute entry")
         }
-
-        panic!("Couldn't find the attribute entry");
     }
 
     pub fn sanity(&self, super_block: &Sb) {
@@ -422,8 +368,6 @@ pub struct AttrRmtHdr {
 
 impl AttrRmtHdr {
     pub fn from<R: BufRead + Seek>(buf_reader: &mut R) -> (AttrRmtHdr, Vec<u8>) {
-        let start_offset = buf_reader.stream_position().unwrap();
-
         let rm_magic = buf_reader.read_u32::<BigEndian>().unwrap();
         let rm_offset = buf_reader.read_u32::<BigEndian>().unwrap();
         let rm_bytes = buf_reader.read_u32::<BigEndian>().unwrap();
@@ -434,10 +378,6 @@ impl AttrRmtHdr {
         let rm_owner = buf_reader.read_u64::<BigEndian>().unwrap();
         let rm_blkno = buf_reader.read_u64::<BigEndian>().unwrap();
         let rm_lsn = buf_reader.read_u64::<BigEndian>().unwrap();
-
-        buf_reader
-            .seek(SeekFrom::Start(start_offset + u64::from(rm_offset)))
-            .unwrap();
 
         let mut data = vec![0; rm_bytes as usize];
         buf_reader.read_exact(&mut data).unwrap();
