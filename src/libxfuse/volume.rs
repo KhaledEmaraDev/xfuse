@@ -327,7 +327,10 @@ impl Filesystem for Volume {
                         } else if attrs_size > size {
                             reply.error(ERANGE);
                         } else {
-                            reply.data(attrs.get(buf_reader.by_ref(), &self.sb, name).as_slice());
+                            match attrs.get(buf_reader.by_ref(), &self.sb, name) {
+                                Ok(a) => reply.data(a.as_slice()),
+                                Err(e) => reply.error(e)
+                            }
                         }
                     }
                     Err(e) => {

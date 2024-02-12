@@ -132,14 +132,14 @@ impl<R: BufRead + Seek> Attr<R> for AttrShortform {
         list
     }
 
-    fn get(&self, _buf_reader: &mut R, _super_block: &Sb, name: &OsStr) -> Vec<u8> {
+    fn get(&self, _buf_reader: &mut R, _super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, i32> {
         for entry in &self.list {
             let entry_name = entry.nameval[0..(entry.namelen as usize)].to_vec();
 
             if name.as_bytes().to_vec() == entry_name {
                 let namelen = entry.namelen as usize;
 
-                return entry.nameval[namelen..].to_vec();
+                return Ok(entry.nameval[namelen..].to_vec());
             }
         }
 

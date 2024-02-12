@@ -520,60 +520,86 @@ fn mount(harness4k: Harness) {
     drop(harness4k);
 }
 
-/// Lookup all entries in a directory
-//
-// In the 1k blocksize golden image, they use a different naming convention.
-#[named]
-#[apply(all_dir_types_1k)]
-fn lookup_1k(harness1k: Harness, #[case] d: &str) {
-    require_fusefs!();
+mod lookup {
+    use super::*;
 
-    let amode = AccessFlags::F_OK;
-    for i in 0..ents_per_dir_1k(d) {
-        let p = harness1k.d.path().join(format!("{d}/frame__________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________{i:08}"));
-        access(p.as_path(), amode)
-            .unwrap_or_else(|_| panic!("Lookup failed: {}", p.display()));
+    /// Lookup all entries in a directory
+    //
+    // In the 1k blocksize golden image, they use a different naming convention.
+    #[named]
+    #[apply(all_dir_types_1k)]
+    fn ok_1k(harness1k: Harness, #[case] d: &str) {
+        require_fusefs!();
+
+        let amode = AccessFlags::F_OK;
+        for i in 0..ents_per_dir_1k(d) {
+            let p = harness1k.d.path().join(format!("{d}/frame__________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________{i:08}"));
+            access(p.as_path(), amode)
+                .unwrap_or_else(|_| panic!("Lookup failed: {}", p.display()));
+        }
+    }
+
+    /// Lookup all entries in a directory
+    #[named]
+    #[apply(all_dir_types_4k)]
+    fn ok_4k(harness4k: Harness, #[case] d: &str) {
+        require_fusefs!();
+
+        let amode = AccessFlags::F_OK;
+        for i in 0..ents_per_dir_4k(d) {
+            let p = harness4k.d.path().join(format!("{d}/frame{i:06}"));
+            access(p.as_path(), amode)
+                .unwrap_or_else(|_| panic!("Lookup failed: {}", p.display()));
+        }
+    }
+
+    /// Lookup a directory's "." and ".." entries.  Verify their inode numbers
+    #[named]
+    #[rstest]
+    #[case::sf(harness4k, "sf")]
+    #[case::block(harness4k, "block")]
+    #[case::leaf(harness4k, "leaf")]
+    #[case::node(harness4k, "node")]
+    #[case::btree(harness4k, "btree")]
+    #[case::btree2_3(harness1k, "btree2.3")]
+    #[case::btree3(harness1k, "btree3")]
+    fn dots(#[case] h: fn() -> Harness, #[case] d: &str) {
+        require_fusefs!();
+
+        let harness = h();
+        let root_md = fs::metadata(harness.d.path()).unwrap();
+        let dir_md = fs::metadata(harness.d.path().join(d)).unwrap();
+        let dotpath = harness.d.path().join(format!("{d}/."));
+        let dot_md = fs::metadata(dotpath).unwrap();
+        assert_eq!(dir_md.ino(), dot_md.ino());
+
+        let dotdotpath = harness.d.path().join(format!("{d}/.."));
+        let dotdot_md = fs::metadata(dotdotpath).unwrap();
+        assert_eq!(root_md.ino(), dotdot_md.ino());
+    }
+
+    #[named]
+    #[rstest]
+    #[case::sf(harness4k, "sf")]
+    #[case::block(harness4k, "block")]
+    #[case::leaf(harness4k, "leaf")]
+    #[case::node(harness4k, "node")]
+    #[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/30" ]
+    #[case::btree(harness4k, "btree")]
+    #[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/74" ]
+    #[case::btree2_3(harness1k, "btree2.3")]
+    #[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/73" ]
+    #[case::btree3(harness1k, "btree3")]
+    fn enoent(#[case] h: fn() -> Harness, #[case] d: &str) {
+        require_fusefs!();
+
+        let harness = h();
+        let p = harness.d.path().join(format!("{d}/nonexistent"));
+        let e = access(p.as_path(), AccessFlags::F_OK).unwrap_err();
+        assert_eq!(e, nix::Error::ENOENT);
     }
 }
 
-/// Lookup all entries in a directory
-#[named]
-#[apply(all_dir_types_4k)]
-fn lookup_4k(harness4k: Harness, #[case] d: &str) {
-    require_fusefs!();
-
-    let amode = AccessFlags::F_OK;
-    for i in 0..ents_per_dir_4k(d) {
-        let p = harness4k.d.path().join(format!("{d}/frame{i:06}"));
-        access(p.as_path(), amode)
-            .unwrap_or_else(|_| panic!("Lookup failed: {}", p.display()));
-    }
-}
-
-/// Lookup a directory's "." and ".." entries.  Verify their inode numbers
-#[named]
-#[rstest]
-#[case::sf(harness4k, "sf")]
-#[case::block(harness4k, "block")]
-#[case::leaf(harness4k, "leaf")]
-#[case::node(harness4k, "node")]
-#[case::btree(harness4k, "btree")]
-#[case::btree2_3(harness1k, "btree2.3")]
-#[case::btree3(harness1k, "btree3")]
-fn lookup_dots(#[case] h: fn() -> Harness, #[case] d: &str) {
-    require_fusefs!();
-
-    let harness = h();
-    let root_md = fs::metadata(harness.d.path()).unwrap();
-    let dir_md = fs::metadata(harness.d.path().join(d)).unwrap();
-    let dotpath = harness.d.path().join(format!("{d}/."));
-    let dot_md = fs::metadata(dotpath).unwrap();
-    assert_eq!(dir_md.ino(), dot_md.ino());
-
-    let dotdotpath = harness.d.path().join(format!("{d}/.."));
-    let dotdot_md = fs::metadata(dotdotpath).unwrap();
-    assert_eq!(root_md.ino(), dotdot_md.ino());
-}
 
 mod lsextattr {
     use super::*;
@@ -817,7 +843,7 @@ fn readdir_1k(harness1k: Harness, #[case] d: &str) {
         // The other metadata fields are checked in a separate test case.
         count += 1;
     }
-    assert_eq!(count, ents_per_dir_4k(d));
+    assert_eq!(count, ents_per_dir_1k(d));
 }
 
 /// List a directory's contents with readdir

@@ -465,7 +465,7 @@ pub trait Attr<R: BufRead + Seek> {
 
     fn list(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8>;
 
-    fn get(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Vec<u8>;
+    fn get(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, libc::c_int>;
 }
 
 /// Open an attribute block, whose type may be unknown until its contents are examined.

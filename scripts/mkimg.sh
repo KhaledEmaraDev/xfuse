@@ -7,9 +7,7 @@ mkfiles() {
 	COUNT=$2
 
 	mkdir $DIR
-	for i in $(seq -f "%06g" 0 $(( COUNT - 1 )) ); do
-		touch "$DIR/frame${i}"
-	done
+	seq -f "%06g" 0 $(( COUNT - 1 )) | xargs -I % touch "$DIR/frame%"
 }
 
 # Make a directory filled with files that have very long file names
@@ -18,9 +16,7 @@ mkfiles2() {
 	COUNT=$2
 
 	mkdir $DIR
-	for i in $(seq -f "%08.0f" 0 $(( COUNT - 1 )) ); do
-		touch "$DIR/frame__________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________${i}"
-	done
+	seq -f "%08.0f" 0 $(( COUNT - 1 )) | xargs -I % touch "$DIR/frame__________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________%"
 }
 
 mkattrs() {
@@ -28,9 +24,8 @@ mkattrs() {
 	COUNT=$2
 
 	touch $FILE
-	for i in $(seq -f "%06g" 0 $(( COUNT - 1 )) ); do
-		setfattr -n user.attr.${i} -v value.${i} $FILE
-	done
+	seq -f "%06g" 0 $(( COUNT - 1 )) | xargs -I % \
+		setfattr -n user.attr.% -v value.% $FILE
 }
 
 fill_file() {
