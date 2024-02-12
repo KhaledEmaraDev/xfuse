@@ -25,7 +25,6 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use std::cmp::Ordering;
 use std::convert::TryInto;
 use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, Seek, SeekFrom};
@@ -308,26 +307,10 @@ pub struct Dir2LeafNDisk {
 
 impl Dir2LeafNDisk {
     pub fn get_address(&self, hash: XfsDahash) -> Result<XfsDir2Dataptr, c_int> {
-        let mut low: i64 = 0;
-        let mut high: i64 = (self.ents.len() - 1) as i64;
-
-        while low <= high {
-            let mid = low + ((high - low) / 2);
-
-            let entry = &self.ents[mid as usize];
-
-            match entry.hashval.cmp(&hash) {
-                Ordering::Greater => {
-                    high = mid - 1;
-                }
-                Ordering::Less => {
-                    low = mid + 1;
-                }
-                Ordering::Equal => return Ok(entry.address),
-            }
+        match self.ents.binary_search_by_key(&hash, |ent| ent.hashval) {
+            Ok(i) => Ok(self.ents[i].address),
+            Err(_) => Err(ENOENT)
         }
-
-        Err(ENOENT)
     }
 
     pub fn sanity(&self, super_block: &Sb) {
@@ -404,26 +387,10 @@ impl Dir2LeafDisk {
     }
 
     pub fn get_address(&self, hash: XfsDahash) -> Result<XfsDir2Dataptr, c_int> {
-        let mut low: i64 = 0;
-        let mut high: i64 = (self.ents.len() - 1) as i64;
-
-        while low <= high {
-            let mid = low + ((high - low) / 2);
-
-            let entry = &self.ents[mid as usize];
-
-            match entry.hashval.cmp(&hash) {
-                Ordering::Greater => {
-                    high = mid - 1;
-                }
-                Ordering::Less => {
-                    low = mid + 1;
-                }
-                Ordering::Equal => return Ok(entry.address),
-            }
+        match self.ents.binary_search_by_key(&hash, |ent| ent.hashval) {
+            Ok(i) => Ok(self.ents[i].address),
+            Err(_) => Err(ENOENT)
         }
-
-        Err(ENOENT)
     }
 }
 
