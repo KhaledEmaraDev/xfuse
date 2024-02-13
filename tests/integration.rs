@@ -55,14 +55,50 @@ lazy_static! {
     static ref GOLDEN4K: PathBuf = prepare_image("xfs4096.img");
 }
 
-/// How many extended attributes are present on each file?
-fn attrs_per_file(f: &str) -> usize {
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+struct ExpectedXattr {
+    name: OsString,
+    value: OsString
+}
+
+/// Return an iterator over the extended attributes that ought to be present in each file, sorted
+/// in order by name.
+fn expected_xattrs_per_file(f: &str) -> impl Iterator<Item=ExpectedXattr> {
+    let locals = (0..local_attrs_per_file(f)).map(|i| {
+        ExpectedXattr {
+            name: OsString::from(format!("user.attr.{:06}", i)),
+            value: OsString::from(format!("value.{:06}", i))
+        }
+    });
+    let remotes = (0..remote_attrs_per_file(f)).map(|i| {
+        ExpectedXattr {
+            name: OsString::from(format!("user.remote_attr.{:06}", i)),
+            value: OsString::from(format!("________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________.{:06}", i))
+        }
+    });
+    locals.chain(remotes)
+}
+
+/// How many extended attributes with local storage are present on each file?
+fn local_attrs_per_file(f: &str) -> usize {
     match f {
         "local" => 4,
         "extents" => 64,
         "btree2" => 256,
         "btree2.3" => 2048,
         "btree3" => 8192,
+        _ => unimplemented!()
+    }
+}
+
+/// How many extended attributes with remote storage are present on each file?
+fn remote_attrs_per_file(f: &str) -> usize {
+    match f {
+        "local" => 0,
+        "extents" => 0,
+        "btree2" => 1,
+        "btree2.3" => 1,
+        "btree3" => 1,
         _ => unimplemented!()
     }
 }
@@ -85,7 +121,6 @@ fn ents_per_dir_4k(d: &str) -> usize {
         "block" => 32,
         "leaf" => 384,
         "node" => 1024,
-        "btree" => 8192,
         _ => unimplemented!()
     }
 }
@@ -331,8 +366,6 @@ fn all_dir_types_1k(d: &str) {}
 #[case::block("block")]
 #[case::leaf("leaf")]
 #[case::node("node")]
-#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/30" ]
-#[case::btree("btree")]
 fn all_dir_types_4k(d: &str) {}
 
 #[template]
@@ -386,13 +419,10 @@ mod getextattr {
         let harness = h();
         let p = harness.d.path().join("xattrs").join(d);
 
-        for i in 0..attrs_per_file(d) {
-            let s = format!("user.attr.{:06}", i);
-            let attrname = OsStr::new(s.as_str());
-            let expected_value = OsString::from(format!("value.{:06}", i));
-            let binary_value = xattr::get(&p, attrname).unwrap().unwrap();
+        for attr in expected_xattrs_per_file(d) {
+            let binary_value = xattr::get(&p, attr.name.as_os_str()).unwrap().unwrap();
             let value = OsStr::from_bytes(&binary_value[..]);
-            assert_eq!(expected_value, value);
+            assert_eq!(attr.value, value);
         }
     }
 
@@ -475,7 +505,7 @@ fn getextattr_size(#[case] h: fn() -> Harness, #[case] d: &str) {
     let expected_len = "value.000000".len();
     let cpath = CString::new(p.as_os_str().as_bytes()).unwrap();
 
-    for i in 0..attrs_per_file(d) {
+    for i in 0..local_attrs_per_file(d) {
         let s = format!("attr.{:06}", i);
         let attrname = OsStr::new(s.as_str());
         let cattrname = CString::new(attrname.as_bytes()).unwrap();
@@ -560,7 +590,6 @@ mod lookup {
     #[case::block(harness4k, "block")]
     #[case::leaf(harness4k, "leaf")]
     #[case::node(harness4k, "node")]
-    #[case::btree(harness4k, "btree")]
     #[case::btree2_3(harness1k, "btree2.3")]
     #[case::btree3(harness1k, "btree3")]
     fn dots(#[case] h: fn() -> Harness, #[case] d: &str) {
@@ -611,16 +640,12 @@ mod lsextattr {
 
         let harness = h();
         let p = harness.d.path().join("xattrs").join(d);
-        let mut count = 0;
 
         let mut all_attrnames = xattr::list(p).unwrap().collect::<Vec<_>>();
         all_attrnames.sort_unstable();
-        for (i, attrname) in all_attrnames.into_iter().enumerate() {
-            let expected_name = OsString::from(format!("user.attr.{:06}", i));
-            assert_eq!(expected_name, attrname);
-            count += 1;
+        for (expected, actual) in std::iter::zip(expected_xattrs_per_file(d), all_attrnames) {
+            assert_eq!(expected.name, actual);
         }
-        assert_eq!(count, attrs_per_file(d));
     }
 
     #[named]
@@ -688,8 +713,9 @@ mod lsextattr {
         let harness = h();
         let ns = libc::EXTATTR_NAMESPACE_USER;
         let p = harness.d.path().join("xattrs").join(d);
-        let bytes_per_attr = "attr.000000".len() + 1;
-        let expected_len = bytes_per_attr * attrs_per_file(d);
+        let expected_len: usize = expected_xattrs_per_file(d).map(|attr| {
+            attr.name.len() /* -5 because "user." is not included*/ - 5 /* +1 for NUL */ + 1
+        }).sum();
         let cpath = CString::new(p.as_os_str().as_bytes()).unwrap();
 
         let r = unsafe {
@@ -878,7 +904,6 @@ fn readdir_4k(harness4k: Harness, #[case] d: &str) {
 #[case::block(harness4k, "block")]
 #[case::leaf(harness4k, "leaf")]
 #[case::node(harness4k, "node")]
-#[case::btree(harness4k, "btree")]
 #[case::btree2_3(harness1k, "btree2.3")]
 #[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/73" ]
 #[case::btree3(harness1k, "btree3")]
@@ -944,7 +969,7 @@ mod stat {
         // greater than mtime.
         assert!(stat.st_ctime > stat.st_mtime || 
                 stat.st_ctime_nsec > stat.st_mtime_nsec);
-        assert_eq!(stat.st_ino, 99586);
+        assert_eq!(stat.st_ino, 76994);
         assert_eq!(stat.st_size, 14);
         assert_eq!(stat.st_blksize, 4096);
         assert_eq!(stat.st_blocks, 1);
@@ -985,8 +1010,8 @@ mod stat {
     /// stat should work on symlinks
     #[named]
     #[rstest]
-    #[case::sf("sf", 76994)]
-    #[case::extent("max", 76995)]
+    #[case::sf("sf", 32930)]
+    #[case::extent("max", 32931)]
     fn symlink(harness4k: Harness, #[case] linkname: &str, #[case] ino: libc::ino_t)
     {
         require_fusefs!();
@@ -1018,7 +1043,7 @@ fn statfs(harness4k: Harness) {
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
     // here.
-    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 9660);
+    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 1467);
 
     // There are legitimate questions about what the correct value for
     // optimal_transfer_size
@@ -1043,7 +1068,7 @@ fn statvfs(harness4k: Harness) {
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
     // here.
-    assert_eq!(svfs.files() - svfs.files_free(), 9660);
+    assert_eq!(svfs.files() - svfs.files_free(), 1467);
     assert_eq!(svfs.files_free(), svfs.files_available());
 
     // Linux's calculation for blocks available and free is complicated and the
