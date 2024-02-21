@@ -174,6 +174,12 @@ pub struct BtreeRoot {
     pub ptrs: Vec<XfsBmdrPtr>,
 }
 
+impl BtreeRoot {
+    pub fn new(bmdr: BmdrBlock, keys: Vec<BmbtKey>, ptrs: Vec<XfsBmdrPtr>) -> Self {
+        Self {bmdr, keys, ptrs}
+    }
+}
+
 impl Btree for BtreeRoot {
     fn keys(&self) -> &[BmbtKey] {
         &self.keys
