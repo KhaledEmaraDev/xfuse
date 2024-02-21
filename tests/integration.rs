@@ -354,9 +354,7 @@ impl Drop for MdHarness {
 
 #[template]
 #[rstest]
-#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/74" ]
 #[case::btree_2_3("btree2.3")]
-#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/73" ]
 #[case::btree_3("btree3")]
 fn all_dir_types_1k(d: &str) {}
 
@@ -613,11 +611,8 @@ mod lookup {
     #[case::block(harness4k, "block")]
     #[case::leaf(harness4k, "leaf")]
     #[case::node(harness4k, "node")]
-    #[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/30" ]
     #[case::btree(harness4k, "btree")]
-    #[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/74" ]
     #[case::btree2_3(harness1k, "btree2.3")]
-    #[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/73" ]
     #[case::btree3(harness1k, "btree3")]
     fn enoent(#[case] h: fn() -> Harness, #[case] d: &str) {
         require_fusefs!();
@@ -905,7 +900,6 @@ fn readdir_4k(harness4k: Harness, #[case] d: &str) {
 #[case::leaf(harness4k, "leaf")]
 #[case::node(harness4k, "node")]
 #[case::btree2_3(harness1k, "btree2.3")]
-#[ignore = "https://github.com/KhaledEmaraDev/xfuse/issues/73" ]
 #[case::btree3(harness1k, "btree3")]
 fn readdir_dots(#[case] h: fn() -> Harness, #[case] d: &str) {
     use nix::{dir::Dir, fcntl::OFlag, sys::stat::Mode};

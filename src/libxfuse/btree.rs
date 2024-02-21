@@ -35,7 +35,6 @@ use bincode::{
     de::{Decoder, read::Reader},
     error::DecodeError
 };
-use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use num_traits::{PrimInt, Unsigned};
 use super::utils::Uuid;
 
@@ -64,41 +63,6 @@ pub struct BtreeBlockHdr<T: PrimInt + Unsigned> {
 
 impl<T: PrimInt + Unsigned> BtreeBlockHdr<T> {
     pub const SIZE: usize = 56 + 2 * mem::size_of::<T>();
-
-    pub fn from<R: BufRead + Seek>(buf_reader: &mut R, super_block: &Sb) -> Self {
-        let bb_magic = buf_reader.read_u32::<BigEndian>().unwrap();
-        let bb_level = buf_reader.read_u16::<BigEndian>().unwrap();
-        let bb_numrecs = buf_reader.read_u16::<BigEndian>().unwrap();
-
-        let type_size = mem::size_of::<T>();
-        let bb_leftsib = T::from(buf_reader.read_uint::<BigEndian>(type_size).unwrap()).unwrap();
-        let bb_rightsib = T::from(buf_reader.read_uint::<BigEndian>(type_size).unwrap()).unwrap();
-
-        let bb_blkno = buf_reader.read_u64::<BigEndian>().unwrap();
-        let bb_lsn = buf_reader.read_u64::<BigEndian>().unwrap();
-        let bb_uuid = Uuid::from_u128(buf_reader.read_u128::<BigEndian>().unwrap());
-        let bb_owner = buf_reader.read_u64::<BigEndian>().unwrap();
-        let bb_crc = buf_reader.read_u32::<LittleEndian>().unwrap();
-        let bb_pad = buf_reader.read_u32::<BigEndian>().unwrap();
-
-        if bb_uuid != super_block.sb_uuid {
-            panic!("UUID mismatch!");
-        }
-
-        Self {
-            bb_magic,
-            bb_level,
-            bb_numrecs,
-            bb_leftsib,
-            bb_rightsib,
-            bb_blkno,
-            bb_lsn,
-            bb_uuid,
-            bb_owner,
-            bb_crc,
-            bb_pad,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Decode)]
@@ -118,12 +82,6 @@ pub struct BmbtKey {
 
 impl BmbtKey {
     pub const SIZE: usize = 8;
-
-    pub fn from<R: BufRead>(buf_reader: &mut R) -> BmbtKey {
-        let br_startoff = buf_reader.read_u64::<BigEndian>().unwrap();
-
-        BmbtKey { br_startoff }
-    }
 }
 
 pub type XfsBmbtPtr = XfsFsblock;
