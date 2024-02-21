@@ -330,7 +330,6 @@ impl Dinode {
                 bmbt.clone(),
                 keys.clone(),
                 pointers.clone(),
-                superblock.sb_blocksize,
             )),
             _ => {
                 panic!("Unsupported dir format!");

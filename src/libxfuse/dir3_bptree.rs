@@ -25,10 +25,12 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use std::ffi::{OsStr, OsString};
-use std::cmp::Ordering;
-use std::io::{BufRead, Seek, SeekFrom};
-use std::mem;
+use std::{
+    cmp::Ordering,
+    ffi::{OsStr, OsString},
+    io::{BufRead, Seek, SeekFrom},
+    mem,
+};
 
 use super::bmbt_rec::BmbtRec;
 use super::btree::{BmbtKey, BmdrBlock, XfsBmbtLblock, XfsBmbtPtr};
@@ -38,6 +40,7 @@ use super::dinode::Dinode;
 use super::dir3::{Dir2DataEntry, Dir2DataUnused, Dir2LeafEntry, Dir3, Dir3DataHdr, Dir3LeafHdr};
 use super::sb::Sb;
 use super::utils::{get_file_type, FileKind};
+use super::volume::SUPERBLOCK;
 
 use byteorder::{BigEndian, ReadBytesExt};
 use fuser::{FileAttr, FileType};
@@ -48,7 +51,6 @@ pub struct Dir2Btree {
     pub bmbt: BmdrBlock,
     pub keys: Vec<BmbtKey>,
     pub pointers: Vec<XfsBmbtPtr>,
-    pub block_size: u32,
 }
 
 impl Dir2Btree {
@@ -56,13 +58,11 @@ impl Dir2Btree {
         bmbt: BmdrBlock,
         keys: Vec<BmbtKey>,
         pointers: Vec<XfsBmbtPtr>,
-        block_size: u32,
     ) -> Dir2Btree {
         Dir2Btree {
             bmbt,
             keys,
             pointers,
-            block_size,
         }
     }
 
@@ -72,13 +72,14 @@ impl Dir2Btree {
         super_block: &Sb,
         dblock: XfsDablk,
     ) -> (Option<XfsBmbtLblock>, Option<BmbtRec>) {
+        let blocksize: u64 = SUPERBLOCK.get().unwrap().sb_blocksize.into();
         let mut bmbt: Option<XfsBmbtLblock> = None;
         let mut bmbt_rec: Option<BmbtRec> = None;
         let mut bmbt_block_offset = 0;
 
         for (i, BmbtKey { br_startoff: key }) in self.keys.iter().enumerate().rev() {
             if dblock as u64 >= *key {
-                bmbt_block_offset = self.pointers[i] * (self.block_size as u64);
+                bmbt_block_offset = self.pointers[i] * blocksize;
                 buf_reader.seek(SeekFrom::Start(bmbt_block_offset)).unwrap();
 
                 bmbt = Some(XfsBmbtLblock::from(buf_reader.by_ref(), super_block))
@@ -132,7 +133,7 @@ impl Dir2Btree {
                 .unwrap();
             let pointer = buf_reader.read_u64::<BigEndian>().unwrap();
 
-            bmbt_block_offset = pointer * (self.block_size as u64);
+            bmbt_block_offset = pointer * blocksize;
             buf_reader.seek(SeekFrom::Start(bmbt_block_offset)).unwrap();
             bmbt = Some(XfsBmbtLblock::from(buf_reader.by_ref(), super_block));
         }
@@ -191,6 +192,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
         super_block: &Sb,
         name: &OsStr,
     ) -> Result<(FileAttr, u64), c_int> {
+        let blocksize: u64 = SUPERBLOCK.get().unwrap().sb_blocksize.into();
         let idx = super_block.get_dir3_leaf_offset();
         let hash = hashname(name);
 
@@ -200,7 +202,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
         if let Some(bmbt_rec_some) = &bmbt_rec {
             buf_reader
                 .seek(SeekFrom::Start(
-                    (bmbt_rec_some.br_startblock) * (self.block_size as u64),
+                    (bmbt_rec_some.br_startblock) * blocksize,
                 ))
                 .unwrap();
 
@@ -216,7 +218,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
                         if let Some(bmbt_rec_some) = &bmbt_rec {
                             buf_reader
                                 .seek(SeekFrom::Start(
-                                    (bmbt_rec_some.br_startblock) * (self.block_size as u64),
+                                    (bmbt_rec_some.br_startblock) * blocksize,
                                 ))
                                 .unwrap();
 
@@ -244,15 +246,15 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
 
             if entry.hashval == hash {
                 let address = (entry.address as u64) * 8;
-                let idx = (address / (self.block_size as u64)) as usize;
-                let address = address % (self.block_size as u64);
+                let idx = (address / blocksize) as usize;
+                let address = address % blocksize;
 
                 let (_, bmbt_rec) = self.map_dblock(buf_reader.by_ref(), super_block, idx as u32);
 
                 if let Some(bmbt_rec_some) = &bmbt_rec {
                     buf_reader
                         .seek(SeekFrom::Start(
-                            (bmbt_rec_some.br_startblock) * (self.block_size as u64),
+                            (bmbt_rec_some.br_startblock) * blocksize,
                         ))
                         .unwrap();
 
@@ -280,6 +282,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
         super_block: &Sb,
         offset: i64,
     ) -> Result<(XfsIno, i64, FileType, OsString), c_int> {
+        let blocksize: u64 = SUPERBLOCK.get().unwrap().sb_blocksize.into();
         let offset = offset as u64;
         let idx = offset >> (64 - 48); // tags take 16-bits
         let offset = offset & ((1 << (64 - 48)) - 1);
@@ -308,7 +311,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
                 while bmbt_rec_idx < bmbt_rec_some.br_blockcount {
                     buf_reader
                         .seek(SeekFrom::Start(
-                            (bmbt_rec_some.br_startblock + bmbt_rec_idx) * (self.block_size as u64),
+                            (bmbt_rec_some.br_startblock + bmbt_rec_idx) * blocksize,
                         ))
                         .unwrap();
 
@@ -316,7 +319,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
 
                     while buf_reader.stream_position().unwrap()
                         < ((bmbt_rec_some.br_startblock + bmbt_rec_idx + 1)
-                            * (self.block_size as u64))
+                            * blocksize)
                     {
                         let freetag = buf_reader.read_u16::<BigEndian>().unwrap();
                         buf_reader.seek(SeekFrom::Current(-2)).unwrap();
@@ -348,7 +351,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
                     offset = mem::size_of::<Dir3DataHdr>() as u64;
                 }
 
-                if bmbt_block_offset + (mem::size_of::<BmbtRec>() as u64) > (self.block_size as u64)
+                if bmbt_block_offset + (mem::size_of::<BmbtRec>() as u64) > blocksize
                 {
                     break;
                 } else {
@@ -363,7 +366,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
             if bmbt_some.bb_rightsib == 0 {
                 break;
             } else {
-                bmbt_block_offset = bmbt_some.bb_rightsib * (self.block_size as u64);
+                bmbt_block_offset = bmbt_some.bb_rightsib * blocksize;
                 buf_reader.seek(SeekFrom::Start(bmbt_block_offset)).unwrap();
                 bmbt = Some(XfsBmbtLblock::from(buf_reader.by_ref(), super_block));
 
