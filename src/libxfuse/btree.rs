@@ -140,7 +140,7 @@ pub trait Btree {
         buf_reader: &mut R,
         super_block: &Sb,
         logical_block: XfsFileoff,
-    ) -> XfsFsblock {
+    ) -> Result<XfsFsblock, i32> {
         let idx = self.keys().partition_point(|k| k.br_startoff <= logical_block) - 1;
         buf_reader
             .seek(SeekFrom::Start(
@@ -254,11 +254,14 @@ struct BtreeLeaf {
 }
 
 impl BtreeLeaf {
-    pub fn map_block( &self, logical_block: XfsFileoff,) -> XfsFsblock {
+    pub fn map_block( &self, logical_block: XfsFileoff,) -> Result<XfsFsblock, i32> {
         let i = self.recs.partition_point(|k| k.br_startoff <= logical_block) - 1;
         let rec = &self.recs[i];
-
-        rec.br_startblock + (logical_block - rec.br_startoff)
+        if rec.br_blockcount > logical_block - rec.br_startoff {
+            Ok(rec.br_startblock + (logical_block - rec.br_startoff))
+        } else {
+            Err(libc::ENOENT)
+        }
     }
 }
 
