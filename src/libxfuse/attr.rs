@@ -192,7 +192,7 @@ impl AttrLeafblock {
                 total_size +=
                     get_namespace_size_from_flags(entry.flags) + u32::from(name_entry.namelen) + 1;
             } else {
-                let name_entry = AttrLeafNameRemote::from(buf_reader.by_ref());
+                let name_entry: AttrLeafNameRemote = decode_from(buf_reader.by_ref()).unwrap();
                 total_size +=
                     get_namespace_size_from_flags(entry.flags) + u32::from(name_entry.namelen) + 1;
             }
@@ -220,7 +220,7 @@ impl AttrLeafblock {
                     let name_entry: AttrLeafNameLocal = decode_from(buf_reader.by_ref()).unwrap();
                     Ok(name_entry.valuelen.into())
                 } else {
-                    let name_entry = AttrLeafNameRemote::from(buf_reader.by_ref());
+                    let name_entry: AttrLeafNameRemote = decode_from(buf_reader.by_ref()).unwrap();
                     Ok(name_entry.valuelen)
                 }
             },
@@ -247,7 +247,7 @@ impl AttrLeafblock {
                 let namelen = name_entry.namelen as usize;
                 list.extend_from_slice(&name_entry.nameval[0..namelen]);
             } else {
-                let name_entry = AttrLeafNameRemote::from(buf_reader.by_ref());
+                let name_entry: AttrLeafNameRemote = decode_from(buf_reader.by_ref()).unwrap();
 
                 list.extend_from_slice(get_namespace_from_flags(entry.flags));
                 let namelen = name_entry.namelen as usize;
@@ -284,7 +284,7 @@ impl AttrLeafblock {
 
                     name_entry.nameval[namelen..].to_vec()
                 } else {
-                    let name_entry = AttrLeafNameRemote::from(buf_reader.by_ref());
+                    let name_entry: AttrLeafNameRemote = decode_from(buf_reader.by_ref()).unwrap();
 
                     let mut valuelen: i64 = name_entry.valuelen.into();
                     let mut valueblk = name_entry.valueblk;
@@ -335,23 +335,15 @@ pub struct AttrLeafNameRemote {
     pub name: Vec<u8>,
 }
 
-impl AttrLeafNameRemote {
-    pub fn from<R: BufRead>(buf_reader: &mut R) -> AttrLeafNameRemote {
-        let valueblk = buf_reader.read_u32::<BigEndian>().unwrap();
-        let valuelen = buf_reader.read_u32::<BigEndian>().unwrap();
-        let namelen = buf_reader.read_u8().unwrap();
+impl Decode for AttrLeafNameRemote {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let valueblk = Decode::decode(decoder)?;
+        let valuelen = Decode::decode(decoder)?;
+        let namelen: u8 = Decode::decode(decoder)?;
+        let mut name = vec![0u8; usize::from(namelen)];
+        decoder.reader().read(&mut name[..])?;
 
-        let mut name = Vec::<u8>::new();
-        for _i in 0..namelen {
-            name.push(buf_reader.read_u8().unwrap());
-        }
-
-        AttrLeafNameRemote {
-            valueblk,
-            valuelen,
-            namelen,
-            name,
-        }
+        Ok(Self{ valueblk, valuelen, namelen, name})
     }
 }
 
