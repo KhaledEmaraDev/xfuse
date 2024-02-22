@@ -233,10 +233,17 @@ pub struct Dir2LeafNDisk {
 }
 
 impl Dir2LeafNDisk {
-    pub fn get_address(&self, hash: XfsDahash) -> Result<XfsDir2Dataptr, c_int> {
-        match self.ents.binary_search_by_key(&hash, |ent| ent.hashval) {
-            Ok(i) => Ok(self.ents[i].address),
-            Err(_) => Err(ENOENT)
+    pub fn get_address(
+        &self,
+        hash: XfsDahash,
+        collision_resolver: usize) -> Result<XfsDir2Dataptr, c_int>
+    {
+        let i = self.ents.partition_point(|ent| ent.hashval < hash);
+        let ent = self.ents.get(i + collision_resolver).ok_or(ENOENT)?;
+        if ent.hashval == hash {
+            Ok(ent.address)
+        } else {
+            Err(ENOENT)
         }
     }
 

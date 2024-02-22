@@ -91,24 +91,32 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
         let leaf: Dir2LeafNDisk = decode_from(buf_reader.by_ref()).unwrap();
         leaf.sanity(super_block);
 
-        let address = leaf.get_address(hash)? * 8;
-        let leaf_dblock = u64::from(address) / blocksize;
-        let address = (u64::from(address) % blocksize) as usize;
+        for collision_resolver in 0.. {
+            let address = leaf.get_address(hash, collision_resolver)? * 8;
+            let leaf_dblock = u64::from(address) / blocksize;
+            let address = (u64::from(address) % blocksize) as usize;
 
-        let leaf_fs_block = self.root.map_block(buf_reader, super_block, leaf_dblock)?;
-        buf_reader
-            .seek(SeekFrom::Start(leaf_fs_block * blocksize))
-            .unwrap();
-        let mut leafraw = vec![0u8; dblksize as usize];
-        buf_reader.read_exact(&mut leafraw).unwrap();
+            let leaf_fs_block = self.root.map_block(buf_reader, super_block, leaf_dblock)?;
+            buf_reader
+                .seek(SeekFrom::Start(leaf_fs_block * blocksize))
+                .unwrap();
+            let mut leafraw = vec![0u8; dblksize as usize];
+            buf_reader.read_exact(&mut leafraw).unwrap();
 
-        let entry: Dir2DataEntry = decode(&leafraw[address..]).unwrap().0;
+            let entry: Dir2DataEntry = decode(&leafraw[address..]).unwrap().0;
+            if entry.name != name {
+                // There was a probably hash collision in the directory.  This happens frequently,
+                // since the hash is only 32 bits.
+                continue;
+            }
 
-        let dinode = Dinode::from(buf_reader.by_ref(), super_block, entry.inumber);
+            let dinode = Dinode::from(buf_reader.by_ref(), super_block, entry.inumber);
 
-        let attr = dinode.di_core.stat(entry.inumber)?;
+            let attr = dinode.di_core.stat(entry.inumber)?;
 
-        Ok((attr, dinode.di_core.di_gen.into()))
+            return Ok((attr, dinode.di_core.di_gen.into()));
+        }
+        Err(libc::ENOENT)
     }
 
     fn next(

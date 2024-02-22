@@ -860,7 +860,7 @@ fn readdir_1k(harness1k: Harness, #[case] d: &str) {
         assert_eq!(ent.file_name(), OsStr::new(&expected_name));
         assert!(ent.file_type().unwrap().is_file());
         let md = ent.metadata().unwrap();
-        assert_eq!(ent.ino(), md.ino());
+        assert_eq!(ent.ino(), md.ino(), "inode mismatch for {}: readdir returned {} but lookup returned {}", expected_name, ent.ino(), md.ino());
         // The other metadata fields are checked in a separate test case.
         count += 1;
     }

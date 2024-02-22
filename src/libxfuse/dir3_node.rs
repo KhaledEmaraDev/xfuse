@@ -132,25 +132,32 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Node {
         let leaf: Dir2LeafNDisk = decode_from(buf_reader.by_ref()).unwrap();
         leaf.sanity(super_block);
 
-        let address = leaf.get_address(hash)? * 8;
-        let idx = (address / super_block.sb_blocksize) as u64;
-        let address = (address % super_block.sb_blocksize) as usize;
+        for collision_resolver in 0.. {
+            let address = leaf.get_address(hash, collision_resolver)? * 8;
+            let idx = (address / super_block.sb_blocksize) as u64;
+            let address = (address % super_block.sb_blocksize) as usize;
 
-        let bmbt_rec = self.map_dblock(idx).ok_or(EIO)?;
-        let blk = bmbt_rec.br_startblock + (idx - bmbt_rec.br_startoff);
-        buf_reader
-            .seek(SeekFrom::Start(blk * u64::from(super_block.sb_blocksize)))
-            .unwrap();
-        let mut leafraw = vec![0u8; bmbt_rec.br_blockcount as usize * self.block_size as usize];
-        buf_reader.read_exact(&mut leafraw).unwrap();
+            let bmbt_rec = self.map_dblock(idx).ok_or(EIO)?;
+            let blk = bmbt_rec.br_startblock + (idx - bmbt_rec.br_startoff);
+            buf_reader
+                .seek(SeekFrom::Start(blk * u64::from(super_block.sb_blocksize)))
+                .unwrap();
+            let mut leafraw = vec![0u8; bmbt_rec.br_blockcount as usize * self.block_size as usize];
+            buf_reader.read_exact(&mut leafraw).unwrap();
 
-        let entry: Dir2DataEntry = decode(&leafraw[address..]).unwrap().0;
+            let entry: Dir2DataEntry = decode(&leafraw[address..]).unwrap().0;
+            if entry.name != name {
+                tracing::debug!("Hash collision in Dir2Btree::lookup");
+                continue;
+            }
 
-        let dinode = Dinode::from(buf_reader.by_ref(), super_block, entry.inumber);
+            let dinode = Dinode::from(buf_reader.by_ref(), super_block, entry.inumber);
 
-        let attr = dinode.di_core.stat(entry.inumber)?;
+            let attr = dinode.di_core.stat(entry.inumber)?;
 
-        Ok((attr, dinode.di_core.di_gen.into()))
+            return Ok((attr, dinode.di_core.di_gen.into()));
+        }
+        Err(libc::ENOENT)
     }
 
     fn next(
