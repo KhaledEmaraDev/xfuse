@@ -83,40 +83,55 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
         buf_reader.read_exact(&mut raw).unwrap();
         let (node, _) = decode::<XfsDa3Intnode>(&raw[..]).map_err(|_| libc::EIO)?;
         assert_eq!(node.hdr.info.magic, XFS_DA3_NODE_MAGIC);
-        let blk: XfsFsblock = node.lookup(buf_reader.by_ref(), super_block, hash, |block, br| {
+        let blk: XfsFsblock = node.lookup(buf_reader.by_ref(), super_block, hash,
+            |block, br| {
             self.root.map_block(br, super_block, block.into()).unwrap()
         })?;
 
         buf_reader.seek(SeekFrom::Start(blk * blocksize)).unwrap();
-        let leaf: Dir2LeafNDisk = decode_from(buf_reader.by_ref()).unwrap();
-        leaf.sanity(super_block);
+        'outer: loop {
+            // We want to save the BTreeLeaf node's forw pointer here
+            let leaf: Dir2LeafNDisk = decode_from(buf_reader.by_ref()).unwrap();
+            leaf.sanity(super_block);
 
-        for collision_resolver in 0.. {
-            let address = leaf.get_address(hash, collision_resolver)? * 8;
-            let leaf_dblock = u64::from(address) / blocksize;
-            let address = (u64::from(address) % blocksize) as usize;
+            'inner: for lcr in 0.. {
+                let address = match leaf.get_address(hash, lcr) {
+                    Ok(a) => a * 8,
+                    Err(libc::ENOENT) if leaf.ents.last().map(|e| e.hashval) == Some(hash) => {
+                        // There was a probably hash collision in the directory.  This happens
+                        // frequently, since the hash is only 32 bits.  Tragically, the colliding
+                        // entries were located in different leaf blocks.
+                        let forw = leaf.hdr.info.forw.into();
+                        let next_fsblock = self.root.map_block(buf_reader, super_block, forw)?;
+                        buf_reader.seek(SeekFrom::Start(next_fsblock * blocksize)).unwrap();
+                        continue 'outer;
+                    },
+                    Err(e) => return Err(e)
+                };
+                let leaf_dblock = u64::from(address) / blocksize;
+                let address = (u64::from(address) % blocksize) as usize;
 
-            let leaf_fs_block = self.root.map_block(buf_reader, super_block, leaf_dblock)?;
-            buf_reader
-                .seek(SeekFrom::Start(leaf_fs_block * blocksize))
-                .unwrap();
-            let mut leafraw = vec![0u8; dblksize as usize];
-            buf_reader.read_exact(&mut leafraw).unwrap();
+                let leaf_fs_block = self.root.map_block(buf_reader, super_block, leaf_dblock)?;
+                buf_reader
+                    .seek(SeekFrom::Start(leaf_fs_block * blocksize))
+                    .unwrap();
+                let mut leafraw = vec![0u8; dblksize as usize];
+                buf_reader.read_exact(&mut leafraw).unwrap();
 
-            let entry: Dir2DataEntry = decode(&leafraw[address..]).unwrap().0;
-            if entry.name != name {
-                // There was a probably hash collision in the directory.  This happens frequently,
-                // since the hash is only 32 bits.
-                continue;
+                let entry: Dir2DataEntry = decode(&leafraw[address..]).unwrap().0;
+                if entry.name != name {
+                    // There was a probably hash collision in the directory.  This happens
+                    // frequently, since the hash is only 32 bits.
+                    continue 'inner;
+                }
+
+                let dinode = Dinode::from(buf_reader.by_ref(), super_block, entry.inumber);
+
+                let attr = dinode.di_core.stat(entry.inumber)?;
+
+                return Ok((attr, dinode.di_core.di_gen.into()));
             }
-
-            let dinode = Dinode::from(buf_reader.by_ref(), super_block, entry.inumber);
-
-            let attr = dinode.di_core.stat(entry.inumber)?;
-
-            return Ok((attr, dinode.di_core.di_gen.into()));
         }
-        Err(libc::ENOENT)
     }
 
     fn next(

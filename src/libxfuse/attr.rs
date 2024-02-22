@@ -255,6 +255,8 @@ impl AttrLeafblock {
         }
     }
 
+    // TODO: return ENOENT instead of panicing.  It might be due to a hash collision one level up
+    // the tree.
     pub fn get<R: BufRead + Seek, F: Fn(XfsFileoff, &mut R) -> XfsFsblock>(
         &self,
         buf_reader: &mut R,
