@@ -64,43 +64,36 @@ impl AttrLeaf {
 }
 
 impl<R: BufRead + Reader + Seek> Attr<R> for AttrLeaf {
-    fn get_total_size(&mut self, buf_reader: &mut R, _super_block: &Sb) -> u32 {
+    fn get_total_size(&mut self, _buf_reader: &mut R, _super_block: &Sb) -> u32 {
         if self.total_size != -1 {
             self.total_size.try_into().unwrap()
         } else {
-            self.total_size = i64::from(
-                self.leaf
-                    .get_total_size(buf_reader.by_ref(), self.leaf_offset),
-            );
+            self.total_size = i64::from(self.leaf.get_total_size());
             self.total_size as u32
         }
     }
 
-    fn get_size(&self, buf_reader: &mut R, _super_block: &Sb, name: &OsStr) -> Result<u32, libc::c_int> {
+    fn get_size(&self, _buf_reader: &mut R, _super_block: &Sb, name: &OsStr) -> Result<u32, libc::c_int> {
         let hash = hashname(name);
 
-        self.leaf
-            .get_size(buf_reader.by_ref(), hash, self.leaf_offset)
+        self.leaf.get_size(hash)
     }
 
     fn list(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8> {
         let mut list: Vec<u8> =
             Vec::with_capacity(self.get_total_size(buf_reader.by_ref(), super_block) as usize);
 
-        self.leaf
-            .list(buf_reader.by_ref(), &mut list, self.leaf_offset);
+        self.leaf.list(&mut list);
 
         list
     }
 
-    fn get(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, i32> {
+    fn get(&self, buf_reader: &mut R, _super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, i32> {
         let hash = hashname(name);
 
         Ok(self.leaf.get(
             buf_reader.by_ref(),
-            super_block,
             hash,
-            self.leaf_offset,
             |block, _| self.map_logical_block_to_actual_block(block),
         ))
     }
@@ -166,6 +159,7 @@ mod tests {
                 pad2: 0,
             },
             entries: vec![],
+            names: vec![],
         };
 
         let attr = AttrLeaf {

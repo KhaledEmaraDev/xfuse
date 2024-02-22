@@ -152,14 +152,14 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrNode {
             buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
 
             let mut node: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
-            total_size += node.get_total_size(buf_reader.by_ref(), leaf_offset);
+            total_size += node.get_total_size();
 
             while node.hdr.info.forw != 0 {
                 let lfblk = self.map_logical_block_to_fs_block(node.hdr.info.forw.into());
                 let lfofs = lfblk * u64::from(super_block.sb_blocksize);
                 buf_reader.seek(SeekFrom::Start(lfofs)).unwrap();
                 node = decode_from(buf_reader.by_ref()).unwrap();
-                total_size += node.get_total_size(buf_reader.by_ref(), lfofs);
+                total_size += node.get_total_size();
             }
 
             self.total_size = i64::from(total_size);
@@ -187,7 +187,7 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrNode {
         loop {
             let leaf: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
 
-            match leaf.get_size(buf_reader.by_ref(), hash, leaf_offset) {
+            match leaf.get_size(hash) {
                 Ok(l) => return Ok(l),
                 Err(libc::ENOATTR) if leaf.entries.last().map(|e| e.hashval) == Some(hash) => {
                     let forw = leaf.hdr.info.forw.into();
@@ -214,14 +214,14 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrNode {
         buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
 
         let mut leaf: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
-        leaf.list(buf_reader.by_ref(), &mut list, leaf_offset);
+        leaf.list(&mut list);
 
         while leaf.hdr.info.forw != 0 {
             let lfblk = self.map_logical_block_to_fs_block(leaf.hdr.info.forw.into());
             let lfofs = lfblk * u64::from(super_block.sb_blocksize);
             buf_reader.seek(SeekFrom::Start(lfofs)).unwrap();
             leaf = decode_from(buf_reader.by_ref()).unwrap();
-            leaf.list(buf_reader.by_ref(), &mut list, lfofs);
+            leaf.list(&mut list);
         }
 
         list
@@ -240,9 +240,7 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrNode {
 
         Ok(leaf.get(
             buf_reader.by_ref(),
-            super_block,
             hash,
-            leaf_offset,
             |block, _| self.map_logical_block_to_fs_block(block),
         ))
     }

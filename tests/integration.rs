@@ -321,9 +321,8 @@ struct MdHarness {
     child: Child
 }
 
-#[fixture]
-fn mdharness() -> MdHarness {
-    let md = Md::new(GOLDEN4K.as_path()).unwrap();
+fn mdharness(image: &Path) -> MdHarness {
+    let md = Md::new(image).unwrap();
     let d = tempdir().unwrap();
     let child = Command::cargo_bin("xfs-fuse").unwrap()
         .arg(md.0.as_path())
@@ -389,20 +388,25 @@ fn all_xattr_fork_types_with_none(h: fn() -> Harness, d: &str) {}
 /// with devices that require all accesses to be sector size aligned.
 // Regression test for https://github.com/KhaledEmaraDev/xfuse/issues/15
 // TODO: Read all data as well as metadata
-#[rstest]
 #[named]
-fn dev() {
+#[rstest]
+#[case(GOLDEN4K.as_path())]
+#[case(GOLDEN1K.as_path())]
+fn dev(#[case] image: &Path) {
     require_fusefs!();
     require_root!();
-    let h = mdharness();
+    let h = mdharness(image);
 
     let walker = walkdir::WalkDir::new(h.d.path())
-        .into_iter()
-        // Ignore btree dirs, for now.
-        // https://github.com/KhaledEmaraDev/xfuse/issues/22
-        .filter_entry(|e| !e.file_name().to_str().unwrap().starts_with("btree"));
+        .into_iter();
     for entry in walker {
-        let _ = entry.unwrap().metadata().unwrap();
+        let entry = entry.unwrap();
+        let _ = entry.metadata().unwrap();
+        if entry.path().file_name() != Some(OsStr::new("fifo")) {
+            for attr in xattr::list(entry.path()).unwrap() {
+                xattr::get(entry.path(), attr).unwrap().unwrap();
+            }
+        }
     }
 }
 
