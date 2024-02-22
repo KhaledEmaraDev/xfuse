@@ -200,12 +200,6 @@ pub struct Dir3LeafHdr {
     pub pad: u32,
 }
 
-impl Dir3LeafHdr {
-    pub fn sanity(&self, super_block: &Sb) {
-        self.info.sanity(super_block);
-    }
-}
-
 #[derive(Clone, Copy, Debug, Decode, Default)]
 pub struct Dir2LeafEntry {
     pub hashval: XfsDahash,
@@ -246,12 +240,6 @@ impl Dir2LeafNDisk {
             Err(ENOENT)
         }
     }
-
-    pub fn sanity(&self, super_block: &Sb) {
-        assert_eq!(self.hdr.info.magic, XFS_DIR3_LEAFN_MAGIC,
-            "bad magic! expected {:#x} but found {:#x}", XFS_DIR3_LEAFN_MAGIC, self.hdr.info.magic);
-        self.hdr.sanity(super_block);
-    }
 }
 
 impl Decode for Dir2LeafNDisk {
@@ -262,6 +250,8 @@ impl Decode for Dir2LeafNDisk {
             let leaf_entry: Dir2LeafEntry = Decode::decode(decoder)?;
             ents.push(leaf_entry);
         }
+        assert_eq!(hdr.info.magic, XFS_DIR3_LEAFN_MAGIC,
+            "bad magic! expected {:#x} but found {:#x}", XFS_DIR3_LEAFN_MAGIC, hdr.info.magic);
 
         Ok(Dir2LeafNDisk { hdr, ents })
     }
@@ -278,7 +268,6 @@ pub struct Dir2LeafDisk {
 impl Dir2LeafDisk {
     pub fn from<T: BufRead + Seek>(
         buf_reader: &mut T,
-        super_block: &Sb,
         offset: u64,
         size: usize,
     ) -> Dir2LeafDisk {
@@ -291,7 +280,6 @@ impl Dir2LeafDisk {
         let reader = bincode::de::read::SliceReader::new(&raw[..]);
         let mut decoder = bincode::de::DecoderImpl::new(reader, config);
         let hdr = Dir3LeafHdr::decode(&mut decoder).unwrap();
-        hdr.sanity(super_block);
         assert_eq!(hdr.info.magic, XFS_DIR3_LEAF1_MAGIC,
             "bad magic! expected {:#x} but found {:#x}", XFS_DIR3_LEAF1_MAGIC, hdr.info.magic);
 

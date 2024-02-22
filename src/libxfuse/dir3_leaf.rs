@@ -68,7 +68,7 @@ impl Dir2Leaf {
         let offset = leaf_extent.br_startblock * (superblock.sb_blocksize as u64);
         let entry_size = superblock.sb_blocksize * (1 << superblock.sb_dirblklog);
 
-        let leaf = Dir2LeafDisk::from(buf_reader, superblock, offset, entry_size as usize);
+        let leaf = Dir2LeafDisk::from(buf_reader, offset, entry_size as usize);
         assert_eq!(leaf.hdr.info.magic, XFS_DIR3_LEAF1_MAGIC);
 
         Dir2Leaf {

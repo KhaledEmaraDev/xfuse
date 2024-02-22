@@ -92,7 +92,6 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
         'outer: loop {
             // We want to save the BTreeLeaf node's forw pointer here
             let leaf: Dir2LeafNDisk = decode_from(buf_reader.by_ref()).unwrap();
-            leaf.sanity(super_block);
 
             'inner: for lcr in 0.. {
                 let address = match leaf.get_address(hash, lcr) {
