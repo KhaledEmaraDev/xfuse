@@ -38,6 +38,7 @@ use super::{
     btree::{Btree, BtreeRoot},
     da_btree::{hashname, XfsDa3Intnode},
     sb::Sb,
+    utils::decode_from
 };
 
 #[derive(Debug)]
@@ -70,7 +71,7 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrBtree {
 
             buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
 
-            let mut leaf = AttrLeafblock::from(buf_reader.by_ref());
+            let mut leaf: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
             total_size += leaf.get_total_size(buf_reader.by_ref(), leaf_offset);
 
             while leaf.hdr.info.forw != 0 {
@@ -78,7 +79,7 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrBtree {
                     leaf.hdr.info.forw.into()).unwrap();
                 let lfofs = lfblk * u64::from(super_block.sb_blocksize);
                 buf_reader.seek(SeekFrom::Start(lfofs)).unwrap();
-                leaf = AttrLeafblock::from(buf_reader.by_ref());
+                leaf = decode_from(buf_reader.by_ref()).unwrap();
                 total_size += leaf.get_total_size(buf_reader.by_ref(), lfofs);
             }
 
@@ -114,7 +115,7 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrBtree {
         buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
 
         loop {
-            let leaf = AttrLeafblock::from(buf_reader.by_ref());
+            let leaf: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
 
             match leaf.get_size(buf_reader.by_ref(), hash, leaf_offset) {
                 Ok(l) => return Ok(l),
@@ -148,7 +149,7 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrBtree {
 
         buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
 
-        let mut leaf = AttrLeafblock::from(buf_reader.by_ref());
+        let mut leaf: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
         leaf.list(buf_reader.by_ref(), &mut list, leaf_offset);
 
         while leaf.hdr.info.forw != 0 {
@@ -156,7 +157,7 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrBtree {
                 leaf.hdr.info.forw.into()).unwrap();
             let lfofs = lfblk * u64::from(super_block.sb_blocksize);
             buf_reader.seek(SeekFrom::Start(lfofs)).unwrap();
-            leaf = AttrLeafblock::from(buf_reader.by_ref());
+            leaf = decode_from(buf_reader.by_ref()).unwrap();
             leaf.list(buf_reader.by_ref(), &mut list, lfofs);
         }
 
@@ -181,7 +182,7 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrBtree {
 
         buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
 
-        let leaf = AttrLeafblock::from(buf_reader.by_ref());
+        let leaf: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
 
         return Ok(leaf.get(
             buf_reader.by_ref(),

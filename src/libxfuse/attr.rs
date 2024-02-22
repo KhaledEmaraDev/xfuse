@@ -163,17 +163,6 @@ pub struct AttrLeafblock {
 }
 
 impl AttrLeafblock {
-    pub fn from<R: Reader + BufRead + Seek>(buf_reader: &mut R) -> AttrLeafblock {
-        let hdr: AttrLeafHdr = decode_from(buf_reader.by_ref()).unwrap();
-
-        let mut entries = Vec::<AttrLeafEntry>::with_capacity(hdr.count.into());
-        for _i in 0..entries.capacity() {
-            entries.push(AttrLeafEntry::from(buf_reader.by_ref()));
-        }
-
-        AttrLeafblock { hdr, entries }
-    }
-
     pub fn get_total_size<R: BufRead + Reader + Seek>(
         &mut self,
         buf_reader: &mut R,
