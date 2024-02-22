@@ -31,6 +31,8 @@ use std::{
     io::{BufRead, Seek},
 };
 
+use bincode::de::read::Reader;
+
 use super::{
     attr::{Attr, AttrLeafblock},
     bmbt_rec::BmbtRec,
@@ -61,7 +63,7 @@ impl AttrLeaf {
     }
 }
 
-impl<R: BufRead + Seek> Attr<R> for AttrLeaf {
+impl<R: BufRead + Reader + Seek> Attr<R> for AttrLeaf {
     fn get_total_size(&mut self, buf_reader: &mut R, _super_block: &Sb) -> u32 {
         if self.total_size != -1 {
             self.total_size.try_into().unwrap()

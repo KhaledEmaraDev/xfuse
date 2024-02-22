@@ -143,21 +143,14 @@ pub struct AttrLeafNameLocal {
     pub nameval: Vec<u8>,
 }
 
-impl AttrLeafNameLocal {
-    pub fn from<R: BufRead>(buf_reader: &mut R) -> AttrLeafNameLocal {
-        let valuelen = buf_reader.read_u16::<BigEndian>().unwrap();
-        let namelen = buf_reader.read_u8().unwrap();
+impl Decode for AttrLeafNameLocal {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let valuelen = Decode::decode(decoder)?;
+        let namelen: u8 = Decode::decode(decoder)?;
+        let mut nameval = vec![0u8; usize::from(namelen) + usize::from(valuelen)];
+        decoder.reader().read(&mut nameval[..])?;
 
-        let mut nameval = Vec::<u8>::new();
-        for _i in 0..((namelen as u16) + valuelen) {
-            nameval.push(buf_reader.read_u8().unwrap());
-        }
-
-        AttrLeafNameLocal {
-            valuelen,
-            namelen,
-            nameval,
-        }
+        Ok(Self{ valuelen, namelen, nameval})
     }
 }
 
@@ -181,7 +174,7 @@ impl AttrLeafblock {
         AttrLeafblock { hdr, entries }
     }
 
-    pub fn get_total_size<R: BufRead + Seek>(
+    pub fn get_total_size<R: BufRead + Reader + Seek>(
         &mut self,
         buf_reader: &mut R,
         leaf_offset: u64,
@@ -195,7 +188,7 @@ impl AttrLeafblock {
                 .unwrap();
 
             if entry.flags & constants::XFS_ATTR_LOCAL != 0 {
-                let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
+                let name_entry: AttrLeafNameLocal = decode_from(buf_reader.by_ref()).unwrap();
                 total_size +=
                     get_namespace_size_from_flags(entry.flags) + u32::from(name_entry.namelen) + 1;
             } else {
@@ -208,7 +201,7 @@ impl AttrLeafblock {
         total_size
     }
 
-    pub fn get_size<R: BufRead + Seek>(
+    pub fn get_size<R: BufRead + Reader + Seek>(
         &self,
         buf_reader: &mut R,
         hash: u32,
@@ -224,7 +217,7 @@ impl AttrLeafblock {
                     .unwrap();
 
                 if entry.flags & constants::XFS_ATTR_LOCAL != 0 {
-                    let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
+                    let name_entry: AttrLeafNameLocal = decode_from(buf_reader.by_ref()).unwrap();
                     Ok(name_entry.valuelen.into())
                 } else {
                     let name_entry = AttrLeafNameRemote::from(buf_reader.by_ref());
@@ -235,7 +228,7 @@ impl AttrLeafblock {
         }
     }
 
-    pub fn list<R: BufRead + Seek>(
+    pub fn list<R: BufRead + Reader + Seek>(
         &mut self,
         buf_reader: &mut R,
         list: &mut Vec<u8>,
@@ -248,7 +241,7 @@ impl AttrLeafblock {
                 .unwrap();
 
             if entry.flags & constants::XFS_ATTR_LOCAL != 0 {
-                let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
+                let name_entry: AttrLeafNameLocal = decode_from(buf_reader.by_ref()).unwrap();
 
                 list.extend_from_slice(get_namespace_from_flags(entry.flags));
                 let namelen = name_entry.namelen as usize;
@@ -267,7 +260,7 @@ impl AttrLeafblock {
 
     // TODO: return ENOENT instead of panicing.  It might be due to a hash collision one level up
     // the tree.
-    pub fn get<R: BufRead + Seek, F: Fn(XfsFileoff, &mut R) -> XfsFsblock>(
+    pub fn get<R: BufRead + Reader + Seek, F: Fn(XfsFileoff, &mut R) -> XfsFsblock>(
         &self,
         buf_reader: &mut R,
         super_block: &Sb,
@@ -285,7 +278,7 @@ impl AttrLeafblock {
                     .unwrap();
 
                 if entry.flags & constants::XFS_ATTR_LOCAL != 0 {
-                    let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
+                    let name_entry: AttrLeafNameLocal = decode_from(buf_reader.by_ref()).unwrap();
 
                     let namelen = name_entry.namelen as usize;
 
