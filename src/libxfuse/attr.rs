@@ -33,7 +33,8 @@ use std::{
 use bincode::{
     Decode,
     de::{Decoder, read::Reader},
-    error::DecodeError
+    error::DecodeError,
+    impl_borrow_decode
 };
 use byteorder::{BigEndian, ReadBytesExt};
 use uuid::Uuid;
@@ -81,7 +82,7 @@ pub struct AttrLeafMap {
     pub size: u16,
 }
 
-#[derive(Debug, Decode)]
+#[derive(Debug)]
 pub struct AttrLeafHdr {
     pub info: XfsDa3Blkinfo,
     pub count: u16,
@@ -93,13 +94,23 @@ pub struct AttrLeafHdr {
     pub pad2: u32,
 }
 
-impl AttrLeafHdr {
-    pub fn sanity(&self, super_block: &Sb) {
-        assert_eq!(self.info.magic, XFS_ATTR3_LEAF_MAGIC,
-           "bad magic!  expected {:#x} but found {:#x}", XFS_ATTR3_LEAF_MAGIC, self.info.magic);
-        self.info.sanity(super_block);
+impl Decode for AttrLeafHdr {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let info: XfsDa3Blkinfo = Decode::decode(decoder)?;
+        let count = Decode::decode(decoder)?;
+        let usedbytes = Decode::decode(decoder)?;
+        let firstused = Decode::decode(decoder)?;
+        let holes = Decode::decode(decoder)?;
+        let pad1 = Decode::decode(decoder)?;
+        let freemap = Decode::decode(decoder)?;
+        let pad2 = Decode::decode(decoder)?;
+
+        assert_eq!(info.magic, XFS_ATTR3_LEAF_MAGIC,
+           "bad magic!  expected {:#x} but found {:#x}", XFS_ATTR3_LEAF_MAGIC, info.magic);
+        Ok(Self{info, count, usedbytes, firstused, holes, pad1, freemap, pad2})
     }
 }
+impl_borrow_decode!(AttrLeafHdr);
 
 #[derive(Debug, Decode)]
 pub struct AttrLeafEntry {
@@ -159,9 +170,8 @@ pub struct AttrLeafblock {
 }
 
 impl AttrLeafblock {
-    pub fn from<R: Reader + BufRead + Seek>(buf_reader: &mut R, super_block: &Sb) -> AttrLeafblock {
+    pub fn from<R: Reader + BufRead + Seek>(buf_reader: &mut R) -> AttrLeafblock {
         let hdr: AttrLeafHdr = decode_from(buf_reader.by_ref()).unwrap();
-        hdr.sanity(super_block);
 
         let mut entries = Vec::<AttrLeafEntry>::with_capacity(hdr.count.into());
         for _i in 0..entries.capacity() {
@@ -309,10 +319,6 @@ impl AttrLeafblock {
             Err(_) => panic!("Couldn't find the attribute entry")
         }
     }
-
-    pub fn sanity(&self, super_block: &Sb) {
-        self.hdr.sanity(super_block)
-    }
 }
 
 impl Decode for AttrLeafblock {
@@ -427,7 +433,6 @@ pub fn open<R: Reader + BufRead + Seek>(
         match info.magic {
             XFS_ATTR3_LEAF_MAGIC => {
                 let leaf: AttrLeafblock = utils::decode(&raw).unwrap().0;
-                leaf.sanity(superblock);
                 Box::new(AttrLeaf {
                     bmx,
                     leaf,

@@ -31,7 +31,6 @@ use std::{
     os::unix::ffi::OsStrExt
 };
 
-use super::{definitions::*, sb::Sb};
 
 use bincode::{
     Decode,
@@ -41,7 +40,13 @@ use bincode::{
 };
 
 use byteorder::{BigEndian, ReadBytesExt};
-use super::utils::Uuid;
+
+use super::{
+    definitions::*,
+    utils::Uuid,
+    sb::Sb,
+    volume::SUPERBLOCK
+};
 
 macro_rules! rol32 {
     ($x:expr, $y:expr) => {
@@ -79,7 +84,7 @@ pub fn hashname(name: &OsStr) -> XfsDahash {
     }
 }
 
-#[derive(Debug, Decode)]
+#[derive(Debug)]
 pub struct XfsDa3Blkinfo {
     pub forw: u32,
     pub back: u32,
@@ -122,13 +127,36 @@ impl XfsDa3Blkinfo {
             owner,
         }
     }
+}
 
-    pub fn sanity(&self, super_block: &Sb) {
-        if self.uuid != super_block.sb_uuid {
-            panic!("UUID mismatch!");
-        }
+impl Decode for XfsDa3Blkinfo {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let forw = Decode::decode(decoder)?;
+        let back = Decode::decode(decoder)?;
+        let magic = Decode::decode(decoder)?;
+        let pad = Decode::decode(decoder)?;
+        let crc = Decode::decode(decoder)?;
+        let blkno = Decode::decode(decoder)?;
+        let lsn = Decode::decode(decoder)?;
+        let uuid = Decode::decode(decoder)?;
+        let owner = Decode::decode(decoder)?;
+        assert_eq!(uuid, SUPERBLOCK.get().unwrap().sb_uuid, "UUID mismatch!");
+
+        Ok(XfsDa3Blkinfo {
+            forw,
+            back,
+            magic,
+            pad,
+            crc,
+            blkno,
+            lsn,
+            uuid,
+            owner,
+        })
     }
 }
+impl_borrow_decode!(XfsDa3Blkinfo);
+
 
 #[derive(Debug)]
 pub struct XfsDa3NodeHdr {
