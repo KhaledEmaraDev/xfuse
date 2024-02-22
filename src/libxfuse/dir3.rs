@@ -41,7 +41,6 @@ use bincode::{
     de::{Decoder, read::Reader},
     error::DecodeError
 };
-use byteorder::{BigEndian, ReadBytesExt};
 use fuser::{FileAttr, FileType};
 use libc::{c_int, ENOENT};
 
@@ -108,40 +107,8 @@ pub struct Dir2DataEntry {
 }
 
 impl Dir2DataEntry {
-    pub fn from<T: BufRead + Seek>(buf_reader: &mut T) -> Dir2DataEntry {
-        let inumber = buf_reader.read_u64::<BigEndian>().unwrap();
-        let namelen = buf_reader.read_u8().unwrap();
-
-        let mut namebytes = vec![0u8; namelen.into()];
-        buf_reader.read_exact(&mut namebytes).unwrap();
-        let name = OsString::from_vec(namebytes);
-
-        let ftype = buf_reader.read_u8().unwrap();
-
-        let pad_off = (((buf_reader.stream_position().unwrap() + 2 + 8 - 1) / 8) * 8)
-            - (buf_reader.stream_position().unwrap() + 2);
-        buf_reader.seek(SeekFrom::Current(pad_off as i64)).unwrap();
-
-        let tag = buf_reader.read_u16::<BigEndian>().unwrap();
-
-        Dir2DataEntry {
-            inumber,
-            name,
-            ftype,
-            tag,
-        }
-    }
-
     pub fn get_length(raw: &[u8]) -> i64 {
         let namelen: u8 = decode(&raw[8..]).unwrap().0;
-        ((((namelen as i64) + 8 + 1 + 2) + 8 - 1) / 8) * 8
-    }
-
-    pub fn get_length_from_reader<T: BufRead + Seek>(buf_reader: &mut T) -> i64 {
-        buf_reader.seek(SeekFrom::Current(8)).unwrap();
-        let namelen = buf_reader.read_u8().unwrap();
-        buf_reader.seek(SeekFrom::Current(-9)).unwrap();
-
         ((((namelen as i64) + 8 + 1 + 2) + 8 - 1) / 8) * 8
     }
 }
@@ -173,25 +140,6 @@ pub struct Dir2DataUnused {
     pub freetag: u16,
     pub length: XfsDir2DataOff,
     pub tag: XfsDir2DataOff,
-}
-
-impl Dir2DataUnused {
-    pub fn from<T: BufRead + Seek>(buf_reader: &mut T) -> Dir2DataUnused {
-        let freetag = buf_reader.read_u16::<BigEndian>().unwrap();
-        let length = buf_reader.read_u16::<BigEndian>().unwrap();
-
-        buf_reader
-            .seek(SeekFrom::Current((length - 6) as i64))
-            .unwrap();
-
-        let tag = buf_reader.read_u16::<BigEndian>().unwrap();
-
-        Dir2DataUnused {
-            freetag,
-            length,
-            tag,
-        }
-    }
 }
 
 impl From<&[u8]> for Dir2DataUnused {
@@ -253,20 +201,6 @@ pub struct Dir3LeafHdr {
 }
 
 impl Dir3LeafHdr {
-    pub fn from<T: BufRead + Seek>(buf_reader: &mut T, super_block: &Sb) -> Dir3LeafHdr {
-        let info = XfsDa3Blkinfo::from(buf_reader, super_block);
-        let count = buf_reader.read_u16::<BigEndian>().unwrap();
-        let stale = buf_reader.read_u16::<BigEndian>().unwrap();
-        let pad = buf_reader.read_u32::<BigEndian>().unwrap();
-
-        Dir3LeafHdr {
-            info,
-            count,
-            stale,
-            pad,
-        }
-    }
-
     pub fn sanity(&self, super_block: &Sb) {
         self.info.sanity(super_block);
     }
@@ -281,13 +215,6 @@ pub struct Dir2LeafEntry {
 impl Dir2LeafEntry {
     /// On-disk size in bytes
     pub const SIZE: usize = 8;
-
-    pub fn from<T: BufRead>(buf_reader: &mut T) -> Dir2LeafEntry {
-        let hashval = buf_reader.read_u32::<BigEndian>().unwrap();
-        let address = buf_reader.read_u32::<BigEndian>().unwrap();
-
-        Dir2LeafEntry { hashval, address }
-    }
 }
 
 #[derive(Debug, Decode)]
@@ -306,10 +233,17 @@ pub struct Dir2LeafNDisk {
 }
 
 impl Dir2LeafNDisk {
-    pub fn get_address(&self, hash: XfsDahash) -> Result<XfsDir2Dataptr, c_int> {
-        match self.ents.binary_search_by_key(&hash, |ent| ent.hashval) {
-            Ok(i) => Ok(self.ents[i].address),
-            Err(_) => Err(ENOENT)
+    pub fn get_address(
+        &self,
+        hash: XfsDahash,
+        collision_resolver: usize) -> Result<XfsDir2Dataptr, c_int>
+    {
+        let i = self.ents.partition_point(|ent| ent.hashval < hash);
+        let ent = self.ents.get(i + collision_resolver).ok_or(ENOENT)?;
+        if ent.hashval == hash {
+            Ok(ent.address)
+        } else {
+            Err(ENOENT)
         }
     }
 

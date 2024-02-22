@@ -330,7 +330,6 @@ impl Dinode {
                 bmbt.clone(),
                 keys.clone(),
                 pointers.clone(),
-                superblock.sb_blocksize,
             )),
             _ => {
                 panic!("Unsupported dir format!");
@@ -350,11 +349,7 @@ impl Dinode {
                 block_size: superblock.sb_blocksize,
             }),
             DiU::Bmbt((bmdr, keys, pointers)) => Box::new(FileBtree {
-                btree: BtreeRoot {
-                    bmdr: bmdr.clone(),
-                    keys: keys.clone(),
-                    ptrs: pointers.clone(),
-                },
+                btree: BtreeRoot::new(bmdr.clone(), keys.clone(), pointers.clone()),
                 size: self.di_core.di_size,
                 block_size: superblock.sb_blocksize,
             }),

@@ -25,30 +25,31 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use std::ffi::{OsStr, OsString};
-use std::cmp::Ordering;
-use std::io::{BufRead, Seek, SeekFrom};
-use std::mem;
+use std::{
+    cell::RefCell,
+    convert::TryInto,
+    ffi::{OsStr, OsString},
+    io::{BufRead, Seek, SeekFrom},
+};
 
-use super::bmbt_rec::BmbtRec;
-use super::btree::{BmbtKey, BmdrBlock, XfsBmbtLblock, XfsBmbtPtr};
-use super::da_btree::{hashname, XfsDa3NodeEntry, XfsDa3NodeHdr};
+use super::btree::{BmbtKey, BmdrBlock, Btree, BtreeRoot, XfsBmbtPtr};
+use super::da_btree::{hashname, XfsDa3Intnode};
 use super::definitions::*;
 use super::dinode::Dinode;
-use super::dir3::{Dir2DataEntry, Dir2DataUnused, Dir2LeafEntry, Dir3, Dir3DataHdr, Dir3LeafHdr};
+use super::dir3::{Dir2DataEntry, Dir2DataUnused, Dir3, Dir3DataHdr, Dir2LeafNDisk};
 use super::sb::Sb;
-use super::utils::{get_file_type, FileKind};
+use super::utils::{decode, decode_from, get_file_type, FileKind};
+use super::volume::SUPERBLOCK;
 
-use byteorder::{BigEndian, ReadBytesExt};
 use fuser::{FileAttr, FileType};
-use libc::{c_int, ENOENT};
+use libc::c_int;
 
 #[derive(Debug)]
-pub struct Dir2Btree {
-    pub bmbt: BmdrBlock,
-    pub keys: Vec<BmbtKey>,
-    pub pointers: Vec<XfsBmbtPtr>,
-    pub block_size: u32,
+pub struct Dir2Btree{
+    root: BtreeRoot,
+    /// A cache of the last extent and its starting block number read by lookup
+    /// or readdir.
+    block_cache: RefCell<Option<(u64, Vec<u8>)>>
 }
 
 impl Dir2Btree {
@@ -56,131 +57,10 @@ impl Dir2Btree {
         bmbt: BmdrBlock,
         keys: Vec<BmbtKey>,
         pointers: Vec<XfsBmbtPtr>,
-        block_size: u32,
-    ) -> Dir2Btree {
-        Dir2Btree {
-            bmbt,
-            keys,
-            pointers,
-            block_size,
-        }
-    }
-
-    pub fn map_dblock<R: BufRead + Seek>(
-        &self,
-        buf_reader: &mut R,
-        super_block: &Sb,
-        dblock: XfsDablk,
-    ) -> (Option<XfsBmbtLblock>, Option<BmbtRec>) {
-        let mut bmbt: Option<XfsBmbtLblock> = None;
-        let mut bmbt_rec: Option<BmbtRec> = None;
-        let mut bmbt_block_offset = 0;
-
-        for (i, BmbtKey { br_startoff: key }) in self.keys.iter().enumerate().rev() {
-            if dblock as u64 >= *key {
-                bmbt_block_offset = self.pointers[i] * (self.block_size as u64);
-                buf_reader.seek(SeekFrom::Start(bmbt_block_offset)).unwrap();
-
-                bmbt = Some(XfsBmbtLblock::from(buf_reader.by_ref(), super_block))
-            }
-        }
-
-        while let Some(bmbt_some) = &bmbt {
-            if bmbt_some.bb_level == 0 {
-                break;
-            }
-
-            let mut l: i64 = 0;
-            let mut r: i64 = (bmbt_some.bb_numrecs - 1) as i64;
-
-            let mut predecessor = 0;
-
-            while l <= r {
-                let m = (l + r) / 2;
-
-                buf_reader
-                    .seek(SeekFrom::Start(
-                        bmbt_block_offset
-                            + (mem::size_of::<XfsBmbtLblock>() as u64)
-                            + ((m as u64) * (mem::size_of::<BmbtKey>() as u64)),
-                    ))
-                    .unwrap();
-                let key = BmbtKey::from(buf_reader.by_ref()).br_startoff;
-
-                match key.cmp(&dblock.into()) {
-                    Ordering::Greater => {
-                        r = m - 1;
-                    }
-                    Ordering::Less => {
-                        l = m + 1;
-                        predecessor = m;
-                    }
-                    Ordering::Equal => {
-                        predecessor = m;
-                        break;
-                    }
-                }
-            }
-
-            buf_reader
-                .seek(SeekFrom::Start(
-                    bmbt_block_offset
-                        + (mem::size_of::<XfsBmbtLblock>() as u64)
-                        + ((bmbt_some.bb_numrecs as u64) * (mem::size_of::<BmbtKey>() as u64))
-                        + ((predecessor as u64) * (mem::size_of::<XfsBmbtPtr>() as u64)),
-                ))
-                .unwrap();
-            let pointer = buf_reader.read_u64::<BigEndian>().unwrap();
-
-            bmbt_block_offset = pointer * (self.block_size as u64);
-            buf_reader.seek(SeekFrom::Start(bmbt_block_offset)).unwrap();
-            bmbt = Some(XfsBmbtLblock::from(buf_reader.by_ref(), super_block));
-        }
-
-        if let Some(bmbt_some) = &bmbt {
-            let mut l: i64 = 0;
-            let mut r: i64 = (bmbt_some.bb_numrecs - 1) as i64;
-
-            let mut predecessor = 0;
-
-            while l <= r {
-                let m = (l + r) / 2;
-
-                buf_reader
-                    .seek(SeekFrom::Start(
-                        bmbt_block_offset
-                            + (mem::size_of::<XfsBmbtLblock>() as u64)
-                            + ((m as u64) * (mem::size_of::<BmbtRec>() as u64)),
-                    ))
-                    .unwrap();
-                let key = BmbtRec::from(buf_reader.by_ref()).br_startoff;
-
-                match key.cmp(&dblock.into()) {
-                    Ordering::Greater => {
-                        r = m - 1;
-                    }
-                    Ordering::Less => {
-                        l = m + 1;
-                        predecessor = m;
-                    }
-                    Ordering::Equal => {
-                        predecessor = m;
-                        break;
-                    }
-                }
-            }
-
-            buf_reader
-                .seek(SeekFrom::Start(
-                    bmbt_block_offset
-                        + (mem::size_of::<XfsBmbtLblock>() as u64)
-                        + ((predecessor as u64) * (mem::size_of::<BmbtRec>() as u64)),
-                ))
-                .unwrap();
-            bmbt_rec = Some(BmbtRec::from(buf_reader.by_ref()));
-        }
-
-        (bmbt, bmbt_rec)
+    ) -> Self {
+        let block_cache = RefCell::new(None);
+        let root = BtreeRoot::new(bmbt, keys, pointers);
+        Self{root, block_cache}
     }
 }
 
@@ -191,190 +71,126 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
         super_block: &Sb,
         name: &OsStr,
     ) -> Result<(FileAttr, u64), c_int> {
+        let blocksize: u64 = SUPERBLOCK.get().unwrap().sb_blocksize.into();
+        let dblksize: u64 = blocksize * (1 << super_block.sb_dirblklog);
         let idx = super_block.get_dir3_leaf_offset();
         let hash = hashname(name);
 
-        let (_, bmbt_rec) = self.map_dblock(buf_reader.by_ref(), super_block, idx as u32);
-        let mut hdr: Option<XfsDa3NodeHdr>;
+        let fsblock = self.root.map_block(buf_reader, super_block, idx)?;
 
-        if let Some(bmbt_rec_some) = &bmbt_rec {
-            buf_reader
-                .seek(SeekFrom::Start(
-                    (bmbt_rec_some.br_startblock) * (self.block_size as u64),
-                ))
-                .unwrap();
+        let mut raw = vec![0u8; dblksize as usize];
+        buf_reader.seek(SeekFrom::Start(fsblock * blocksize)).unwrap();
+        buf_reader.read_exact(&mut raw).unwrap();
+        let (node, _) = decode::<XfsDa3Intnode>(&raw[..]).map_err(|_| libc::EIO)?;
+        assert_eq!(node.hdr.info.magic, XFS_DA3_NODE_MAGIC);
+        let blk: XfsFsblock = node.lookup(buf_reader.by_ref(), super_block, hash,
+            |block, br| {
+            self.root.map_block(br, super_block, block.into()).unwrap()
+        })?;
 
-            hdr = Some(XfsDa3NodeHdr::from(buf_reader.by_ref(), super_block));
+        buf_reader.seek(SeekFrom::Start(blk * blocksize)).unwrap();
+        'outer: loop {
+            // We want to save the BTreeLeaf node's forw pointer here
+            let leaf: Dir2LeafNDisk = decode_from(buf_reader.by_ref()).unwrap();
+            leaf.sanity(super_block);
 
-            while let Some(hdr_some) = &hdr {
-                loop {
-                    let entry = XfsDa3NodeEntry::from(buf_reader.by_ref());
-                    if entry.hashval > hash {
-                        let (_, bmbt_rec) =
-                            self.map_dblock(buf_reader.by_ref(), super_block, entry.before);
-
-                        if let Some(bmbt_rec_some) = &bmbt_rec {
-                            buf_reader
-                                .seek(SeekFrom::Start(
-                                    (bmbt_rec_some.br_startblock) * (self.block_size as u64),
-                                ))
-                                .unwrap();
-
-                            break;
-                        } else {
-                            return Err(ENOENT);
-                        }
-                    }
-                }
-
-                if hdr_some.level == 1 {
-                    break;
-                } else {
-                    hdr = Some(XfsDa3NodeHdr::from(buf_reader.by_ref(), super_block));
-                }
-            }
-        } else {
-            return Err(ENOENT);
-        }
-
-        let hdr = Dir3LeafHdr::from(buf_reader.by_ref(), super_block);
-
-        for _i in 0..hdr.count {
-            let entry = Dir2LeafEntry::from(buf_reader.by_ref());
-
-            if entry.hashval == hash {
-                let address = (entry.address as u64) * 8;
-                let idx = (address / (self.block_size as u64)) as usize;
-                let address = address % (self.block_size as u64);
-
-                let (_, bmbt_rec) = self.map_dblock(buf_reader.by_ref(), super_block, idx as u32);
-
-                if let Some(bmbt_rec_some) = &bmbt_rec {
-                    buf_reader
-                        .seek(SeekFrom::Start(
-                            (bmbt_rec_some.br_startblock) * (self.block_size as u64),
-                        ))
-                        .unwrap();
-
-                    buf_reader.seek(SeekFrom::Current(address as i64)).unwrap();
-
-                    let entry = Dir2DataEntry::from(buf_reader.by_ref());
-
-                    let dinode = Dinode::from(buf_reader.by_ref(), super_block, entry.inumber);
-
-                    let attr = dinode.di_core.stat(entry.inumber)?;
-
-                    return Ok((attr, dinode.di_core.di_gen.into()));
-                } else {
-                    return Err(ENOENT);
+            'inner: for lcr in 0.. {
+                let address = match leaf.get_address(hash, lcr) {
+                    Ok(a) => a * 8,
+                    Err(libc::ENOENT) if leaf.ents.last().map(|e| e.hashval) == Some(hash) => {
+                        // There was a probably hash collision in the directory.  This happens
+                        // frequently, since the hash is only 32 bits.  Tragically, the colliding
+                        // entries were located in different leaf blocks.
+                        let forw = leaf.hdr.info.forw.into();
+                        let next_fsblock = self.root.map_block(buf_reader, super_block, forw)?;
+                        buf_reader.seek(SeekFrom::Start(next_fsblock * blocksize)).unwrap();
+                        continue 'outer;
+                    },
+                    Err(e) => return Err(e)
                 };
+                let leaf_dblock = u64::from(address) / blocksize;
+                let address = (u64::from(address) % blocksize) as usize;
+
+                let leaf_fs_block = self.root.map_block(buf_reader, super_block, leaf_dblock)?;
+                buf_reader
+                    .seek(SeekFrom::Start(leaf_fs_block * blocksize))
+                    .unwrap();
+                let mut leafraw = vec![0u8; dblksize as usize];
+                buf_reader.read_exact(&mut leafraw).unwrap();
+
+                let entry: Dir2DataEntry = decode(&leafraw[address..]).unwrap().0;
+                if entry.name != name {
+                    // There was a probably hash collision in the directory.  This happens
+                    // frequently, since the hash is only 32 bits.
+                    continue 'inner;
+                }
+
+                let dinode = Dinode::from(buf_reader.by_ref(), super_block, entry.inumber);
+
+                let attr = dinode.di_core.stat(entry.inumber)?;
+
+                return Ok((attr, dinode.di_core.di_gen.into()));
             }
         }
-
-        Err(ENOENT)
     }
 
     fn next(
         &self,
         buf_reader: &mut R,
-        super_block: &Sb,
+        sb: &Sb,
         offset: i64,
     ) -> Result<(XfsIno, i64, FileType, OsString), c_int> {
-        let offset = offset as u64;
-        let idx = offset >> (64 - 48); // tags take 16-bits
-        let offset = offset & ((1 << (64 - 48)) - 1);
-
+        let blocksize: u64 = sb.sb_blocksize.into();
+        let dblksize: u64 = blocksize * (1 << sb.sb_dirblklog);
+        let mut offset: u64 = offset.try_into().unwrap();
         let mut next = offset == 0;
-        let mut offset = if offset == 0 {
-            mem::size_of::<Dir3DataHdr>() as u64
-        } else {
-            offset
-        };
 
-        let (mut bmbt, mut bmbt_rec) =
-            self.map_dblock(buf_reader.by_ref(), super_block, idx as u32);
-        let mut bmbt_block_offset;
-        let mut bmbt_rec_idx;
+        loop {
+            // Byte offset within this directory block
+            let dir_block_offset = offset % ((1 << sb.sb_dirblklog) * blocksize);
+            // Offset of this directory block within the directory
+            let doffset = offset - dir_block_offset;
 
-        if let Some(bmbt_rec_some) = &bmbt_rec {
-            bmbt_block_offset = buf_reader.stream_position().unwrap();
-            bmbt_rec_idx = idx - bmbt_rec_some.br_startoff;
-        } else {
-            return Err(ENOENT);
-        }
+            let lblock = (offset / blocksize) & !((1u64 << sb.sb_dirblklog) - 1);
+            let fsblock = self.root.map_block(buf_reader, sb, lblock)?;
 
-        while let Some(bmbt_some) = &bmbt {
-            while let Some(bmbt_rec_some) = &bmbt_rec {
-                while bmbt_rec_idx < bmbt_rec_some.br_blockcount {
-                    buf_reader
-                        .seek(SeekFrom::Start(
-                            (bmbt_rec_some.br_startblock + bmbt_rec_idx) * (self.block_size as u64),
-                        ))
-                        .unwrap();
-
-                    buf_reader.seek(SeekFrom::Current(offset as i64)).unwrap();
-
-                    while buf_reader.stream_position().unwrap()
-                        < ((bmbt_rec_some.br_startblock + bmbt_rec_idx + 1)
-                            * (self.block_size as u64))
-                    {
-                        let freetag = buf_reader.read_u16::<BigEndian>().unwrap();
-                        buf_reader.seek(SeekFrom::Current(-2)).unwrap();
-
-                        if freetag == 0xffff {
-                            Dir2DataUnused::from(buf_reader.by_ref());
-                        } else if next {
-                            let entry = Dir2DataEntry::from(buf_reader.by_ref());
-
-                            let kind = get_file_type(FileKind::Type(entry.ftype))?;
-
-                            let tag = ((bmbt_rec_some.br_startoff + bmbt_rec_idx)
-                                & 0xFFFFFFFFFFFF0000)
-                                | (entry.tag as u64);
-
-                            let name = entry.name;
-
-                            return Ok((entry.inumber, tag as i64, kind, name));
-                        } else {
-                            let length = Dir2DataEntry::get_length_from_reader(buf_reader.by_ref());
-                            buf_reader.seek(SeekFrom::Current(length)).unwrap();
-
-                            next = true;
-                        }
-                    }
-
-                    bmbt_rec_idx += 1;
-
-                    offset = mem::size_of::<Dir3DataHdr>() as u64;
-                }
-
-                if bmbt_block_offset + (mem::size_of::<BmbtRec>() as u64) > (self.block_size as u64)
-                {
-                    break;
-                } else {
-                    bmbt_rec = Some(BmbtRec::from(buf_reader.by_ref()));
-
-                    bmbt_rec_idx = 0;
-
-                    offset = mem::size_of::<Dir3DataHdr>() as u64;
-                }
+            let mut cache_guard = self.block_cache.borrow_mut();
+            if cache_guard.is_none() || cache_guard.as_ref().unwrap().0 != fsblock
+            {
+                let mut raw = vec![0u8; dblksize as usize];
+                buf_reader
+                    .seek(SeekFrom::Start(fsblock * blocksize))
+                    .unwrap();
+                buf_reader.read_exact(&mut raw).unwrap();
+                *cache_guard = Some((fsblock, raw));
             }
+            let raw = &cache_guard.as_ref().unwrap().1;
 
-            if bmbt_some.bb_rightsib == 0 {
-                break;
+            let mut blk_offset = if offset % dblksize > 0 {
+                (offset % dblksize) as usize
             } else {
-                bmbt_block_offset = bmbt_some.bb_rightsib * (self.block_size as u64);
-                buf_reader.seek(SeekFrom::Start(bmbt_block_offset)).unwrap();
-                bmbt = Some(XfsBmbtLblock::from(buf_reader.by_ref(), super_block));
-
-                bmbt_rec = Some(BmbtRec::from(buf_reader.by_ref()));
-
-                bmbt_rec_idx = 0;
-
-                offset = mem::size_of::<Dir3DataHdr>() as u64;
+                Dir3DataHdr::SIZE as usize
+            };
+            while blk_offset < dblksize as usize {
+                let freetag: u16 = decode(&raw[blk_offset..]).unwrap().0;
+                if freetag == 0xffff {
+                    let (_, length) = decode::<Dir2DataUnused>(&raw[blk_offset..])
+                        .unwrap();
+                    offset += length as u64;
+                    blk_offset += length;
+                } else if !next {
+                    let length = Dir2DataEntry::get_length(&raw[blk_offset..]);
+                    blk_offset += length as usize;
+                    offset += length as u64;
+                    next = true;
+                } else {
+                    let (entry, _l)= decode::<Dir2DataEntry >(&raw[blk_offset..]).unwrap();
+                    let kind = get_file_type(FileKind::Type(entry.ftype))?;
+                    let name = entry.name;
+                    let entry_offset = doffset + entry.tag as u64;
+                    return Ok((entry.inumber, entry_offset as i64, kind, name));
+                }
             }
         }
-
-        Err(ENOENT)
     }
 }

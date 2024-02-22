@@ -55,7 +55,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> File<R> for FileBtree {
         while remaining_size > 0 {
             let blk = self
                 .btree
-                .map_block(buf_reader.by_ref(), super_block, logical_block as u64);
+                .map_block(buf_reader.by_ref(), super_block, logical_block as u64).unwrap();
             buf_reader
                 .seek(SeekFrom::Start(blk * u64::from(self.block_size)))
                 .unwrap();
