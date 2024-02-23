@@ -45,9 +45,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> File<R> for FileBtree {
 
         let mut remaining_size = min(size as i64, self.size - offset);
 
-        if remaining_size < 0 {
-            panic!("Offset is too large!");
-        }
+        assert!(remaining_size >= 0, "Offset is too large!");
 
         let mut logical_block = offset / i64::from(self.block_size);
         let mut block_offset = offset % i64::from(self.block_size);
@@ -57,9 +55,8 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> File<R> for FileBtree {
                 .btree
                 .map_block(buf_reader.by_ref(), super_block, logical_block as u64).unwrap();
             buf_reader
-                .seek(SeekFrom::Start(blk * u64::from(self.block_size)))
+                .seek(SeekFrom::Start(blk * u64::from(self.block_size) + block_offset as u64))
                 .unwrap();
-            buf_reader.seek(SeekFrom::Current(block_offset)).unwrap();
 
             let size_to_read = min(remaining_size, (self.block_size as i64) - block_offset);
 
