@@ -32,13 +32,30 @@ use std::{
 
 use bincode::de::read::Reader;
 
-use super::{btree::{Btree, BtreeRoot}, definitions::XfsFsize, file::File, sb::Sb};
+use super::{
+    btree::{Btree, BtreeRoot},
+    definitions::{XfsFileoff, XfsFsize, XfsFsblock},
+    file::File,
+    sb::Sb
+};
 
 #[derive(Debug)]
 pub struct FileBtree {
     pub btree: BtreeRoot,
     pub size: XfsFsize,
     pub block_size: u32,
+}
+
+impl FileBtree {
+    /// Return the extent, if any, that contains the given data block within the file.
+    /// Return its starting position as an FSblock, and its length in file system block units
+    pub fn get_extent<R>(&self, buf_reader: &mut R, block: XfsFileoff) -> (Option<XfsFsblock>, u64)
+        where R: Reader + BufRead + Seek
+    {
+        let (blk, len) = self.btree.map_block(buf_reader.by_ref(), block).unwrap();
+        let len = len.unwrap_or((self.size as u64).div_ceil(self.block_size.into()));
+        (blk, len)
+    }
 }
 
 impl<R: Reader + BufRead + Seek> File<R> for FileBtree {
@@ -53,21 +70,21 @@ impl<R: Reader + BufRead + Seek> File<R> for FileBtree {
         let mut block_offset = offset % i64::from(self.block_size);
 
         while remaining_size > 0 {
-            let blk = self
-                .btree
-                .map_block(buf_reader.by_ref(), logical_block as u64).unwrap();
-            buf_reader
-                .seek(SeekFrom::Start(blk * u64::from(self.block_size) + block_offset as u64))
-                .unwrap();
+            let (blk, blocks) = self.get_extent(buf_reader.by_ref(), logical_block as u64);
+            let z = min(remaining_size, (blocks as i64 * self.block_size as i64) - block_offset);
+            let oldlen = data.len();
+            data.resize(oldlen + z as usize, 0u8);
+            if let Some(blk) = blk {
+                buf_reader
+                    .seek(SeekFrom::Start(blk * u64::from(self.block_size) + block_offset as u64))
+                    .unwrap();
 
-            let size_to_read = min(remaining_size, (self.block_size as i64) - block_offset);
-
-            let mut buf = vec![0u8; size_to_read as usize];
-            buf_reader.read_exact(&mut buf).unwrap();
-            data.extend_from_slice(&buf);
-
-            remaining_size -= size_to_read;
-            logical_block += 1;
+                buf_reader.read_exact(&mut data[oldlen..]).unwrap();
+            } else {
+                // A hole
+            }
+            logical_block += blocks as i64;
+            remaining_size -= z;
             block_offset = 0;
         }
 
