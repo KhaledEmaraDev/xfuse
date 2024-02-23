@@ -41,7 +41,6 @@ use super::utils::Uuid;
 use super::{
     bmbt_rec::BmbtRec,
     definitions::{XfsFileoff, XfsFsblock},
-    sb::Sb,
     utils::decode_from,
     volume::SUPERBLOCK
 };
@@ -96,9 +95,9 @@ pub trait Btree {
     fn map_block<R: bincode::de::read::Reader + BufRead + Seek>(
         &self,
         buf_reader: &mut R,
-        super_block: &Sb,
         logical_block: XfsFileoff,
     ) -> Result<XfsFsblock, i32> {
+        let super_block = SUPERBLOCK.get().unwrap();
         let idx = self.keys().partition_point(|k| k.br_startoff <= logical_block) - 1;
         buf_reader
             .seek(SeekFrom::Start(
@@ -109,7 +108,7 @@ pub trait Btree {
         if self.level() > 1 {
             let bti: BtreeIntermediate = decode_from(buf_reader.by_ref()).unwrap();
             assert_eq!(bti.hdr.bb_uuid, super_block.sb_uuid);
-            bti.map_block(buf_reader, super_block, logical_block)
+            bti.map_block(buf_reader, logical_block)
         } else {
             let btl: BtreeLeaf = decode_from(buf_reader.by_ref()).unwrap();
             assert_eq!(btl.hdr.bb_uuid, super_block.sb_uuid);

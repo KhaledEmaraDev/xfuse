@@ -30,6 +30,8 @@ use std::{
     io::{BufRead, Seek, SeekFrom},
 };
 
+use bincode::de::read::Reader;
+
 use super::{btree::{Btree, BtreeRoot}, definitions::XfsFsize, file::File, sb::Sb};
 
 #[derive(Debug)]
@@ -39,8 +41,8 @@ pub struct FileBtree {
     pub block_size: u32,
 }
 
-impl<R: bincode::de::read::Reader + BufRead + Seek> File<R> for FileBtree {
-    fn read(&mut self, buf_reader: &mut R, super_block: &Sb, offset: i64, size: u32) -> Vec<u8> {
+impl<R: Reader + BufRead + Seek> File<R> for FileBtree {
+    fn read(&mut self, buf_reader: &mut R, _super_block: &Sb, offset: i64, size: u32) -> Vec<u8> {
         let mut data = Vec::<u8>::with_capacity(size as usize);
 
         let mut remaining_size = min(size as i64, self.size - offset);
@@ -53,7 +55,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> File<R> for FileBtree {
         while remaining_size > 0 {
             let blk = self
                 .btree
-                .map_block(buf_reader.by_ref(), super_block, logical_block as u64).unwrap();
+                .map_block(buf_reader.by_ref(), logical_block as u64).unwrap();
             buf_reader
                 .seek(SeekFrom::Start(blk * u64::from(self.block_size) + block_offset as u64))
                 .unwrap();
