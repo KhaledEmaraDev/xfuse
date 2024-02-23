@@ -46,7 +46,8 @@ use super::{
     da_btree::{XfsDa3Blkinfo, XfsDa3Intnode},
     definitions::{XFS_ATTR3_LEAF_MAGIC, XFS_DA3_NODE_MAGIC, XfsFileoff, XfsFsblock},
     sb::Sb,
-    utils::{self, decode_from}
+    utils,
+    volume::SUPERBLOCK
 };
 
 #[allow(dead_code)]
@@ -120,22 +121,6 @@ pub struct AttrLeafEntry {
     pub pad2: u8,
 }
 
-impl AttrLeafEntry {
-    pub fn from<R: BufRead>(buf_reader: &mut R) -> AttrLeafEntry {
-        let hashval = buf_reader.read_u32::<BigEndian>().unwrap();
-        let nameidx = buf_reader.read_u16::<BigEndian>().unwrap();
-        let flags = buf_reader.read_u8().unwrap();
-        let pad2 = buf_reader.read_u8().unwrap();
-
-        AttrLeafEntry {
-            hashval,
-            nameidx,
-            flags,
-            pad2,
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct AttrLeafNameLocal {
     pub valuelen: u16,
@@ -143,20 +128,76 @@ pub struct AttrLeafNameLocal {
     pub nameval: Vec<u8>,
 }
 
-impl AttrLeafNameLocal {
-    pub fn from<R: BufRead>(buf_reader: &mut R) -> AttrLeafNameLocal {
-        let valuelen = buf_reader.read_u16::<BigEndian>().unwrap();
-        let namelen = buf_reader.read_u8().unwrap();
+impl Decode for AttrLeafNameLocal {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let valuelen = Decode::decode(decoder)?;
+        let namelen: u8 = Decode::decode(decoder)?;
+        let mut nameval = vec![0u8; usize::from(namelen) + usize::from(valuelen)];
+        decoder.reader().read(&mut nameval[..])?;
 
-        let mut nameval = Vec::<u8>::new();
-        for _i in 0..((namelen as u16) + valuelen) {
-            nameval.push(buf_reader.read_u8().unwrap());
+        Ok(Self{ valuelen, namelen, nameval})
+    }
+}
+
+#[derive(Debug)]
+pub enum AttrLeafName {
+    Local(AttrLeafNameLocal),
+    Remote(AttrLeafNameRemote)
+}
+
+impl AttrLeafName {
+    fn name(&self) -> &[u8] {
+        match self {
+            AttrLeafName::Local(local) => &local.nameval[0..usize::from(local.namelen)],
+            AttrLeafName::Remote(remote) => &remote.name[0..usize::from(remote.namelen)],
         }
+    }
 
-        AttrLeafNameLocal {
-            valuelen,
-            namelen,
-            nameval,
+    fn namelen(&self) -> u8 {
+        match self {
+            AttrLeafName::Local(local) => local.namelen,
+            AttrLeafName::Remote(remote) => remote.namelen,
+        }
+    }
+
+    fn value<F, R>(
+        &self,
+        buf_reader: &mut R,
+        map_logical_block_to_fs_block: F,
+    ) -> Vec<u8>
+        where R: BufRead + Reader + Seek,
+              F: Fn(XfsFileoff, &mut R) -> XfsFsblock
+    {
+        match self {
+            AttrLeafName::Local(local) => {
+                local.nameval[local.namelen as usize..].to_vec()
+            },
+            AttrLeafName::Remote(remote) => {
+                let blocksize = u64::from(SUPERBLOCK.get().unwrap().sb_blocksize);
+                let mut res: Vec<u8> = Vec::with_capacity(remote.valuelen as usize);
+                let mut valueblk = remote.valueblk.into();
+                let mut valuelen: i64 = remote.valuelen.into();
+
+                while valuelen > 0 {
+                    let blk_num =
+                        map_logical_block_to_fs_block(valueblk, buf_reader.by_ref());
+                    buf_reader.seek(SeekFrom::Start(blk_num * blocksize)).unwrap();
+
+                    let (_, data) = AttrRmtHdr::from(buf_reader.by_ref());
+
+                    valuelen -= data.len() as i64;
+                    res.extend(data);
+                    valueblk += 1;
+                }
+                res
+            }
+        }
+    }
+
+    fn valuelen(&self) -> u32 {
+        match self {
+            AttrLeafName::Local(local) => local.valuelen.into(),
+            AttrLeafName::Remote(remote) => remote.valuelen,
         }
     }
 }
@@ -164,158 +205,49 @@ impl AttrLeafNameLocal {
 #[derive(Debug)]
 pub struct AttrLeafblock {
     pub hdr: AttrLeafHdr,
+    // TODO: in-memory, combine AttrLeafEntry and AttrLeafName into a struct, so we'll only need a
+    // single Vec
     pub entries: Vec<AttrLeafEntry>,
-    // pub namelist: AttrLeafNameLocal,
-    // pub valuelist: AttrLeafNameRemote,
+    pub names: Vec<AttrLeafName>
 }
 
 impl AttrLeafblock {
-    pub fn from<R: Reader + BufRead + Seek>(buf_reader: &mut R) -> AttrLeafblock {
-        let hdr: AttrLeafHdr = decode_from(buf_reader.by_ref()).unwrap();
+    pub fn get_total_size(&mut self) -> u32 {
+        let mut total: u32 = 0;
 
-        let mut entries = Vec::<AttrLeafEntry>::with_capacity(hdr.count.into());
-        for _i in 0..entries.capacity() {
-            entries.push(AttrLeafEntry::from(buf_reader.by_ref()));
+        for (entry, name) in std::iter::zip(self.entries.iter(), self.names.iter()) {
+            total += get_namespace_size_from_flags(entry.flags) + u32::from(name.namelen()) + 1;
         }
 
-        AttrLeafblock { hdr, entries }
+        total
     }
 
-    pub fn get_total_size<R: BufRead + Seek>(
-        &mut self,
-        buf_reader: &mut R,
-        leaf_offset: u64,
-    ) -> u32 {
-        let mut total_size: u32 = 0;
-
-        for entry in self.entries.iter() {
-            buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-            buf_reader
-                .seek(SeekFrom::Current(i64::from(entry.nameidx)))
-                .unwrap();
-
-            if entry.flags & constants::XFS_ATTR_LOCAL != 0 {
-                let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
-                total_size +=
-                    get_namespace_size_from_flags(entry.flags) + u32::from(name_entry.namelen) + 1;
-            } else {
-                let name_entry = AttrLeafNameRemote::from(buf_reader.by_ref());
-                total_size +=
-                    get_namespace_size_from_flags(entry.flags) + u32::from(name_entry.namelen) + 1;
-            }
-        }
-
-        total_size
-    }
-
-    pub fn get_size<R: BufRead + Seek>(
-        &self,
-        buf_reader: &mut R,
-        hash: u32,
-        leaf_offset: u64,
-    ) -> Result<u32, libc::c_int> {
+    pub fn get_size(&self, hash: u32) -> Result<u32, libc::c_int> {
+        // TODO: handle hash collisions
         match self.entries.binary_search_by_key(&hash, |entry| entry.hashval) {
-            Ok(i) => {
-                // TODO: read all of these into the struct instead of reading them here
-                let entry = &self.entries[i];
-                buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-                buf_reader
-                    .seek(SeekFrom::Current(i64::from(entry.nameidx)))
-                    .unwrap();
-
-                if entry.flags & constants::XFS_ATTR_LOCAL != 0 {
-                    let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
-                    Ok(name_entry.valuelen.into())
-                } else {
-                    let name_entry = AttrLeafNameRemote::from(buf_reader.by_ref());
-                    Ok(name_entry.valuelen)
-                }
-            },
+            Ok(i) => Ok(self.names[i].valuelen()),
             Err(_) => Err(libc::ENOATTR)
         }
     }
 
-    pub fn list<R: BufRead + Seek>(
-        &mut self,
-        buf_reader: &mut R,
-        list: &mut Vec<u8>,
-        leaf_offset: u64,
-    ) {
-        for entry in self.entries.iter() {
-            buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-            buf_reader
-                .seek(SeekFrom::Current(i64::from(entry.nameidx)))
-                .unwrap();
-
-            if entry.flags & constants::XFS_ATTR_LOCAL != 0 {
-                let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
-
-                list.extend_from_slice(get_namespace_from_flags(entry.flags));
-                let namelen = name_entry.namelen as usize;
-                list.extend_from_slice(&name_entry.nameval[0..namelen]);
-            } else {
-                let name_entry = AttrLeafNameRemote::from(buf_reader.by_ref());
-
-                list.extend_from_slice(get_namespace_from_flags(entry.flags));
-                let namelen = name_entry.namelen as usize;
-                list.extend_from_slice(&name_entry.name[0..namelen]);
-            }
-
+    pub fn list(&mut self, list: &mut Vec<u8>) {
+        for (entry, name_entry) in std::iter::zip(self.entries.iter(), self.names.iter()) {
+            list.extend_from_slice(get_namespace_from_flags(entry.flags));
+            list.extend_from_slice(name_entry.name());
             list.push(0)
         }
     }
 
     // TODO: return ENOENT instead of panicing.  It might be due to a hash collision one level up
     // the tree.
-    pub fn get<R: BufRead + Seek, F: Fn(XfsFileoff, &mut R) -> XfsFsblock>(
+    pub fn get<R: BufRead + Reader + Seek, F: Fn(XfsFileoff, &mut R) -> XfsFsblock>(
         &self,
         buf_reader: &mut R,
-        super_block: &Sb,
         hash: u32,
-        leaf_offset: u64,
         map_logical_block_to_fs_block: F,
     ) -> Vec<u8> {
         match self.entries.binary_search_by_key(&hash, |entry| entry.hashval) {
-            Ok(i) => {
-                // TODO: read all of these into the struct instead of reading them here
-                let entry = &self.entries[i];
-                buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-                buf_reader
-                    .seek(SeekFrom::Current(i64::from(entry.nameidx)))
-                    .unwrap();
-
-                if entry.flags & constants::XFS_ATTR_LOCAL != 0 {
-                    let name_entry = AttrLeafNameLocal::from(buf_reader.by_ref());
-
-                    let namelen = name_entry.namelen as usize;
-
-                    name_entry.nameval[namelen..].to_vec()
-                } else {
-                    let name_entry = AttrLeafNameRemote::from(buf_reader.by_ref());
-
-                    let mut valuelen: i64 = name_entry.valuelen.into();
-                    let mut valueblk = name_entry.valueblk;
-
-                    let mut res: Vec<u8> = Vec::with_capacity(valuelen as usize);
-
-                    while valuelen > 0 {
-                        let blk_num =
-                            map_logical_block_to_fs_block(valueblk.into(), buf_reader.by_ref());
-                        buf_reader
-                            .seek(SeekFrom::Start(
-                                blk_num * u64::from(super_block.sb_blocksize),
-                            ))
-                            .unwrap();
-
-                        let (_, data) = AttrRmtHdr::from(buf_reader.by_ref());
-
-                        valuelen -= data.len() as i64;
-                        res.extend(data);
-                        valueblk += 1;
-                    }
-                    res
-                }
-            },
+            Ok(i) => self.names[i].value(buf_reader, map_logical_block_to_fs_block),
             Err(_) => panic!("Couldn't find the attribute entry")
         }
     }
@@ -323,14 +255,35 @@ impl AttrLeafblock {
 
 impl Decode for AttrLeafblock {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let hdr: AttrLeafHdr = Decode::decode(decoder)?;
+        let blocksize = SUPERBLOCK.get().unwrap().sb_blocksize as usize;
+        let mut raw = vec![0u8; blocksize];
+        decoder.reader().read(&mut raw[..])?;
+
+        let config = decoder.config();
+        let sl = bincode::de::read::SliceReader::new(&raw);
+        let mut sldecoder = bincode::de::DecoderImpl::new(sl, *config);
+        let hdr: AttrLeafHdr = Decode::decode(&mut sldecoder)?;
 
         let mut entries = Vec::<AttrLeafEntry>::with_capacity(hdr.count.into());
         for _i in 0..entries.capacity() {
-            entries.push(Decode::decode(decoder)?);
+            entries.push(Decode::decode(&mut sldecoder)?);
         }
 
-        Ok(AttrLeafblock {hdr, entries})
+        let mut names = Vec::with_capacity(entries.len());
+        for e in entries.iter() {
+            let ofs = usize::from(e.nameidx);
+            if e.flags & constants::XFS_ATTR_LOCAL != 0 {
+                let local = bincode::decode_from_slice(&raw[ofs..], *config)?.0;
+                names.push(AttrLeafName::Local(local));
+            } else {
+                let remote = bincode::decode_from_slice(&raw[ofs..], *config)?.0;
+                names.push(AttrLeafName::Remote(remote));
+            }
+        }
+
+        Ok(AttrLeafblock {hdr, entries,
+            names
+        })
     }
 }
 
@@ -342,23 +295,15 @@ pub struct AttrLeafNameRemote {
     pub name: Vec<u8>,
 }
 
-impl AttrLeafNameRemote {
-    pub fn from<R: BufRead>(buf_reader: &mut R) -> AttrLeafNameRemote {
-        let valueblk = buf_reader.read_u32::<BigEndian>().unwrap();
-        let valuelen = buf_reader.read_u32::<BigEndian>().unwrap();
-        let namelen = buf_reader.read_u8().unwrap();
+impl Decode for AttrLeafNameRemote {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let valueblk = Decode::decode(decoder)?;
+        let valuelen = Decode::decode(decoder)?;
+        let namelen: u8 = Decode::decode(decoder)?;
+        let mut name = vec![0u8; usize::from(namelen)];
+        decoder.reader().read(&mut name[..])?;
 
-        let mut name = Vec::<u8>::new();
-        for _i in 0..namelen {
-            name.push(buf_reader.read_u8().unwrap());
-        }
-
-        AttrLeafNameRemote {
-            valueblk,
-            valuelen,
-            namelen,
-            name,
-        }
+        Ok(Self{ valueblk, valuelen, namelen, name})
     }
 }
 
