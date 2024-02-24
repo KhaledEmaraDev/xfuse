@@ -102,15 +102,14 @@ pub trait Btree {
         buf_reader
             .seek(SeekFrom::Start(
                 self.ptrs()[idx] * u64::from(super_block.sb_blocksize),
-            ))
-            .unwrap();
+            )).map_err(|e| e.raw_os_error().unwrap())?;
 
         if self.level() > 1 {
-            let bti: BtreeIntermediate = decode_from(buf_reader.by_ref()).unwrap();
+            let bti: BtreeIntermediate = decode_from(buf_reader.by_ref()).map_err(|_| libc::EIO)?;
             assert_eq!(bti.hdr.bb_uuid, super_block.sb_uuid);
             bti.map_block(buf_reader, logical_block)
         } else {
-            let btl: BtreeLeaf = decode_from(buf_reader.by_ref()).unwrap();
+            let btl: BtreeLeaf = decode_from(buf_reader.by_ref()).map_err(|_| libc::EIO)?;
             assert_eq!(btl.hdr.bb_uuid, super_block.sb_uuid);
             btl.map_block(logical_block)
         }
