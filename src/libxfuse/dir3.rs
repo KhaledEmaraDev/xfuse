@@ -183,7 +183,7 @@ impl Dir2Data {
         superblock: &Sb,
         start_block: u64,
     ) -> Dir2Data {
-        let offset = start_block * (superblock.sb_blocksize as u64);
+        let offset = superblock.fsb_to_offset(start_block);
         buf_reader.seek(SeekFrom::Start(offset)).unwrap();
 
         let hdr = decode_from(buf_reader.by_ref()).unwrap();

@@ -44,17 +44,15 @@ use libc::{c_int, EIO, ENOENT};
 #[derive(Debug)]
 pub struct Dir2Node {
     pub bmx: Vec<BmbtRec>,
-    pub block_size: u32,
     /// An cache of the last extent and its starting block number read by lookup
     /// or readdir.
     block_cache: RefCell<Option<(u64, Vec<u8>)>>
 }
 
 impl Dir2Node {
-    pub fn from(bmx: Vec<BmbtRec>, block_size: u32) -> Dir2Node {
+    pub fn from(bmx: Vec<BmbtRec>) -> Dir2Node {
         Dir2Node {
             bmx,
-            block_size,
             block_cache: RefCell::new(None)
         }
     }
@@ -95,7 +93,6 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Node {
         super_block: &Sb,
         name: &OsStr,
     ) -> Result<(FileAttr, u64), c_int> {
-        let blocksize = u64::from(self.block_size);
         let dblock = super_block.get_dir3_leaf_offset();
         let hash = hashname(name);
 
@@ -104,19 +101,17 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Node {
         // ReaddirPlus.
         let bmbt_rec = if let Some(bmbt_rec_some) = self.map_dblock(dblock) {
             buf_reader
-                .seek(SeekFrom::Start(
-                    (bmbt_rec_some.br_startblock) * blocksize,
-                ))
+                .seek(SeekFrom::Start(super_block.fsb_to_offset(bmbt_rec_some.br_startblock)))
                 .unwrap();
             bmbt_rec_some
         } else {
             return Err(ENOENT)
         };
 
-        let extent_size = (bmbt_rec.br_blockcount) as usize * blocksize as usize;
+        let extent_size = (bmbt_rec.br_blockcount) as usize * super_block.sb_blocksize as usize;
         let mut raw = vec![0u8; extent_size];
         buf_reader
-            .seek(SeekFrom::Start(bmbt_rec.br_startblock * blocksize))
+            .seek(SeekFrom::Start(super_block.fsb_to_offset(bmbt_rec.br_startblock)))
             .unwrap();
         buf_reader.read_exact(&mut raw).unwrap();
 
@@ -126,8 +121,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Node {
             self.map_dblock_number(block.into())
         })?;
 
-        let leaf_offset = blk * u64::from(super_block.sb_blocksize);
-        buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
+        buf_reader.seek(SeekFrom::Start(super_block.fsb_to_offset(blk))).unwrap();
 
         'outer: loop {
             let leaf: Dir2LeafNDisk = decode_from(buf_reader.by_ref()).unwrap();
@@ -137,7 +131,9 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Node {
                     Ok(a) => a * 8,
                     Err(libc::ENOENT) if leaf.ents.last().map(|e| e.hashval) == Some(hash) => {
                         let next_leaf_fsblock = self.map_dblock_number(leaf.hdr.info.forw.into());
-                        buf_reader.seek(SeekFrom::Start(next_leaf_fsblock * blocksize)).unwrap();
+                        buf_reader
+                            .seek(SeekFrom::Start(super_block.fsb_to_offset(next_leaf_fsblock)))
+                            .unwrap();
                         continue 'outer;
                     },
                     Err(e) => return Err(e)
@@ -147,10 +143,8 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Node {
 
                 let bmbt_rec = self.map_dblock(idx).ok_or(EIO)?;
                 let blk = bmbt_rec.br_startblock + (idx - bmbt_rec.br_startoff);
-                buf_reader
-                    .seek(SeekFrom::Start(blk * u64::from(super_block.sb_blocksize)))
-                    .unwrap();
-                let mut leafraw = vec![0u8; bmbt_rec.br_blockcount as usize * self.block_size as usize];
+                buf_reader.seek(SeekFrom::Start(super_block.fsb_to_offset(blk))).unwrap();
+                let mut leafraw = vec![0u8; bmbt_rec.br_blockcount as usize * super_block.sb_blocksize as usize];
                 buf_reader.read_exact(&mut leafraw).unwrap();
 
                 let entry: Dir2DataEntry = decode(&leafraw[address..]).unwrap().0;
@@ -176,7 +170,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Node {
     ) -> Result<(XfsIno, i64, FileType, OsString), c_int>
     {
         let mut offset: u64 = offset.try_into().unwrap();
-        let block_size = self.block_size as u64;
+        let block_size = u64::from(sb.sb_blocksize);
         let mut next = offset == 0;
 
         while let Some(bmbt_rec) = self.map_dblock(offset / block_size) {
@@ -189,7 +183,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Node {
             {
                 let mut raw = vec![0u8; extent_size];
                 buf_reader
-                    .seek(SeekFrom::Start(bmbt_rec.br_startblock * block_size))
+                    .seek(SeekFrom::Start(sb.fsb_to_offset(bmbt_rec.br_startblock)))
                     .unwrap();
                 buf_reader.read_exact(&mut raw).unwrap();
                 *cache_guard = Some((bmbt_rec.br_startblock, raw));

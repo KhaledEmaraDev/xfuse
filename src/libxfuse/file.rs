@@ -32,33 +32,35 @@ use std::{
 
 use bincode::de::read::Reader;
 
-use super::definitions::{XfsFileoff, XfsFsblock, XfsFsize};
+use super::{
+    definitions::{XfsFileoff, XfsFsblock, XfsFsize},
+    volume::SUPERBLOCK,
+};
 
 pub trait File<R: BufRead + Reader + Seek> {
-    fn block_size(&self) -> u32;
-
     /// Return the extent, if any, that contains the given data block within the file.
     /// Return its starting position as an FSblock, and its length in file system block units
     fn get_extent(&self, buf_reader: &mut R, block: XfsFileoff) -> (Option<XfsFsblock>, u64);
 
     fn read(&mut self, buf_reader: &mut R, offset: i64, size: u32) -> Vec<u8> {
+        let sb = SUPERBLOCK.get().unwrap();
         let mut data = Vec::<u8>::with_capacity(size as usize);
 
         let mut remaining_size = min(size as i64, self.size() - offset);
 
         assert!(remaining_size >= 0, "Offset is too large!");
 
-        let mut logical_block = offset / i64::from(self.block_size());
-        let mut block_offset = offset % i64::from(self.block_size());
+        let mut logical_block = offset / i64::from(sb.sb_blocksize);
+        let mut block_offset = offset % i64::from(sb.sb_blocksize);
 
         while remaining_size > 0 {
             let (blk, blocks) = self.get_extent(buf_reader.by_ref(), logical_block as u64);
-            let z = min(remaining_size, (blocks as i64 * self.block_size() as i64) - block_offset);
+            let z = min(remaining_size, (blocks as i64 * sb.sb_blocksize as i64) - block_offset);
             let oldlen = data.len();
             data.resize(oldlen + z as usize, 0u8);
             if let Some(blk) = blk {
                 buf_reader
-                    .seek(SeekFrom::Start(blk * u64::from(self.block_size()) + block_offset as u64))
+                    .seek(SeekFrom::Start(sb.fsb_to_offset(blk) + block_offset as u64))
                     .unwrap();
 
                 buf_reader.read_exact(&mut data[oldlen..]).unwrap();

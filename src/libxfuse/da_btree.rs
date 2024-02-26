@@ -256,8 +256,9 @@ impl XfsDa3Intnode {
             Ok(blk)
         } else {
             assert!(self.hdr.level > 1);
+            let offset = super_block.fsb_to_offset(blk);
             buf_reader
-                .seek(SeekFrom::Start(blk * u64::from(super_block.sb_blocksize)))
+                .seek(SeekFrom::Start(offset))
                 .unwrap();
 
             let node = XfsDa3Intnode::from(buf_reader.by_ref(), super_block);
@@ -281,8 +282,9 @@ impl XfsDa3Intnode {
         } else {
             let blk =
                 map_da_block_to_fs_block(self.btree.first().unwrap().before, buf_reader.by_ref());
+            let offset = super_block.fsb_to_offset(blk);
             buf_reader
-                .seek(SeekFrom::Start(blk * u64::from(super_block.sb_blocksize)))
+                .seek(SeekFrom::Start(offset))
                 .unwrap();
 
             let node = XfsDa3Intnode::from(buf_reader.by_ref(), super_block);

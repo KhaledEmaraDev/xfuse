@@ -173,7 +173,7 @@ impl AttrLeafName {
                 local.nameval[local.namelen as usize..].to_vec()
             },
             AttrLeafName::Remote(remote) => {
-                let blocksize = u64::from(SUPERBLOCK.get().unwrap().sb_blocksize);
+                let sb = SUPERBLOCK.get().unwrap();
                 let mut res: Vec<u8> = Vec::with_capacity(remote.valuelen as usize);
                 let mut valueblk = remote.valueblk.into();
                 let mut valuelen: i64 = remote.valuelen.into();
@@ -181,7 +181,7 @@ impl AttrLeafName {
                 while valuelen > 0 {
                     let blk_num =
                         map_logical_block_to_fs_block(valueblk, buf_reader.by_ref());
-                    buf_reader.seek(SeekFrom::Start(blk_num * blocksize)).unwrap();
+                    buf_reader.seek(SeekFrom::Start(sb.fsb_to_offset(blk_num))).unwrap();
 
                     let (_, data) = AttrRmtHdr::from(buf_reader.by_ref());
 
@@ -369,7 +369,7 @@ pub fn open<R: Reader + BufRead + Seek>(
     ) -> Box<dyn Attr<R>>
 {
     if let Some(rec) = bmx.first() {
-        let ofs = rec.br_startblock * u64::from(superblock.sb_blocksize);
+        let ofs = superblock.fsb_to_offset(rec.br_startblock);
         buf_reader.seek(SeekFrom::Start(ofs)).unwrap();
         let mut raw = vec![0u8; superblock.sb_blocksize as usize];
         buf_reader.read_exact(&mut raw).unwrap();

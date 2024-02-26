@@ -321,7 +321,7 @@ impl Dinode {
                         bmx[0].br_startblock,
                     ))
                 } else if bmx.len() > 4 {
-                    Box::new(Dir2Node::from(bmx.clone(), superblock.sb_blocksize))
+                    Box::new(Dir2Node::from(bmx.clone()))
                 } else {
                     Box::new(Dir2Leaf::from(buf_reader.by_ref(), superblock, bmx))
                 }
@@ -340,18 +340,15 @@ impl Dinode {
     pub fn get_file<R: bincode::de::read::Reader + BufRead + Seek>(
         &self,
         _buf_reader: &mut R,
-        superblock: &Sb,
     ) -> Box<dyn File<R>> {
         match &self.di_u {
             DiU::Bmx(bmx) => Box::new(FileExtentList {
                 bmx: bmx.clone(),
                 size: self.di_core.di_size,
-                block_size: superblock.sb_blocksize,
             }),
             DiU::Bmbt((bmdr, keys, pointers)) => Box::new(FileBtree {
                 btree: BtreeRoot::new(bmdr.clone(), keys.clone(), pointers.clone()),
                 size: self.di_core.di_size,
-                block_size: superblock.sb_blocksize,
             }),
             _ => {
                 panic!("Unsupported file format!");

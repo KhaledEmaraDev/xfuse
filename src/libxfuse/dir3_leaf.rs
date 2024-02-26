@@ -65,7 +65,7 @@ impl Dir2Leaf {
         }
 
         let leaf_extent = bmx.last().unwrap();
-        let offset = leaf_extent.br_startblock * (superblock.sb_blocksize as u64);
+        let offset = superblock.fsb_to_offset(leaf_extent.br_startblock);
         let entry_size = superblock.sb_blocksize * (1 << superblock.sb_dirblklog);
 
         let leaf = Dir2LeafDisk::from(buf_reader, offset, entry_size as usize);
