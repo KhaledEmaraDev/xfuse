@@ -25,16 +25,14 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use std::{
-    cmp::min,
-    io::{BufRead, Seek, SeekFrom},
-};
+use std::io::{BufRead, Seek};
+
+use bincode::de::read::Reader;
 
 use super::{
     bmbt_rec::BmbtRec,
     definitions::{XfsFileoff, XfsFsblock, XfsFsize},
     file::File,
-    sb::Sb,
 };
 
 #[derive(Debug)]
@@ -44,44 +42,40 @@ pub struct FileExtentList {
     pub block_size: u32,
 }
 
-impl FileExtentList {
-    pub fn map_logical_block_to_fs_block(&self, block: XfsFileoff) -> XfsFsblock {
-        for entry in self.bmx.iter().rev() {
-            if block >= entry.br_startoff {
-                return entry.br_startblock + (block - entry.br_startoff);
+impl<R: BufRead + Reader + Seek> File<R> for FileExtentList {
+    fn block_size(&self) -> u32 {
+        self.block_size
+    }
+
+    /// Return the extent, if any, that contains the given data block within the file.
+    /// Return its starting position as an FSblock, and its length in file system block units
+    fn get_extent(&self, _buf_reader: &mut R, block: XfsFileoff) -> (Option<XfsFsblock>, u64) {
+        match self.bmx.partition_point(|entry| entry.br_startoff <= block) {
+            0 => {
+                // A hole at the beginning of the file
+                let hole_len = self.bmx.first()
+                    .map(|b| b.br_startoff)
+                    .unwrap_or((self.size as u64).div_ceil(self.block_size.into()));
+                (None, hole_len - block)
+            },
+            i => {
+                let entry = &self.bmx[i - 1];
+                let skip = block - entry.br_startoff;
+                if entry.br_startoff + entry.br_blockcount > block {
+                    (Some(entry.br_startblock + skip), entry.br_blockcount - skip)
+                } else {
+                    // It's a hole
+                    let next_ex_start = self.bmx.get(i)
+                        .map(|e| e.br_startoff)
+                        .unwrap_or((self.size as u64).div_ceil(self.block_size.into()));
+                    let hole_len = next_ex_start - entry.br_startoff;
+                    (None, hole_len - skip)
+                }
             }
         }
-
-        panic!("Couldn't find logical block!");
     }
-}
 
-impl<R: BufRead + Seek> File<R> for FileExtentList {
-    fn read(&mut self, buf_reader: &mut R, _super_block: &Sb, offset: i64, size: u32) -> Vec<u8> {
-        let mut remaining_size = min(size as i64, self.size - offset);
-        let mut data = Vec::<u8>::with_capacity(remaining_size.max(0) as usize);
-
-        let mut logical_block = offset / i64::from(self.block_size);
-        let mut block_offset = offset % i64::from(self.block_size);
-
-        while remaining_size > 0 {
-            let blk = self.map_logical_block_to_fs_block(logical_block as u64);
-            buf_reader
-                .seek(SeekFrom::Start(blk * u64::from(self.block_size)))
-                .unwrap();
-            buf_reader.seek(SeekFrom::Current(block_offset)).unwrap();
-
-            let size_to_read = min(remaining_size, (self.block_size as i64) - block_offset);
-
-            let mut buf = vec![0u8; size_to_read as usize];
-            buf_reader.read_exact(&mut buf).unwrap();
-            data.extend_from_slice(&buf);
-
-            remaining_size -= size_to_read;
-            logical_block += 1;
-            block_offset = 0;
-        }
-
-        data
+    fn size(&self) -> XfsFsize {
+        self.size
     }
 }

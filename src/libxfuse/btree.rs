@@ -41,7 +41,6 @@ use super::utils::Uuid;
 use super::{
     bmbt_rec::BmbtRec,
     definitions::{XfsFileoff, XfsFsblock},
-    sb::Sb,
     utils::decode_from,
     volume::SUPERBLOCK
 };
@@ -93,27 +92,33 @@ pub trait Btree {
     fn keys(&self) -> &[BmbtKey];
     fn level(&self) -> u16;
 
+    /// Return the extent, if any, that contains the given block within the file.
+    /// Return its starting position as an FSblock, and its length in file system block units.
+    /// If the length extents to EoF, return None for length.
     fn map_block<R: bincode::de::read::Reader + BufRead + Seek>(
         &self,
         buf_reader: &mut R,
-        super_block: &Sb,
         logical_block: XfsFileoff,
-    ) -> Result<XfsFsblock, i32> {
-        let idx = self.keys().partition_point(|k| k.br_startoff <= logical_block) - 1;
+    ) -> Result<(Option<XfsFsblock>, Option<u64>), i32> {
+        let super_block = SUPERBLOCK.get().unwrap();
+        let pp = self.keys().partition_point(|k| k.br_startoff <= logical_block);
+        // If there's a hole at the start, we should still descend into the leftmost child.
+        // BtreeLeaf::get_extent will calculate the hole's size.
+        let idx = pp.saturating_sub(1);
+
         buf_reader
             .seek(SeekFrom::Start(
                 self.ptrs()[idx] * u64::from(super_block.sb_blocksize),
-            ))
-            .unwrap();
+            )).map_err(|e| e.raw_os_error().unwrap())?;
 
         if self.level() > 1 {
-            let bti: BtreeIntermediate = decode_from(buf_reader.by_ref()).unwrap();
+            let bti: BtreeIntermediate = decode_from(buf_reader.by_ref()).map_err(|_| libc::EIO)?;
             assert_eq!(bti.hdr.bb_uuid, super_block.sb_uuid);
-            bti.map_block(buf_reader, super_block, logical_block)
+            bti.map_block(buf_reader, logical_block)
         } else {
-            let btl: BtreeLeaf = decode_from(buf_reader.by_ref()).unwrap();
+            let btl: BtreeLeaf = decode_from(buf_reader.by_ref()).map_err(|_| libc::EIO)?;
             assert_eq!(btl.hdr.bb_uuid, super_block.sb_uuid);
-            btl.map_block(logical_block)
+            Ok(btl.get_extent(logical_block))
         }
     }
 
@@ -212,13 +217,29 @@ struct BtreeLeaf {
 }
 
 impl BtreeLeaf {
-    pub fn map_block( &self, logical_block: XfsFileoff,) -> Result<XfsFsblock, i32> {
-        let i = self.recs.partition_point(|k| k.br_startoff <= logical_block) - 1;
-        let rec = &self.recs[i];
-        if rec.br_blockcount > logical_block - rec.br_startoff {
-            Ok(rec.br_startblock + (logical_block - rec.br_startoff))
-        } else {
-            Err(libc::ENOENT)
+    /// Return the extent, if any, that contains the given block within the file.
+    /// Return its starting position as an FSblock, and its length in file system block units.
+    /// If the length extents to EoF, return None for length.
+    pub fn get_extent(&self, dblock: XfsFileoff) -> (Option<XfsFsblock>, Option<u64>) {
+        match self.recs.partition_point(|entry| entry.br_startoff <= dblock) {
+            0 => {
+                // A hole at the beginning of the file
+                let len = self.recs.first()
+                    .map(|b| b.br_startoff - dblock);
+                (None, len)
+            },
+            i => {
+                let entry = &self.recs[i - 1];
+                let skip = dblock - entry.br_startoff;
+                if entry.br_startoff + entry.br_blockcount > dblock {
+                    (Some(entry.br_startblock + skip), Some(entry.br_blockcount - skip))
+                } else {
+                    // It's a hole
+                    let len = self.recs.get(i)
+                        .map(|e| e.br_startoff - entry.br_startblock - skip);
+                    (None, len)
+                }
+            }
         }
     }
 }

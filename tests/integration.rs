@@ -842,6 +842,61 @@ mod read {
         assert_eq!(0, f.read_at(&mut buf[..], size as u64 + 1).unwrap());
     }
 
+    /// Read a sparse file.
+    #[named]
+    #[rstest]
+    #[case("sparse.fully.txt", false)]
+    #[case("sparse.extents.txt", true)]
+    #[case("sparse.btree.txt", true)]
+    fn sparse(harness4k: Harness, #[case] filename: &str, #[case] sector1: bool) {
+        require_fusefs!();
+
+        const BUFSIZE: usize = 16;
+        let path = harness4k.d.path().join("files").join(filename);
+        let mut buf = vec![0; 4096];
+        let mut f = fs::File::open(path).unwrap();
+
+        // First read a sparse block
+        f.read_exact(&mut buf[..]).unwrap();
+        assert_eq!(&vec![0; 4096], &buf);
+
+        // Then read a dense block
+        if sector1 {
+            f.read_exact(&mut buf[..]).unwrap();
+            let mut ofs = 4096;
+            while ofs < 8192 {
+                let expected = format!("{:016x}", ofs);
+                let bofs = ofs - 4096;
+                assert_eq!(&buf[bofs..bofs + BUFSIZE], expected.as_bytes());
+                ofs += BUFSIZE;
+            }
+        }
+    }
+
+    #[named]
+    #[rstest]
+    fn hole_at_end(harness4k: Harness) {
+        require_fusefs!();
+
+        const BUFSIZE: usize = 16;
+        let path = harness4k.d.path().join("files").join("hole_at_end.txt");
+        let mut f = fs::File::open(path).unwrap();
+
+        // First read the dense parts
+        let mut buf = vec![0; 4 * 4096];
+        f.read_exact(&mut buf[..]).unwrap();
+        let mut ofs = 0;
+        while ofs < 4 * 4096 {
+            let expected = format!("{:016x}", ofs);
+            assert_eq!(&buf[ofs..ofs + BUFSIZE], expected.as_bytes());
+            ofs += BUFSIZE;
+        }
+
+        // Now read the hole
+        let mut buf = vec![0; 4096];
+        f.read_exact(&mut buf[..]).unwrap();
+        assert_eq!(&vec![0; 4096], &buf);
+    }
     // TODO: add a test case for reading with direct I/O where the image is on a
     // device, not a file
 }
@@ -1041,7 +1096,7 @@ fn statfs(harness4k: Harness) {
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
     // here.
-    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 1467);
+    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 1471);
 
     // There are legitimate questions about what the correct value for
     // optimal_transfer_size
@@ -1066,7 +1121,7 @@ fn statvfs(harness4k: Harness) {
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
     // here.
-    assert_eq!(svfs.files() - svfs.files_free(), 1467);
+    assert_eq!(svfs.files() - svfs.files_free(), 1471);
     assert_eq!(svfs.files_free(), svfs.files_available());
 
     // Linux's calculation for blocks available and free is complicated and the

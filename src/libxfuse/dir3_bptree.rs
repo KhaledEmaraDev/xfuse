@@ -62,6 +62,15 @@ impl Dir2Btree {
         let root = BtreeRoot::new(bmbt, keys, pointers);
         Self{root, block_cache}
     }
+
+    // Directory blocks always have the same size, so we don't need to return the extent length
+    fn map_block<R: bincode::de::read::Reader + BufRead + Seek>(
+        &self,
+        buf_reader: &mut R,
+        logical_block: XfsFileoff,
+    ) -> Result<XfsFsblock, i32> {
+        self.root.map_block(buf_reader, logical_block)?.0.ok_or(libc::ENOENT)
+    }
 }
 
 impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
@@ -76,7 +85,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
         let idx = super_block.get_dir3_leaf_offset();
         let hash = hashname(name);
 
-        let fsblock = self.root.map_block(buf_reader, super_block, idx)?;
+        let fsblock = self.map_block(buf_reader, idx)?;
 
         let mut raw = vec![0u8; dblksize as usize];
         buf_reader.seek(SeekFrom::Start(fsblock * blocksize)).unwrap();
@@ -85,7 +94,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
         assert_eq!(node.hdr.info.magic, XFS_DA3_NODE_MAGIC);
         let blk: XfsFsblock = node.lookup(buf_reader.by_ref(), super_block, hash,
             |block, br| {
-            self.root.map_block(br, super_block, block.into()).unwrap()
+            self.map_block(br, block.into()).unwrap()
         })?;
 
         buf_reader.seek(SeekFrom::Start(blk * blocksize)).unwrap();
@@ -101,7 +110,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
                         // frequently, since the hash is only 32 bits.  Tragically, the colliding
                         // entries were located in different leaf blocks.
                         let forw = leaf.hdr.info.forw.into();
-                        let next_fsblock = self.root.map_block(buf_reader, super_block, forw)?;
+                        let next_fsblock = self.map_block(buf_reader, forw)?;
                         buf_reader.seek(SeekFrom::Start(next_fsblock * blocksize)).unwrap();
                         continue 'outer;
                     },
@@ -110,7 +119,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
                 let leaf_dblock = u64::from(address) / blocksize;
                 let address = (u64::from(address) % blocksize) as usize;
 
-                let leaf_fs_block = self.root.map_block(buf_reader, super_block, leaf_dblock)?;
+                let leaf_fs_block = self.map_block(buf_reader, leaf_dblock)?;
                 buf_reader
                     .seek(SeekFrom::Start(leaf_fs_block * blocksize))
                     .unwrap();
@@ -151,7 +160,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
             let doffset = offset - dir_block_offset;
 
             let lblock = (offset / blocksize) & !((1u64 << sb.sb_dirblklog) - 1);
-            let fsblock = self.root.map_block(buf_reader, sb, lblock)?;
+            let fsblock = self.map_block(buf_reader, lblock)?;
 
             let mut cache_guard = self.block_cache.borrow_mut();
             if cache_guard.is_none() || cache_guard.as_ref().unwrap().0 != fsblock

@@ -25,12 +25,15 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use std::{
-    cmp::min,
-    io::{BufRead, Seek, SeekFrom},
-};
+use std::io::{BufRead, Seek};
 
-use super::{btree::{Btree, BtreeRoot}, definitions::XfsFsize, file::File, sb::Sb};
+use bincode::de::read::Reader;
+
+use super::{
+    btree::{Btree, BtreeRoot},
+    definitions::{XfsFileoff, XfsFsize, XfsFsblock},
+    file::File,
+};
 
 #[derive(Debug)]
 pub struct FileBtree {
@@ -39,39 +42,18 @@ pub struct FileBtree {
     pub block_size: u32,
 }
 
-impl<R: bincode::de::read::Reader + BufRead + Seek> File<R> for FileBtree {
-    fn read(&mut self, buf_reader: &mut R, super_block: &Sb, offset: i64, size: u32) -> Vec<u8> {
-        let mut data = Vec::<u8>::with_capacity(size as usize);
+impl<R: Reader + BufRead + Seek> File<R> for FileBtree {
+    fn block_size(&self) -> u32 {
+        self.block_size
+    }
 
-        let mut remaining_size = min(size as i64, self.size - offset);
+    fn get_extent(&self, buf_reader: &mut R, block: XfsFileoff) -> (Option<XfsFsblock>, u64) {
+        let (blk, len) = self.btree.map_block(buf_reader.by_ref(), block).unwrap();
+        let len = len.unwrap_or((self.size as u64).div_ceil(self.block_size.into()));
+        (blk, len)
+    }
 
-        if remaining_size < 0 {
-            panic!("Offset is too large!");
-        }
-
-        let mut logical_block = offset / i64::from(self.block_size);
-        let mut block_offset = offset % i64::from(self.block_size);
-
-        while remaining_size > 0 {
-            let blk = self
-                .btree
-                .map_block(buf_reader.by_ref(), super_block, logical_block as u64).unwrap();
-            buf_reader
-                .seek(SeekFrom::Start(blk * u64::from(self.block_size)))
-                .unwrap();
-            buf_reader.seek(SeekFrom::Current(block_offset)).unwrap();
-
-            let size_to_read = min(remaining_size, (self.block_size as i64) - block_offset);
-
-            let mut buf = vec![0u8; size_to_read as usize];
-            buf_reader.read_exact(&mut buf).unwrap();
-            data.extend_from_slice(&buf);
-
-            remaining_size -= size_to_read;
-            logical_block += 1;
-            block_offset = 0;
-        }
-
-        data
+    fn size(&self) -> XfsFsize {
+        self.size
     }
 }

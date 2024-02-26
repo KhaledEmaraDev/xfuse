@@ -214,7 +214,7 @@ impl Filesystem for Volume {
         let mut file = dinode.get_file(buf_reader.by_ref(), &self.sb);
 
         reply.data(
-            file.read(buf_reader.by_ref(), &self.sb, offset, size)
+            file.read(buf_reader.by_ref(), offset, size)
                 .as_slice(),
         );
     }

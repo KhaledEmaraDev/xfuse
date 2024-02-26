@@ -122,6 +122,15 @@ mkfs_4096() {
 	fill_file ${MNTDIR}/files/btree2.4.txt 4096 2048
 	fill_file ${MNTDIR}/files/btree3.txt 4096 4096
 
+	# Now create some sparse files
+	truncate -s 1T ${MNTDIR}/files/sparse.fully.txt
+	fill_file ${MNTDIR}/files/sparse.extents.txt 4096 4
+	fallocate -p -o 0 -l 4096 ${MNTDIR}/files/sparse.extents.txt
+	fill_file ${MNTDIR}/files/sparse.btree.txt 4096 16
+	fallocate -p -o 0 -l 4096 ${MNTDIR}/files/sparse.btree.txt
+	fill_file ${MNTDIR}/files/hole_at_end.txt 4096 4
+	truncate -s 20480 ${MNTDIR}/files/hole_at_end.txt 
+
 	umount ${MNTDIR}
 	rmdir $MNTDIR
 	zstd -f resources/xfs4096.img
