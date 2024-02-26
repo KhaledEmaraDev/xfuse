@@ -52,7 +52,7 @@ fill_file() {
 }
 
 mkfs_4096() {
-	truncate -s 64m resources/xfs4096.img
+	truncate -s 96m resources/xfs4096.img
 	# Create a disk image with block size 4096 (the default) and dir size 8192.
 	# Accessing certain code paths requires the directory size to be larger than
 	# the block size.
@@ -139,7 +139,7 @@ mkfs_4096() {
 mkfs_512() {
 	# Create a 2nd image with smaller block size and directory size, to
 	# test larger files and directories without using so much disk space.
-	truncate -s 512m resources/xfs1024.img
+	truncate -s 600m resources/xfs1024.img
 	# 1024 is the smallest allowed blocksize for a V5 file system, and 4k
 	# is the smallest allowed directory size.
 	mkfs.xfs --unsupported -b size=1024 -n size=4096 -f resources/xfs1024.img

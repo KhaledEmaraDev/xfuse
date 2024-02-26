@@ -106,10 +106,10 @@ pub trait Btree {
         // BtreeLeaf::get_extent will calculate the hole's size.
         let idx = pp.saturating_sub(1);
 
+        let offset = super_block.fsb_to_offset(self.ptrs()[idx]);
         buf_reader
-            .seek(SeekFrom::Start(
-                self.ptrs()[idx] * u64::from(super_block.sb_blocksize),
-            )).map_err(|e| e.raw_os_error().unwrap())?;
+            .seek(SeekFrom::Start(offset))
+            .map_err(|e| e.raw_os_error().unwrap())?;
 
         if self.level() > 1 {
             let bti: BtreeIntermediate = decode_from(buf_reader.by_ref()).map_err(|_| libc::EIO)?;

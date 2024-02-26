@@ -33,23 +33,20 @@ use super::{
     btree::{Btree, BtreeRoot},
     definitions::{XfsFileoff, XfsFsize, XfsFsblock},
     file::File,
+    volume::SUPERBLOCK
 };
 
 #[derive(Debug)]
 pub struct FileBtree {
     pub btree: BtreeRoot,
     pub size: XfsFsize,
-    pub block_size: u32,
 }
 
 impl<R: Reader + BufRead + Seek> File<R> for FileBtree {
-    fn block_size(&self) -> u32 {
-        self.block_size
-    }
-
     fn get_extent(&self, buf_reader: &mut R, block: XfsFileoff) -> (Option<XfsFsblock>, u64) {
+        let sb = SUPERBLOCK.get().unwrap();
         let (blk, len) = self.btree.map_block(buf_reader.by_ref(), block).unwrap();
-        let len = len.unwrap_or((self.size as u64).div_ceil(self.block_size.into()));
+        let len = len.unwrap_or((self.size as u64).div_ceil(sb.sb_blocksize.into()));
         (blk, len)
     }
 

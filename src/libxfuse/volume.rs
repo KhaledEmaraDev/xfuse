@@ -211,7 +211,7 @@ impl Filesystem for Volume {
         let dinode = &self.open_files[fh as usize];
         let mut buf_reader = BufReader::new(&self.device);
 
-        let mut file = dinode.get_file(buf_reader.by_ref(), &self.sb);
+        let mut file = dinode.get_file(buf_reader.by_ref());
 
         reply.data(
             file.read(buf_reader.by_ref(), offset, size)

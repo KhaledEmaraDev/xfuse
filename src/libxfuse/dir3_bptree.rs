@@ -88,7 +88,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
         let fsblock = self.map_block(buf_reader, idx)?;
 
         let mut raw = vec![0u8; dblksize as usize];
-        buf_reader.seek(SeekFrom::Start(fsblock * blocksize)).unwrap();
+        buf_reader.seek(SeekFrom::Start(super_block.fsb_to_offset(fsblock))).unwrap();
         buf_reader.read_exact(&mut raw).unwrap();
         let (node, _) = decode::<XfsDa3Intnode>(&raw[..]).map_err(|_| libc::EIO)?;
         assert_eq!(node.hdr.info.magic, XFS_DA3_NODE_MAGIC);
@@ -97,7 +97,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
             self.map_block(br, block.into()).unwrap()
         })?;
 
-        buf_reader.seek(SeekFrom::Start(blk * blocksize)).unwrap();
+        buf_reader.seek(SeekFrom::Start(super_block.fsb_to_offset(blk))).unwrap();
         'outer: loop {
             // We want to save the BTreeLeaf node's forw pointer here
             let leaf: Dir2LeafNDisk = decode_from(buf_reader.by_ref()).unwrap();
@@ -111,7 +111,8 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
                         // entries were located in different leaf blocks.
                         let forw = leaf.hdr.info.forw.into();
                         let next_fsblock = self.map_block(buf_reader, forw)?;
-                        buf_reader.seek(SeekFrom::Start(next_fsblock * blocksize)).unwrap();
+                        buf_reader.seek(SeekFrom::Start(super_block.fsb_to_offset(next_fsblock)))
+                            .unwrap();
                         continue 'outer;
                     },
                     Err(e) => return Err(e)
@@ -121,7 +122,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
 
                 let leaf_fs_block = self.map_block(buf_reader, leaf_dblock)?;
                 buf_reader
-                    .seek(SeekFrom::Start(leaf_fs_block * blocksize))
+                    .seek(SeekFrom::Start(super_block.fsb_to_offset(leaf_fs_block)))
                     .unwrap();
                 let mut leafraw = vec![0u8; dblksize as usize];
                 buf_reader.read_exact(&mut leafraw).unwrap();
@@ -167,7 +168,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Btree {
             {
                 let mut raw = vec![0u8; dblksize as usize];
                 buf_reader
-                    .seek(SeekFrom::Start(fsblock * blocksize))
+                    .seek(SeekFrom::Start(sb.fsb_to_offset(fsblock)))
                     .unwrap();
                 buf_reader.read_exact(&mut raw).unwrap();
                 *cache_guard = Some((fsblock, raw));

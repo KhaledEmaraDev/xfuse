@@ -131,6 +131,8 @@ pub struct Sb {
 }
 
 impl Sb {
+    const BBSHIFT: u8 = 9;
+
     pub fn from<T: BufRead + Seek>(buf_reader: &mut T) -> Sb {
         let sb_magicnum = buf_reader.read_u32::<BigEndian>().unwrap();
         if sb_magicnum != XFS_SB_MAGIC {
@@ -277,5 +279,19 @@ impl Sb {
     #[inline]
     pub fn get_dir3_leaf_offset(&self) -> u64 {
         (32 * 1024 * 1024 * 1024) / (self.sb_blocksize as u64)
+    }
+
+    /// Given a file system block number, calculate its disk address in units of 512B blocks
+    fn fsb_to_daddr(&self, fsbno: XfsFsblock) -> u64 {
+
+        let blkbb_log = self.sb_blocklog - Self::BBSHIFT;
+        let agno = fsbno >> self.sb_agblklog;
+        let agbno = fsbno & ((1 << self.sb_agblklog) - 1);
+        (agno * u64::from(self.sb_agblocks) + agbno) << blkbb_log
+    }
+
+    /// Given a file system block number, calculate its disk byte offset
+    pub fn fsb_to_offset(&self, fsbno: XfsFsblock) -> u64 {
+        self.fsb_to_daddr(fsbno) << Self::BBSHIFT
     }
 }

@@ -107,7 +107,7 @@ impl Dir2Block {
         superblock: &Sb,
         start_block: u64,
     ) -> Dir2Block {
-        let offset = start_block * (superblock.sb_blocksize as u64);
+        let offset = superblock.fsb_to_offset(start_block);
         let dir_blk_size = superblock.sb_blocksize * (1 << superblock.sb_dirblklog);
 
         let dir_disk = Dir2BlockDisk::from(buf_reader.by_ref(), offset, dir_blk_size);

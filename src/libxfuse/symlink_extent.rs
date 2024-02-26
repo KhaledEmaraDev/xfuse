@@ -85,10 +85,7 @@ impl SymlinkExtents {
         let mut data = Vec::<u8>::with_capacity(1024);
 
         for bmbt_rec in bmx.iter() {
-            buf_reader
-                .seek(SeekFrom::Start(
-                    bmbt_rec.br_startblock * (superblock.sb_blocksize as u64),
-                ))
+            buf_reader.seek(SeekFrom::Start(superblock.fsb_to_offset(bmbt_rec.br_startblock)))
                 .unwrap();
 
             let hdr = DsymlinkHdr::from(buf_reader);

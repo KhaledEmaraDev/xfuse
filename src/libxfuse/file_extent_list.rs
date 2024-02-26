@@ -33,29 +33,26 @@ use super::{
     bmbt_rec::BmbtRec,
     definitions::{XfsFileoff, XfsFsblock, XfsFsize},
     file::File,
+    volume::SUPERBLOCK
 };
 
 #[derive(Debug)]
 pub struct FileExtentList {
     pub bmx: Vec<BmbtRec>,
     pub size: XfsFsize,
-    pub block_size: u32,
 }
 
 impl<R: BufRead + Reader + Seek> File<R> for FileExtentList {
-    fn block_size(&self) -> u32 {
-        self.block_size
-    }
-
     /// Return the extent, if any, that contains the given data block within the file.
     /// Return its starting position as an FSblock, and its length in file system block units
     fn get_extent(&self, _buf_reader: &mut R, block: XfsFileoff) -> (Option<XfsFsblock>, u64) {
+        let sb = SUPERBLOCK.get().unwrap();
         match self.bmx.partition_point(|entry| entry.br_startoff <= block) {
             0 => {
                 // A hole at the beginning of the file
                 let hole_len = self.bmx.first()
                     .map(|b| b.br_startoff)
-                    .unwrap_or((self.size as u64).div_ceil(self.block_size.into()));
+                    .unwrap_or((self.size as u64).div_ceil(sb.sb_blocksize.into()));
                 (None, hole_len - block)
             },
             i => {
@@ -67,7 +64,7 @@ impl<R: BufRead + Reader + Seek> File<R> for FileExtentList {
                     // It's a hole
                     let next_ex_start = self.bmx.get(i)
                         .map(|e| e.br_startoff)
-                        .unwrap_or((self.size as u64).div_ceil(self.block_size.into()));
+                        .unwrap_or((self.size as u64).div_ceil(sb.sb_blocksize.into()));
                     let hole_len = next_ex_start - entry.br_startoff;
                     (None, hole_len - skip)
                 }

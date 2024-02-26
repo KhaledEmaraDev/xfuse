@@ -1022,7 +1022,7 @@ mod stat {
         // greater than mtime.
         assert!(stat.st_ctime > stat.st_mtime || 
                 stat.st_ctime_nsec > stat.st_mtime_nsec);
-        assert_eq!(stat.st_ino, 76994);
+        assert_eq!(stat.st_ino, 142530);
         assert_eq!(stat.st_size, 14);
         assert_eq!(stat.st_blksize, 4096);
         assert_eq!(stat.st_blocks, 1);
@@ -1063,8 +1063,8 @@ mod stat {
     /// stat should work on symlinks
     #[named]
     #[rstest]
-    #[case::sf("sf", 32930)]
-    #[case::extent("max", 32931)]
+    #[case::sf("sf", 65698)]
+    #[case::extent("max", 65699)]
     fn symlink(harness4k: Harness, #[case] linkname: &str, #[case] ino: libc::ino_t)
     {
         require_fusefs!();
@@ -1086,7 +1086,7 @@ fn statfs(harness4k: Harness) {
 
     let sfs = nix::sys::statfs::statfs(harness4k.d.path()).unwrap();
 
-    assert_eq!(sfs.blocks(), 15016);
+    assert_eq!(sfs.blocks(), 23208);
     assert_eq!(sfs.block_size(), 4096);
 
     // Linux's calculation for blocks available and free is complicated and the
@@ -1116,7 +1116,7 @@ fn statvfs(harness4k: Harness) {
     // xfuse is always read-only.
     assert!(svfs.flags().contains(nix::sys::statvfs::FsFlags::ST_RDONLY));
     assert_eq!(svfs.fragment_size(), 4096);
-    assert_eq!(svfs.blocks(), 15016);
+    assert_eq!(svfs.blocks(), 23208);
     
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
