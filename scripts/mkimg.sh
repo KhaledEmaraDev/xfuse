@@ -212,6 +212,10 @@ mkfs_512() {
 	mkattrs ${MNTDIR}/xattrs/btree2.3 2048 1
 	mkattrs ${MNTDIR}/xattrs/btree3 8192 1
 
+	# Create a BTree that also has xattrs
+	mkfiles2 ${MNTDIR}/btree2.with-xattrs 1024
+	mkattrs ${MNTDIR}/btree2.with-xattrs 1 0
+
 	umount ${MNTDIR}
 	rmdir $MNTDIR
 	zstd -f resources/xfs1024.img

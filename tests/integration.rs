@@ -82,11 +82,12 @@ fn expected_xattrs_per_file(f: &str) -> impl Iterator<Item=ExpectedXattr> {
 /// How many extended attributes with local storage are present on each file?
 fn local_attrs_per_file(f: &str) -> usize {
     match f {
-        "local" => 4,
-        "extents" => 64,
-        "btree2" => 256,
-        "btree2.3" => 2048,
-        "btree3" => 8192,
+        "xattrs/local" => 4,
+        "xattrs/extents" => 64,
+        "xattrs/btree2" => 256,
+        "xattrs/btree2.3" => 2048,
+        "xattrs/btree3" => 8192,
+        "btree2.with-xattrs" => 1,
         _ => unimplemented!()
     }
 }
@@ -94,11 +95,12 @@ fn local_attrs_per_file(f: &str) -> usize {
 /// How many extended attributes with remote storage are present on each file?
 fn remote_attrs_per_file(f: &str) -> usize {
     match f {
-        "local" => 0,
-        "extents" => 0,
-        "btree2" => 1,
-        "btree2.3" => 1,
-        "btree3" => 1,
+        "xattrs/local" => 0,
+        "xattrs/extents" => 0,
+        "xattrs/btree2" => 1,
+        "xattrs/btree2.3" => 1,
+        "xattrs/btree3" => 1,
+        "btree2.with-xattrs" => 0,
         _ => unimplemented!()
     }
 }
@@ -107,6 +109,7 @@ fn remote_attrs_per_file(f: &str) -> usize {
 // This is a function of the golden image creation.
 fn ents_per_dir_1k(d: &str) -> usize {
     match d {
+        "btree2.with-xattrs" => 1024,
         "btree2.3" => 8192,
         "btree3" => 131072,
         _ => unimplemented!()
@@ -353,6 +356,7 @@ impl Drop for MdHarness {
 
 #[template]
 #[rstest]
+#[case::btree_2_with_xattrs("btree2.with-xattrs")]
 #[case::btree_2_3("btree2.3")]
 #[case::btree_3("btree3")]
 fn all_dir_types_1k(d: &str) {}
@@ -367,11 +371,12 @@ fn all_dir_types_4k(d: &str) {}
 
 #[template]
 #[rstest]
-#[case::local(harness4k, "local")]
-#[case::extents(harness4k, "extents")]
-#[case::btree2(harness1k, "btree2")]
-#[case::btree2_3(harness1k, "btree2.3")]
-#[case::btree3(harness1k, "btree3")]
+#[case::local(harness4k, "xattrs/local")]
+#[case::extents(harness4k, "xattrs/extents")]
+#[case::btree2(harness1k, "xattrs/btree2")]
+#[case::btree2_3(harness1k, "xattrs/btree2.3")]
+#[case::btree3(harness1k, "xattrs/btree3")]
+#[case::btree2_with_xattrs(harness1k, "btree2.with-xattrs")]
 fn all_xattr_fork_types(h: fn() -> Harness, d: &str) {}
 
 #[template]
@@ -419,7 +424,7 @@ mod getextattr {
         require_fusefs!();
 
         let harness = h();
-        let p = harness.d.path().join("xattrs").join(d);
+        let p = harness.d.path().join(d);
 
         for attr in expected_xattrs_per_file(d) {
             let binary_value = xattr::get(&p, attr.name.as_os_str()).unwrap().unwrap();
@@ -503,7 +508,7 @@ fn getextattr_size(#[case] h: fn() -> Harness, #[case] d: &str) {
 
     let harness = h();
     let ns = libc::EXTATTR_NAMESPACE_USER;
-    let p = harness.d.path().join("xattrs").join(d);
+    let p = harness.d.path().join(d);
     let expected_len = "value.000000".len();
     let cpath = CString::new(p.as_os_str().as_bytes()).unwrap();
 
@@ -638,10 +643,11 @@ mod lsextattr {
         require_fusefs!();
 
         let harness = h();
-        let p = harness.d.path().join("xattrs").join(d);
+        let p = harness.d.path().join(d);
 
         let mut all_attrnames = xattr::list(p).unwrap().collect::<Vec<_>>();
         all_attrnames.sort_unstable();
+        assert_eq!(expected_xattrs_per_file(d).count(), all_attrnames.len());
         for (expected, actual) in std::iter::zip(expected_xattrs_per_file(d), all_attrnames) {
             assert_eq!(expected.name, actual);
         }
@@ -711,7 +717,7 @@ mod lsextattr {
 
         let harness = h();
         let ns = libc::EXTATTR_NAMESPACE_USER;
-        let p = harness.d.path().join("xattrs").join(d);
+        let p = harness.d.path().join(d);
         let expected_len: usize = expected_xattrs_per_file(d).map(|attr| {
             attr.name.len() /* -5 because "user." is not included*/ - 5 /* +1 for NUL */ + 1
         }).sum();
@@ -958,6 +964,7 @@ fn readdir_4k(harness4k: Harness, #[case] d: &str) {
 #[case::block(harness4k, "block")]
 #[case::leaf(harness4k, "leaf")]
 #[case::node(harness4k, "node")]
+#[case::btree2_with_xattrs(harness1k, "btree2.with-xattrs")]
 #[case::btree2_3(harness1k, "btree2.3")]
 #[case::btree3(harness1k, "btree3")]
 fn readdir_dots(#[case] h: fn() -> Harness, #[case] d: &str) {
