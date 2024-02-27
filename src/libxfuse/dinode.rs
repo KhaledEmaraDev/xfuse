@@ -27,7 +27,6 @@
  */
 use std::ffi::CString;
 use std::io::{BufRead, Seek, SeekFrom};
-use std::mem;
 
 use super::attr::Attr;
 use super::attr_bptree::AttrBtree;
@@ -195,10 +194,16 @@ impl Dinode {
                     // divided by half.  Half for keys and half for pointers,
                     // even if only one of each are allocated.  The remaining
                     // space is padded with zeros.
-                    assert_eq!(di_core.di_forkoff, 0, "TODO");
-                    let maxrecs = (superblock.sb_inodesize as usize - (DinodeCore::SIZE + BmdrBlock::SIZE)) /
-                        (BmbtKey::SIZE + mem::size_of::<XfsBmbtPtr>());
-                    let gap = (maxrecs - bmbt.bb_numrecs as usize) as i64 * BmbtKey::SIZE as i64;
+                    let space = if di_core.di_forkoff == 0 {
+                        (usize::from(superblock.sb_inodesize) - LITERAL_AREA_OFFSET) / 2
+                    } else {
+                        usize::from(di_core.di_forkoff) * 8 / 2
+                    };
+                    let gap = space -
+                        BmdrBlock::SIZE -
+                        bmbt.bb_numrecs as usize * BmbtKey::SIZE -
+                        /* XXX Why does it need this extra 4? */ 4;
+
                     decoder.reader().consume(gap as usize);
                     let mut pointers = Vec::<XfsBmbtPtr>::new();
                     for _i in 0..bmbt.bb_numrecs {

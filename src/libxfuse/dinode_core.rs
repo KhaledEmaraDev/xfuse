@@ -130,8 +130,6 @@ pub struct DinodeCore {
 }
 
 impl DinodeCore {
-    pub const SIZE: usize = 0xb0;   // For inode version 3
-
     pub fn sanity(&self) {
         assert_eq!(self.di_magic, XFS_DINODE_MAGIC,
                    "Agi magic number is invalid");
