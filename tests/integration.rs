@@ -907,87 +907,91 @@ mod read {
     // device, not a file
 }
 
-/// List a directory's contents with readdir
-//
-// The 1k blocksize formatted golden image uses a different naming convention than the 4k image
-#[named]
-#[apply(all_dir_types_1k)]
-fn readdir_1k(harness1k: Harness, #[case] d: &str) {
-    require_fusefs!();
+mod readdir {
+    use super::*;
 
-    let dpath = harness1k.d.path().join(d);
-    let ents = std::fs::read_dir(dpath)
-        .unwrap();
-    let mut count = 0;
-    for (i, rent) in ents.enumerate() {
-        let ent = rent.unwrap();
-        let expected_name = format!("frame__________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________{i:08}");
-        assert_eq!(ent.file_name(), OsStr::new(&expected_name));
-        assert!(ent.file_type().unwrap().is_file());
-        let md = ent.metadata().unwrap();
-        assert_eq!(ent.ino(), md.ino(), "inode mismatch for {}: readdir returned {} but lookup returned {}", expected_name, ent.ino(), md.ino());
-        // The other metadata fields are checked in a separate test case.
-        count += 1;
+    /// List a directory's contents with readdir
+    //
+    // The 1k blocksize formatted golden image uses a different naming convention than the 4k image
+    #[named]
+    #[apply(all_dir_types_1k)]
+    fn onek(harness1k: Harness, #[case] d: &str) {
+        require_fusefs!();
+
+        let dpath = harness1k.d.path().join(d);
+        let ents = std::fs::read_dir(dpath)
+            .unwrap();
+        let mut count = 0;
+        for (i, rent) in ents.enumerate() {
+            let ent = rent.unwrap();
+            let expected_name = format!("frame__________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________{i:08}");
+            assert_eq!(ent.file_name(), OsStr::new(&expected_name));
+            assert!(ent.file_type().unwrap().is_file());
+            let md = ent.metadata().unwrap();
+            assert_eq!(ent.ino(), md.ino(), "inode mismatch for {}: readdir returned {} but lookup returned {}", expected_name, ent.ino(), md.ino());
+            // The other metadata fields are checked in a separate test case.
+            count += 1;
+        }
+        assert_eq!(count, ents_per_dir_1k(d));
     }
-    assert_eq!(count, ents_per_dir_1k(d));
-}
 
-/// List a directory's contents with readdir
-#[named]
-#[apply(all_dir_types_4k)]
-fn readdir_4k(harness4k: Harness, #[case] d: &str) {
-    require_fusefs!();
+    /// List a directory's contents with readdir
+    #[named]
+    #[apply(all_dir_types_4k)]
+    fn fourk(harness4k: Harness, #[case] d: &str) {
+        require_fusefs!();
 
-    let dpath = harness4k.d.path().join(d);
-    let ents = std::fs::read_dir(dpath)
-        .unwrap();
-    let mut count = 0;
-    for (i, rent) in ents.enumerate() {
-        let ent = rent.unwrap();
-        let expected_name = format!("frame{:06}", i);
-        assert_eq!(ent.file_name(), OsStr::new(&expected_name));
-        assert!(ent.file_type().unwrap().is_file());
-        let md = ent.metadata().unwrap();
-        assert_eq!(ent.ino(), md.ino());
-        // The other metadata fields are checked in a separate test case.
-        count += 1;
+        let dpath = harness4k.d.path().join(d);
+        let ents = std::fs::read_dir(dpath)
+            .unwrap();
+        let mut count = 0;
+        for (i, rent) in ents.enumerate() {
+            let ent = rent.unwrap();
+            let expected_name = format!("frame{:06}", i);
+            assert_eq!(ent.file_name(), OsStr::new(&expected_name));
+            assert!(ent.file_type().unwrap().is_file());
+            let md = ent.metadata().unwrap();
+            assert_eq!(ent.ino(), md.ino());
+            // The other metadata fields are checked in a separate test case.
+            count += 1;
+        }
+        assert_eq!(count, ents_per_dir_4k(d));
     }
-    assert_eq!(count, ents_per_dir_4k(d));
-}
 
-/// List a directory's hidden contents with readdir
-// Use Nix::dir::Dir instead of std::fs::read_dir, because the latter
-// unconditionally hides the hidden entries.
-#[named]
-#[rstest]
-#[case::sf(harness4k, "sf")]
-#[case::block(harness4k, "block")]
-#[case::leaf(harness4k, "leaf")]
-#[case::node(harness4k, "node")]
-#[case::btree2_with_xattrs(harness1k, "btree2.with-xattrs")]
-#[case::btree2_3(harness1k, "btree2.3")]
-#[case::btree3(harness1k, "btree3")]
-fn readdir_dots(#[case] h: fn() -> Harness, #[case] d: &str) {
-    use nix::{dir::Dir, fcntl::OFlag, sys::stat::Mode};
-    require_fusefs!();
+    /// List a directory's hidden contents with readdir
+    // Use Nix::dir::Dir instead of std::fs::read_dir, because the latter
+    // unconditionally hides the hidden entries.
+    #[named]
+    #[rstest]
+    #[case::sf(harness4k, "sf")]
+    #[case::block(harness4k, "block")]
+    #[case::leaf(harness4k, "leaf")]
+    #[case::node(harness4k, "node")]
+    #[case::btree2_with_xattrs(harness1k, "btree2.with-xattrs")]
+    #[case::btree2_3(harness1k, "btree2.3")]
+    #[case::btree3(harness1k, "btree3")]
+    fn dots(#[case] h: fn() -> Harness, #[case] d: &str) {
+        use nix::{dir::Dir, fcntl::OFlag, sys::stat::Mode};
+        require_fusefs!();
 
-    let harness = h();
-    let root_md = fs::metadata(harness.d.path()).unwrap();
-    let dir_md = fs::metadata(harness.d.path().join(d)).unwrap();
+        let harness = h();
+        let root_md = fs::metadata(harness.d.path()).unwrap();
+        let dir_md = fs::metadata(harness.d.path().join(d)).unwrap();
 
-    let dpath = harness.d.path().join(d);
-    let mut dir = Dir::open(&dpath, OFlag::O_RDONLY, Mode::S_IRUSR).unwrap();
-    let mut ents = dir.iter();
+        let dpath = harness.d.path().join(d);
+        let mut dir = Dir::open(&dpath, OFlag::O_RDONLY, Mode::S_IRUSR).unwrap();
+        let mut ents = dir.iter();
 
-    // The first entry should be "."
-    let dot = ents.next().unwrap().unwrap();
-    assert_eq!(".", dot.file_name().to_str().unwrap());
-    assert_eq!(dir_md.ino(), dot.ino());
+        // The first entry should be "."
+        let dot = ents.next().unwrap().unwrap();
+        assert_eq!(".", dot.file_name().to_str().unwrap());
+        assert_eq!(dir_md.ino(), dot.ino());
 
-    // Next should be ".."
-    let dotdot = ents.next().unwrap().unwrap();
-    assert_eq!("..", dotdot.file_name().to_str().unwrap());
-    assert_eq!(root_md.ino(), dotdot.ino());
+        // Next should be ".."
+        let dotdot = ents.next().unwrap().unwrap();
+        assert_eq!("..", dotdot.file_name().to_str().unwrap());
+        assert_eq!(root_md.ino(), dotdot.ino());
+    }
 }
 
 #[named]
