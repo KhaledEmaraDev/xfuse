@@ -109,7 +109,7 @@ pub struct Dir2DataEntry {
 impl Dir2DataEntry {
     pub fn get_length(raw: &[u8]) -> i64 {
         let namelen: u8 = decode(&raw[8..]).unwrap().0;
-        ((((namelen as i64) + 8 + 1 + 2) + 8 - 1) / 8) * 8
+        ((namelen as i64 + 19) / 8) * 8
     }
 }
 
@@ -121,9 +121,9 @@ impl Decode for Dir2DataEntry {
         decoder.reader().read(&mut namebytes[..])?;
         let name = OsString::from_vec(namebytes);
         let ftype = Decode::decode(decoder)?;
-        // Pad up to 2 less than a multiple of 8 bytes
-        // current offset is 8 + 1 + namelen + 1
-        let pad: usize = (4 - namelen as i8).rem_euclid(8).try_into().unwrap();
+        // Pad up to 1 less than a multiple of 8 bytes
+        // current offset is 9 + 1 + namelen + 1
+        let pad: usize = (4 - namelen as i16).rem_euclid(8).try_into().unwrap();
         decoder.reader().consume(pad);
         let tag = Decode::decode(decoder)?;
         Ok(Dir2DataEntry {
@@ -173,7 +173,6 @@ impl Decode for Dir2DataUnused {
 #[derive(Debug)]
 pub struct Dir2Data {
     pub hdr: Dir3DataHdr,
-
     pub offset: u64,
 }
 
@@ -308,10 +307,15 @@ impl Dir2LeafDisk {
         }
     }
 
-    pub fn get_address(&self, hash: XfsDahash) -> Result<XfsDir2Dataptr, c_int> {
-        match self.ents.binary_search_by_key(&hash, |ent| ent.hashval) {
-            Ok(i) => Ok(self.ents[i].address),
-            Err(_) => Err(ENOENT)
+    pub fn get_address(&self, hash: XfsDahash, collision_resolver: usize)
+        -> Result<XfsDir2Dataptr, c_int>
+    {
+        let i = self.ents.partition_point(|ent| ent.hashval < hash);
+        let ent = self.ents.get(i + collision_resolver).ok_or(ENOENT)?;
+        if ent.hashval == hash {
+            Ok(ent.address)
+        } else {
+            Err(ENOENT)
         }
     }
 }
