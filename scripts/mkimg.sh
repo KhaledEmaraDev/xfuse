@@ -19,6 +19,25 @@ mkfiles2() {
 	seq -f "%08.0f" 0 $(( COUNT - 1 )) | xargs -I % touch "$DIR/frame__________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________%"
 }
 
+# Make a directory filled with 40 files whose names include hash collisions
+mk_colliding_files() {
+	DIR=$1
+
+	mkdir $DIR
+	for f in 210001 2a0004 310009 81000a \
+		210004 2a0001 3a0009 81000d \
+		210005 2a0000 3a0008 81000e\
+		210011 2a0014 310019 81001a\
+		210014 2a0011 3a0019 81001d\
+		210015 2a0010 3a0018 81001e\
+		210021 2a0024 310029 81002a\
+		210024 2a0021 3a0029 81002d\
+		210025 2a0020 3a0028 81002e\
+		210031 2a0034 310039 81003a; do
+		touch $DIR/$f
+	done
+}
+
 mkattrs() {
 	FILE=$1
 	COUNT=$2
@@ -83,6 +102,12 @@ mkfs_4096() {
 	mkfiles ${MNTDIR}/block 32
 	mkfiles ${MNTDIR}/leaf 384
 	mkfiles ${MNTDIR}/node 1024
+
+	# Make a block directory with hash collisions.
+	# shortform directories cannot have hash collisions (because they don't use hashes).
+	# the other directory types are large enough that hash collisions
+	# happen organically in "mkfiles"
+	mk_colliding_files ${MNTDIR}/block-with-hash-collisions
 
 	mkdir ${MNTDIR}/xattrs
 	mkattrs ${MNTDIR}/xattrs/local 4 0

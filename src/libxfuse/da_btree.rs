@@ -307,3 +307,34 @@ impl Decode for XfsDa3Intnode {
         })
     }
 }
+
+/// Not really a "test" per se.  Instead it finds hash collisions to use in other tests.
+#[test]
+#[ignore = "Not a real test"]
+fn hashname_collisions() {
+    use std::{
+        collections::HashMap,
+        ffi::OsString
+    };
+
+    let way = 4;
+    let want = 10;
+    let mut allnames = HashMap::new();
+    let mut collisions = 0;
+    for i in 0u64.. {
+        let name = OsString::from(format!("{:x}", i));
+        let hash = hashname(&name);
+        if let Some(mut v) = allnames.insert(hash, vec![name.clone()]) {
+            v.push(name);
+            if v.len() >= way {
+                println!("{}-way hash collision found: {}", way,
+                         v.join(OsStr::new(" ")).to_string_lossy());
+                collisions += 1;
+            }
+            allnames.insert(hash, v);
+        }
+        if collisions >= want {
+            break;
+        }
+    }
+}
