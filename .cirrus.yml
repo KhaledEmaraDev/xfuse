@@ -18,20 +18,19 @@ task:
     - pkg install -y fusefs-libs pkgconf
     - kldload fusefs
     - fetch https://sh.rustup.rs -o rustup.sh
-    - sh rustup.sh -y
-    - $HOME/.cargo/bin/rustup toolchain install $VERSION
+    - sh rustup.sh -y --profile=minimal --default-toolchain $VERSION
   cargo_cache:
     folder: $HOME/.cargo/registry
     fingerprint_script: cat Cargo.lock || echo ""
   build_script:
     - . $HOME/.cargo/env
-    - cargo +$VERSION build
+    - cargo build
   test_script:
     - . $HOME/.cargo/env
-    - cargo +$VERSION test
+    - cargo test
   clippy_script:
     - . $HOME/.cargo/env
-    - if [ "$VERSION" = "nightly" ]; then cargo +$VERSION clippy --all-targets -- -D warnings; else true; fi
+    - if [ "$VERSION" = "nightly" ]; then rustup component add clippy && cargo clippy --all-targets -- -D warnings; else true; fi
   audit_script:
     - . $HOME/.cargo/env
     - if [ "$VERSION" = "nightly" ]; then
