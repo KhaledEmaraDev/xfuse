@@ -25,7 +25,6 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, Seek, SeekFrom};
 use std::mem;
@@ -97,7 +96,7 @@ impl Dir2BlockDisk {
 #[derive(Debug)]
 pub struct Dir2Block {
     pub offset: u64,
-    pub hashes: HashMap<XfsDahash, XfsDir2Dataptr>,
+    ents: Vec<Dir2LeafEntry>,
     raw: Box<[u8]>,
 }
 
@@ -117,15 +116,23 @@ impl Dir2Block {
         let mut raw = dir_disk.raw;
         raw.truncate(data_len as usize);
 
-        let mut hashes = HashMap::new();
-        for leaf_entry in dir_disk.leaf {
-            hashes.insert(leaf_entry.hashval, leaf_entry.address);
-        }
-
         Dir2Block {
             offset,
-            hashes,
-            raw: raw.into()
+            raw: raw.into(),
+            ents: dir_disk.leaf
+        }
+    }
+
+    // TODO: figure out how to share this code with Dir2LeafDisk::get_address
+    fn get_address(&self, hash: XfsDahash, collision_resolver: usize)
+        -> Result<XfsDir2Dataptr, c_int>
+    {
+        let i = self.ents.partition_point(|ent| ent.hashval < hash);
+        let ent = self.ents.get(i + collision_resolver).ok_or(ENOENT)?;
+        if ent.hashval == hash {
+            Ok(ent.address)
+        } else {
+            Err(ENOENT)
         }
     }
 }
@@ -138,19 +145,18 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Block {
         name: &OsStr,
     ) -> Result<(FileAttr, u64), c_int> {
         let hash = hashname(name);
-        if let Some(address) = self.hashes.get(&hash) {
-            let address = (*address as usize) * 8;
-
+        for collision_resolver in 0.. {
+            let address = self.get_address(hash, collision_resolver)? as usize * 8;
             let entry: Dir2DataEntry = decode(&self.raw[address..]).unwrap().0;
-
+            if entry.name != name {
+                // Hash collision
+                continue;
+            }
             let dinode = Dinode::from(buf_reader.by_ref(), super_block, entry.inumber);
-
             let attr = dinode.di_core.stat(entry.inumber)?;
-
-            Ok((attr, dinode.di_core.di_gen.into()))
-        } else {
-            Err(ENOENT)
+            return Ok((attr, dinode.di_core.di_gen.into()));
         }
+        unreachable!()
     }
 
     fn next(

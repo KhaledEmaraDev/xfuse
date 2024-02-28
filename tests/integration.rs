@@ -574,6 +574,32 @@ mod lookup {
         }
     }
 
+    /// A block directory with hash collisions
+    #[rstest]
+    #[named]
+    fn hash_collisions_block(harness4k: Harness) {
+        require_fusefs!();
+
+        let filenames = [".", "..",
+                "210001", "2a0004", "310009", "81000a",
+		"210004", "2a0001", "3a0009", "81000d",
+		"210005", "2a0000", "3a0008", "81000e",
+		"210011", "2a0014", "310019", "81001a",
+		"210014", "2a0011", "3a0019", "81001d",
+		"210015", "2a0010", "3a0018", "81001e",
+		"210021", "2a0024", "310029", "81002a",
+		"210024", "2a0021", "3a0029", "81002d",
+		"210025", "2a0020", "3a0028", "81002e",
+		"210031", "2a0034", "310039", "81003a",
+        ];
+        let amode = AccessFlags::F_OK;
+        for filename in &filenames {
+            let p = harness4k.d.path().join("block-with-hash-collisions").join(filename);
+            access(p.as_path(), amode)
+                .unwrap_or_else(|_| panic!("Lookup failed: {}", p.display()));
+        }
+    }
+
     /// Lookup all entries in a directory
     //
     // In the 1k blocksize golden image, they use a different naming convention.
@@ -949,6 +975,28 @@ mod readdir {
         assert_eq!(count, ents_per_dir_4k(d));
     }
 
+    /// A block directory with hash collisions
+    #[rstest]
+    #[named]
+    fn hash_collisions_block(harness4k: Harness) {
+        require_fusefs!();
+
+        let dpath = harness4k.d.path().join("block-with-hash-collisions");
+        let ents = std::fs::read_dir(dpath)
+            .unwrap();
+        let mut count = 0;
+        for rent in ents {
+            let ent = rent.unwrap();
+            assert!(ent.file_type().unwrap().is_file());
+            let md = ent.metadata().unwrap();
+            assert_eq!(ent.ino(), md.ino(),
+                "inode mismatch for {}: readdir returned {} but lookup returned {}",
+                ent.file_name().to_string_lossy(), ent.ino(), md.ino());
+            count += 1;
+        }
+        assert_eq!(count, 40);
+    }
+
     /// List a directory's contents with readdir
     //
     // The 1k blocksize formatted golden image uses a different naming convention than the 4k image
@@ -1072,7 +1120,7 @@ mod stat {
         // greater than mtime.
         assert!(stat.st_ctime > stat.st_mtime || 
                 stat.st_ctime_nsec > stat.st_mtime_nsec);
-        assert_eq!(stat.st_ino, 142530);
+        assert_eq!(stat.st_ino, 197890);
         assert_eq!(stat.st_size, 14);
         assert_eq!(stat.st_blksize, 4096);
         assert_eq!(stat.st_blocks, 1);
@@ -1113,8 +1161,8 @@ mod stat {
     /// stat should work on symlinks
     #[named]
     #[rstest]
-    #[case::sf("sf", 65698)]
-    #[case::extent("max", 65699)]
+    #[case::sf("sf", 142530)]
+    #[case::extent("max", 142531)]
     fn symlink(harness4k: Harness, #[case] linkname: &str, #[case] ino: libc::ino_t)
     {
         require_fusefs!();
@@ -1146,7 +1194,7 @@ fn statfs(harness4k: Harness) {
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
     // here.
-    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 1727);
+    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 1768);
 
     // There are legitimate questions about what the correct value for
     // optimal_transfer_size
@@ -1171,7 +1219,7 @@ fn statvfs(harness4k: Harness) {
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
     // here.
-    assert_eq!(svfs.files() - svfs.files_free(), 1727);
+    assert_eq!(svfs.files() - svfs.files_free(), 1768);
     assert_eq!(svfs.files_free(), svfs.files_available());
 
     // Linux's calculation for blocks available and free is complicated and the
