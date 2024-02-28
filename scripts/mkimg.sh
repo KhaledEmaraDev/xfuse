@@ -225,6 +225,10 @@ mkfs_512() {
 	fill_file ${MNTDIR}/files/btree3.txt 1024 2048
 	fill_file ${MNTDIR}/files/btree3.3.txt 1024 8192
 
+	# Create a regular file that also has an xattr
+	fill_file ${MNTDIR}/files/btree2_with_xattrs.txt 1024 64
+	setfattr -n user.foo -v bar ${MNTDIR}/files/btree2_with_xattrs.txt
+
 	# Allocate a file with a BTree extent list for its xattrs.  This is
 	# unreliable; more xattrs don't necessarily result in a BTree extent
 	# list.  After changing this script, double check that it's still a

@@ -145,7 +145,10 @@ impl Dinode {
                     let space = if di_core.di_forkoff == 0 {
                         (usize::from(superblock.sb_inodesize) - LITERAL_AREA_OFFSET) / 2
                     } else {
-                        usize::from(di_core.di_forkoff) * 8 / 2
+                        let space = usize::from(di_core.di_forkoff) * 8 / 2;
+                        // Round up to a multiple of 8
+                        let rem = space % 8;
+                        if rem == 0 { space } else { space + 8 - rem }
                     };
                     let gap = space -
                         BmdrBlock::SIZE -
@@ -197,7 +200,11 @@ impl Dinode {
                     let space = if di_core.di_forkoff == 0 {
                         (usize::from(superblock.sb_inodesize) - LITERAL_AREA_OFFSET) / 2
                     } else {
-                        usize::from(di_core.di_forkoff) * 8 / 2
+                        let space = usize::from(di_core.di_forkoff) * 8 / 2;
+                        // Round up to a multiple of 8.  This is probably necessary, but I've never
+                        // seen a directory like this in practice.
+                        let rem = space % 8;
+                        if rem == 0 { space } else { space + 8 - rem }
                     };
                     let gap = space -
                         BmdrBlock::SIZE -

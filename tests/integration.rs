@@ -806,6 +806,7 @@ mod read {
     #[case::wide_two_height_btree2(harness1k, "btree2.2.txt", 65536)]
     #[case::wide_two_height_btree2(harness1k, "btree3.txt", 2097152)]
     #[case::wide_two_height_btree2(harness1k, "btree3.3.txt", 8388608)]
+    #[case::btree_with_xattr(harness1k, "btree2_with_xattrs.txt", 65536)]
     fn all_files(h: fn() -> Harness, d: &str) {}
 
     /// Attempting to read across eof should return the correct amount of data
