@@ -131,6 +131,12 @@ mkfs_4096() {
 	fill_file ${MNTDIR}/files/hole_at_end.txt 4096 4
 	truncate -s 20480 ${MNTDIR}/files/hole_at_end.txt 
 
+	# Create a directory containing files of every possible name length
+	mkdir ${MNTDIR}/all_name_lengths
+	for i in `seq 1 255`; do
+		touch ${MNTDIR}/all_name_lengths/`printf "%0${i}d" ${i}`
+	done
+
 	umount ${MNTDIR}
 	rmdir $MNTDIR
 	zstd -f resources/xfs4096.img

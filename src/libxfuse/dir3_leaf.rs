@@ -47,7 +47,6 @@ use libc::{c_int, ENOENT};
 pub struct Dir2Leaf {
     pub entries: Vec<Dir2Data>,
     pub leaf: Dir2LeafDisk,
-    pub entry_size: u32,
     /// An cache of the last block and its index read by lookup or readdir.
     block_cache: RefCell<Option<(usize, Vec<u8>)>>
 }
@@ -60,21 +59,22 @@ impl Dir2Leaf {
     ) -> Dir2Leaf {
         let mut entries = Vec::<Dir2Data>::new();
         for record in bmx.iter().take(bmx.len() - 1) {
-            let entry = Dir2Data::from(buf_reader.by_ref(), superblock, record.br_startblock);
-            entries.push(entry);
+            for i in (0..record.br_blockcount).step_by(1 << superblock.sb_dirblklog) {
+                let entry = Dir2Data::from(buf_reader.by_ref(), superblock, record.br_startblock + i);
+                entries.push(entry);
+            }
         }
 
         let leaf_extent = bmx.last().unwrap();
         let offset = superblock.fsb_to_offset(leaf_extent.br_startblock);
-        let entry_size = superblock.sb_blocksize * (1 << superblock.sb_dirblklog);
 
-        let leaf = Dir2LeafDisk::from(buf_reader, offset, entry_size as usize);
+        let leaf_size = leaf_extent.br_blockcount as usize * superblock.sb_blocksize as usize;
+        let leaf = Dir2LeafDisk::from(buf_reader, offset, leaf_size);
         assert_eq!(leaf.hdr.info.magic, XFS_DIR3_LEAF1_MAGIC);
 
         Dir2Leaf {
             entries,
             leaf,
-            entry_size,
             block_cache: RefCell::new(None)
         }
     }
@@ -87,29 +87,41 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Leaf {
         super_block: &Sb,
         name: &OsStr,
     ) -> Result<(FileAttr, u64), c_int> {
+        let dblksize: usize = super_block.sb_blocksize as usize *
+            (1 << super_block.sb_dirblklog) as usize;
         let hash = hashname(name);
+        let mut collision_resolver = 0;
 
-        let address = self.leaf.get_address(hash)? * 8;
-        let idx = (address / self.entry_size) as usize;
-        let address = (address % self.entry_size) as usize;
+        let entry = loop {
+            let address = self.leaf.get_address(hash, collision_resolver)? as usize * 8;
+            let idx = (address / dblksize) as usize;
+            let address = (address % dblksize) as usize;
 
-        if idx >= self.entries.len() {
-            return Err(ENOENT);
-        }
-        let entry: &Dir2Data = &self.entries[idx];
+            if idx >= self.entries.len() {
+                return Err(ENOENT);
+            }
 
-        let mut cache_guard = self.block_cache.borrow_mut();
-        if cache_guard.is_none() || cache_guard.as_ref().unwrap().0 != idx {
-            let mut raw = vec![0u8; self.entry_size as usize];
-            buf_reader
-                .seek(SeekFrom::Start(entry.offset))
-                .unwrap();
-            buf_reader.read_exact(&mut raw).unwrap();
-            *cache_guard = Some((idx, raw));
-        }
-        let raw = &cache_guard.as_ref().unwrap().1;
+            let d2d: &Dir2Data = &self.entries[idx];
 
-        let entry: Dir2DataEntry = decode(&raw[address..]).unwrap().0;
+            let mut cache_guard = self.block_cache.borrow_mut();
+            if cache_guard.is_none() || cache_guard.as_ref().unwrap().0 != idx {
+                let mut raw = vec![0u8; dblksize];
+                buf_reader
+                    .seek(SeekFrom::Start(d2d.offset))
+                    .unwrap();
+                buf_reader.read_exact(&mut raw).unwrap();
+                *cache_guard = Some((idx, raw));
+            }
+            let raw = &cache_guard.as_ref().unwrap().1;
+
+            let entry: Dir2DataEntry = decode(&raw[address..]).unwrap().0;
+            if entry.name == name {
+                break entry;
+            } else {
+                // A hash collision, probably
+                collision_resolver += 1;
+            }
+        };
 
         let dinode = Dinode::from(buf_reader.by_ref(), super_block, entry.inumber);
 
@@ -148,9 +160,10 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Leaf {
     fn next(
         &self,
         buf_reader: &mut R,
-        _super_block: &Sb,
+        super_block: &Sb,
         offset: i64,
     ) -> Result<(XfsIno, i64, FileType, OsString), c_int> {
+        let dblksize = super_block.sb_blocksize as usize * (1 << super_block.sb_dirblklog);
         let offset = offset as u64;
         // In V5 Inodes can contain up to 21 Extents
         let mut idx: usize = (offset >> (64 - 8)) as usize;
@@ -171,7 +184,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Leaf {
 
             let mut cache_guard = self.block_cache.borrow_mut();
             if cache_guard.is_none() || cache_guard.as_ref().unwrap().0 != idx {
-                let mut raw = vec![0u8; self.entry_size as usize];
+                let mut raw = vec![0u8; dblksize];
                 buf_reader
                     .seek(SeekFrom::Start(entry.offset))
                     .unwrap();
@@ -180,8 +193,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Leaf {
             }
             let raw = &cache_guard.as_ref().unwrap().1;
 
-            while offset < raw.len()
-            {
+            while offset < raw.len() {
                 let freetag: u16 = decode(&raw[offset..]).unwrap().0;
 
                 if freetag == 0xffff {
@@ -190,13 +202,9 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Leaf {
                     offset += length;
                 } else if next {
                     let entry: Dir2DataEntry = decode(&raw[offset..]).unwrap().0;
-
                     let kind = get_file_type(FileKind::Type(entry.ftype))?;
-
                     let name = entry.name;
-
                     let tag = ((idx as u64) << (64 - 8)) | (entry.tag as u64);
-
                     return Ok((entry.inumber, tag as i64, kind, name));
                 } else {
                     let length = Dir2DataEntry::get_length(&raw[offset..]);
