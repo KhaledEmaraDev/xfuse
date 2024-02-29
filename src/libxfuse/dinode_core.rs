@@ -137,7 +137,9 @@ impl DinodeCore {
 
     pub fn stat(&self, ino: XfsIno) -> Result<FileAttr, c_int> {
         let kind = get_file_type(FileKind::Mode(self.di_mode))?;
-        assert_eq!(ino, self.di_ino);
+        // Special case for ino 1.  FUSE requires / to have inode 1, but XFS
+        // does not.
+        assert!(ino == 1 || ino == self.di_ino);
         Ok(FileAttr {
                 ino,
                 size: self.di_size as u64,
