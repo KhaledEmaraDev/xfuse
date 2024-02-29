@@ -30,20 +30,19 @@ use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::os::unix::ffi::OsStrExt;
 use std::sync::OnceLock;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::Duration;
 
-use super::S_IFMT;
 use super::agi::Agi;
 use super::definitions::XfsIno;
 use super::dinode::Dinode;
 use super::sb::Sb;
 
 use fuser::{
-    FileAttr, FileType, Filesystem, ReplyAttr, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen,
+    Filesystem, ReplyAttr, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen,
     ReplyStatfs, ReplyXattr, Request, FUSE_ROOT_ID,
     consts::FOPEN_KEEP_CACHE
 };
-use libc::{mode_t, ERANGE, S_IFDIR, S_IFREG};
+use libc::ERANGE;
 
 /// We must store the Superblock in a global variable.  This is unfortunate, and limits us to only
 /// opening one disk image at a time, but it's necessary in order to use information from the
@@ -122,41 +121,7 @@ impl Filesystem for Volume {
         );
 
         let ttl = Duration::new(86400, 0);
-
-        let kind = match (dinode.di_core.di_mode & S_IFMT) as mode_t {
-            S_IFREG => FileType::RegularFile,
-            S_IFDIR => FileType::Directory,
-            _ => {
-                panic!("Unknown file type.")
-            }
-        };
-
-        let attr = FileAttr {
-            ino,
-            size: dinode.di_core.di_size as u64,
-            blocks: dinode.di_core.di_nblocks,
-            atime: UNIX_EPOCH + Duration::new(
-                dinode.di_core.di_atime.t_sec as u64,
-                dinode.di_core.di_atime.t_nsec,
-            ),
-            mtime: UNIX_EPOCH + Duration::new(
-                dinode.di_core.di_mtime.t_sec as u64,
-                dinode.di_core.di_mtime.t_nsec,
-            ),
-            ctime: UNIX_EPOCH + Duration::new(
-                dinode.di_core.di_ctime.t_sec as u64,
-                dinode.di_core.di_ctime.t_nsec,
-            ),
-            crtime: UNIX_EPOCH,
-            kind,
-            perm: dinode.di_core.di_mode & !S_IFMT,
-            nlink: dinode.di_core.di_nlink,
-            uid: dinode.di_core.di_uid,
-            gid: dinode.di_core.di_gid,
-            rdev: 0,
-            blksize: 4096,
-            flags: 0,
-        };
+        let attr = dinode.di_core.stat(ino).expect("Unknown file type");
 
         reply.attr(&ttl, &attr)
     }
