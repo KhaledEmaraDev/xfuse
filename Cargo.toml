@@ -16,6 +16,7 @@ exclude = [
 bincode = {version = "2.0.0-rc.3", default-features = false, features = ["derive", "std"]}
 byteorder = "1.4.3"
 crc = "2.0.0"
+enum_dispatch = "0.3.12"
 fuser = "0.13.0"
 libc = "0.2.97"
 num-derive = "0.4.2"

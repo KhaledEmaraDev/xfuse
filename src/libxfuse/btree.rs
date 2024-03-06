@@ -112,11 +112,11 @@ pub trait Btree {
             .map_err(|e| e.raw_os_error().unwrap())?;
 
         if self.level() > 1 {
-            let bti: BtreeIntermediate = decode_from(buf_reader.by_ref()).map_err(|_| libc::EIO)?;
+            let bti: BtreeIntermediate = decode_from(buf_reader.by_ref()).map_err(|_| libc::EDESTADDRREQ)?;
             assert_eq!(bti.hdr.bb_uuid, super_block.sb_uuid);
             bti.map_block(buf_reader, logical_block)
         } else {
-            let btl: BtreeLeaf = decode_from(buf_reader.by_ref()).map_err(|_| libc::EIO)?;
+            let btl: BtreeLeaf = decode_from(buf_reader.by_ref()).map_err(|_| libc::ENOTSOCK)?;
             assert_eq!(btl.hdr.bb_uuid, super_block.sb_uuid);
             Ok(btl.get_extent(logical_block))
         }

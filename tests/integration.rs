@@ -109,6 +109,9 @@ fn remote_attrs_per_file(f: &str) -> usize {
 // This is a function of the golden image creation.
 fn ents_per_dir_1k(d: &str) -> usize {
     match d {
+        "leaf" => 256,
+        "node1" => 496,
+        "node3" => 512,
         "btree2.with-xattrs" => 1024,
         "btree2.3" => 8192,
         "btree3" => 131072,
@@ -357,6 +360,12 @@ impl Drop for MdHarness {
 
 #[template]
 #[rstest]
+// Leaf directory with > 4 directory blocks
+#[case::leaf("leaf")]
+// Node directory with a single leaf block
+#[case::node1("node1")]
+// Node directory with multiple leaf blocks
+#[case::node3("node3")]
 #[case::btree_2_with_xattrs("btree2.with-xattrs")]
 #[case::btree_2_3("btree2.3")]
 #[case::btree_3("btree3")]

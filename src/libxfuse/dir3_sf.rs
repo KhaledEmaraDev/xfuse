@@ -194,8 +194,8 @@ impl Decode for Dir2Sf {
     }
 }
 
-impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Sf {
-    fn lookup(
+impl Dir3 for Dir2Sf {
+    fn lookup<R: bincode::de::read::Reader + BufRead + Seek>(
         &self,
         buf_reader: &mut R,
         super_block: &Sb,
@@ -220,7 +220,7 @@ impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Sf {
         }
     }
 
-    fn next(
+    fn next<R: bincode::de::read::Reader + BufRead + Seek>(
         &self,
         _buf_reader: &mut R,
         _super_block: &Sb,

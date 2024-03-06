@@ -40,6 +40,7 @@ mod dinode_core;
 mod dir3;
 mod dir3_block;
 mod dir3_bptree;
+//mod dir3_extents;
 mod dir3_leaf;
 mod dir3_node;
 mod dir3_sf;

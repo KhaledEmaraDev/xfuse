@@ -35,6 +35,7 @@ use std::time::Duration;
 use super::agi::Agi;
 use super::definitions::XfsIno;
 use super::dinode::Dinode;
+use super::dir3::Dir3;
 use super::sb::Sb;
 
 use fuser::{

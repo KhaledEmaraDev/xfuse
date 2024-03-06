@@ -101,7 +101,6 @@ mkfs_4096() {
 	mkfiles ${MNTDIR}/sf 2
 	mkfiles ${MNTDIR}/block 32
 	mkfiles ${MNTDIR}/leaf 384
-	mkfiles ${MNTDIR}/node 1024
 
 	# Make a block directory with hash collisions.
 	# shortform directories cannot have hash collisions (because they don't use hashes).
@@ -190,6 +189,13 @@ mkfs_512() {
 	##
 	# With 1k blocks and 4k directories
 	# nfiles
+	# 64		255	leaf	N/A		5 data 1 leaf
+	# 256		255	leaf	N/A		6 data 1 leaf
+	# 384		255	leaf	N/A		7 data 1 leaf
+	# 448		255	leaf	N/A		8 data 1 leaf
+	# 480		255	leaf	N/A		8 data l leaf
+	# 496		255	node	N/A		8 data 2 leaf
+	# 512		255	node	N/A		9 data 3 leaf
 	# 4096		255	btree	1		2
 	# 8192		255	btree	1		3
 	# 16384		255	btree	1		5
@@ -197,6 +203,9 @@ mkfs_512() {
 	# 65536		255	btree	1		18
 	# 131072	255	btree	2		1
 	# 262144	255	btree	2		2
+	mkfiles2 ${MNTDIR}/leaf 256
+	mkfiles2 ${MNTDIR}/node1 496
+	mkfiles2 ${MNTDIR}/node3 512
 	mkfiles2 ${MNTDIR}/btree2.3 8192
 	mkfiles2 ${MNTDIR}/btree3 131072
 

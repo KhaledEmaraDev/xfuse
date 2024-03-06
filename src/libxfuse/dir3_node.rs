@@ -25,206 +25,93 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use std::cell::RefCell;
-use std::convert::TryInto;
-use std::ffi::{OsStr, OsString};
-use std::io::{BufRead, Seek, SeekFrom};
+use std::{
+    cell::{Ref, RefCell},
+    io::{BufRead, Seek, SeekFrom},
+    ops::Deref
+};
+
+use bincode::de::read::Reader;
 
 use super::bmbt_rec::BmbtRec;
-use super::da_btree::{hashname, XfsDa3Intnode};
 use super::definitions::*;
-use super::dinode::Dinode;
-use super::dir3::{Dir2DataEntry, Dir2DataUnused, Dir2LeafNDisk, Dir3, Dir3DataHdr};
+use super::dir3::{Dir3, NodeLikeDir, XfsDir2Dataptr};
 use super::sb::Sb;
-use super::utils::{decode, decode_from, get_file_type, FileKind};
-
-use fuser::{FileAttr, FileType};
-use libc::{c_int, EIO, ENOENT};
+use super::volume::SUPERBLOCK;
 
 #[derive(Debug)]
 pub struct Dir2Node {
     pub bmx: Vec<BmbtRec>,
-    /// An cache of the last extent and its starting block number read by lookup
+    /// A cache of the last extent and its starting block number read by lookup
     /// or readdir.
-    block_cache: RefCell<Option<(u64, Vec<u8>)>>
+    // TODO: try to eliminate this refcell by giving Dir3::next a mutable pointer
+    block_cache: RefCell<(XfsFsblock, Vec<u8>)>
 }
 
 impl Dir2Node {
     pub fn from(bmx: Vec<BmbtRec>) -> Dir2Node {
+        let sb = SUPERBLOCK.get().unwrap();
+        let dblksize: usize = 1 << (sb.sb_blocklog + sb.sb_dirblklog);
+        let block_cache = RefCell::new((XfsFsblock::max_value(), Vec::with_capacity(dblksize)));
         Dir2Node {
             bmx,
-            block_cache: RefCell::new(None)
+            block_cache
         }
     }
 
-    fn map_dblock(&self, dblock: XfsFileoff) -> Option<&BmbtRec> {
-        let mut res: Option<&BmbtRec> = None;
-        for record in self.bmx.iter().rev() {
-            if dblock >= record.br_startoff {
-                res = Some(record);
-                break;
-            }
+    /// Read one directory block and return a reference to its data.
+    fn read_fsblock<'a, R>(&'a self, mut buf_reader: R, sb: &Sb, fsblock: XfsFsblock)
+        -> Result<Box<dyn Deref<Target=[u8]> + 'a>, i32>
+        where R: Reader + BufRead + Seek
+    {
+        let dblksize: usize = 1 << (sb.sb_blocklog + sb.sb_dirblklog);
+
+        let mut cache_guard = self.block_cache.borrow_mut();
+        if cache_guard.0 != fsblock || cache_guard.1.len() != dblksize {
+            cache_guard.1.resize(dblksize, 0u8);
+            buf_reader
+                .seek(SeekFrom::Start(sb.fsb_to_offset(fsblock)))
+                .unwrap();
+            buf_reader.read_exact(&mut cache_guard.1).unwrap();
+            cache_guard.0 = fsblock;
         }
-
-        if let Some(res_some) = res {
-            if dblock >= res_some.br_startoff + res_some.br_blockcount {
-                res = None
-            }
-        }
-
-        res
-    }
-
-    fn map_dblock_number(&self, dblock: XfsFileoff) -> XfsFsblock {
-        for record in self.bmx.iter().rev() {
-            if dblock >= record.br_startoff {
-                return record.br_startblock + (dblock - record.br_startoff);
-            }
-        }
-
-        panic!("Couldn't find the directory block");
+        // Annoyingly, there's no function to downgrade a RefMut into a Ref.
+        drop(cache_guard);
+        let cache_guard = self.block_cache.borrow();
+        Ok(Box::new(Ref::map(cache_guard, |v| v.1.as_ref())))
     }
 }
 
-impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Node {
-    fn lookup(
-        &self,
-        buf_reader: &mut R,
-        super_block: &Sb,
-        name: &OsStr,
-    ) -> Result<(FileAttr, u64), c_int> {
-        let dblock = super_block.get_dir3_leaf_offset();
-        let hash = hashname(name);
-
-        // NB: reading and decoding the XfsDa3Intnode could be cached in
-        // Self.  but it won't be worthwhile unless we implement
-        // ReaddirPlus.
-        let bmbt_rec = if let Some(bmbt_rec_some) = self.map_dblock(dblock) {
-            buf_reader
-                .seek(SeekFrom::Start(super_block.fsb_to_offset(bmbt_rec_some.br_startblock)))
-                .unwrap();
-            bmbt_rec_some
-        } else {
-            return Err(ENOENT)
-        };
-
-        let extent_size = (bmbt_rec.br_blockcount) as usize * super_block.sb_blocksize as usize;
-        let mut raw = vec![0u8; extent_size];
-        buf_reader
-            .seek(SeekFrom::Start(super_block.fsb_to_offset(bmbt_rec.br_startblock)))
-            .unwrap();
-        buf_reader.read_exact(&mut raw).unwrap();
-
-        let (node, _) = decode::<XfsDa3Intnode>(&raw[..]).map_err(|_| EIO)?;
-        assert_eq!(node.hdr.info.magic, XFS_DA3_NODE_MAGIC);
-        let blk = node.lookup(buf_reader.by_ref(), super_block, hash, |block, _| {
-            self.map_dblock_number(block.into())
-        })?;
-
-        buf_reader.seek(SeekFrom::Start(super_block.fsb_to_offset(blk))).unwrap();
-
-        'outer: loop {
-            let leaf: Dir2LeafNDisk = decode_from(buf_reader.by_ref()).unwrap();
-
-            for lcr in 0.. {
-                let address = match leaf.get_address(hash, lcr) {
-                    Ok(a) => a * 8,
-                    Err(libc::ENOENT) if leaf.ents.last().map(|e| e.hashval) == Some(hash) => {
-                        let next_leaf_fsblock = self.map_dblock_number(leaf.hdr.info.forw.into());
-                        buf_reader
-                            .seek(SeekFrom::Start(super_block.fsb_to_offset(next_leaf_fsblock)))
-                            .unwrap();
-                        continue 'outer;
-                    },
-                    Err(e) => return Err(e)
-                };
-                let idx = (address / super_block.sb_blocksize) as u64;
-                let address = (address % super_block.sb_blocksize) as usize;
-
-                let bmbt_rec = self.map_dblock(idx).ok_or(EIO)?;
-                let blk = bmbt_rec.br_startblock + (idx - bmbt_rec.br_startoff);
-                buf_reader.seek(SeekFrom::Start(super_block.fsb_to_offset(blk))).unwrap();
-                let mut leafraw = vec![0u8; bmbt_rec.br_blockcount as usize * super_block.sb_blocksize as usize];
-                buf_reader.read_exact(&mut leafraw).unwrap();
-
-                let entry: Dir2DataEntry = decode(&leafraw[address..]).unwrap().0;
-                if entry.name != name {
-                    continue;
-                }
-
-                let dinode = Dinode::from(buf_reader.by_ref(), super_block, entry.inumber);
-
-                let attr = dinode.di_core.stat(entry.inumber)?;
-
-                return Ok((attr, dinode.di_core.di_gen.into()));
-            }
-        }
-    }
-
-    fn next(
-        &self,
-        buf_reader: &mut R,
-        sb: &Sb,
-        // logical byte offset within the directory
-        offset: i64,
-    ) -> Result<(XfsIno, i64, FileType, OsString), c_int>
+impl Dir3 for Dir2Node {
+    fn get_addresses<'a, R>(&'a self, buf_reader: &'a RefCell<&'a mut R>, hash: XfsDahash)
+        -> Box<dyn Iterator<Item=XfsDir2Dataptr> + 'a>
+            where R: Reader + BufRead + Seek + 'a
     {
-        let mut offset: u64 = offset.try_into().unwrap();
-        let block_size = u64::from(sb.sb_blocksize);
-        let mut next = offset == 0;
-
-        while let Some(bmbt_rec) = self.map_dblock(offset / block_size) {
-            // Byte offset within this extent
-            let mut ex_offset = (offset - bmbt_rec.br_startoff * block_size) as usize;
-            let extent_size = (bmbt_rec.br_blockcount) as usize * block_size as usize;
-
-            let mut cache_guard = self.block_cache.borrow_mut();
-            if cache_guard.is_none() || cache_guard.as_ref().unwrap().0 != bmbt_rec.br_startblock
-            {
-                let mut raw = vec![0u8; extent_size];
-                buf_reader
-                    .seek(SeekFrom::Start(sb.fsb_to_offset(bmbt_rec.br_startblock)))
-                    .unwrap();
-                buf_reader.read_exact(&mut raw).unwrap();
-                *cache_guard = Some((bmbt_rec.br_startblock, raw));
-            }
-            let raw = &cache_guard.as_ref().unwrap().1;
-
-            while ex_offset < extent_size
-            {
-                // Byte offset within this directory block
-                let dir_block_offset = offset % ((1 << sb.sb_dirblklog) * block_size);
-                // Offset of this directory block within its extent
-                let dboffset = offset - dir_block_offset;
-
-                // If this is the start of the directory block, skip it.
-                if dir_block_offset == 0 {
-                    ex_offset += Dir3DataHdr::SIZE as usize;
-                    offset += Dir3DataHdr::SIZE;
-                }
-
-                // Skip the next directory entry
-                let freetag: u16 = decode(&raw[ex_offset..]).unwrap().0;
-                if freetag == 0xffff {
-                    let (_, l) = decode::<Dir2DataUnused>(&raw[ex_offset..])
-                        .unwrap();
-                    ex_offset += l;
-                    offset += l as u64;
-                } else if !next {
-                    let length = Dir2DataEntry::get_length(&raw[ex_offset..]);
-                    ex_offset += length as usize;
-                    offset += length as u64;
-                    next = true;
-                } else {
-                    let entry: Dir2DataEntry = decode(&raw[ex_offset..]).unwrap().0;
-                    let kind = get_file_type(FileKind::Type(entry.ftype))?;
-                    let name = entry.name;
-                    let entry_offset = dboffset + entry.tag as u64;
-                    return Ok((entry.inumber, entry_offset as i64, kind, name));
-                }
-            }
-        }
-
-        Err(ENOENT)
+        NodeLikeDir::get_addresses(self, buf_reader, hash)
     }
+
+    fn read_dblock<'a, R>(&'a self, mut buf_reader: R, sb: &Sb, dblock: XfsDablk)
+        -> Result<Box<dyn Deref<Target=[u8]> + 'a>, i32>
+        where R: Reader + BufRead + Seek
+    {
+        let fsblock = self.map_dblock(buf_reader.by_ref(), dblock.into())?;
+        self.read_fsblock(buf_reader.by_ref(), sb, fsblock)
+    }
+}
+
+impl NodeLikeDir for Dir2Node {
+    fn map_dblock<R: Reader + BufRead + Seek>(
+        &self,
+        _buf_reader: &mut R,
+        dblock: XfsFileoff,
+    ) -> Result<XfsFsblock, i32> {
+        let i = self.bmx.partition_point(|rec| rec.br_startoff <= dblock);
+        let rec = &self.bmx[i - 1];
+        if i == 0 || rec.br_startoff > dblock || rec.br_startoff + rec.br_blockcount <= dblock {
+            Err(libc::ENOENT)
+        } else {
+            Ok(rec.br_startblock + dblock - rec.br_startoff)
+        }
+    }
+
 }
