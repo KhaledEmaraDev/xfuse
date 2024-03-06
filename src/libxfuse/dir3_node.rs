@@ -57,7 +57,7 @@ impl Dir2Node {
         }
     }
 
-    pub fn map_dblock(&self, dblock: XfsFileoff) -> Option<&BmbtRec> {
+    fn map_dblock(&self, dblock: XfsFileoff) -> Option<&BmbtRec> {
         let mut res: Option<&BmbtRec> = None;
         for record in self.bmx.iter().rev() {
             if dblock >= record.br_startoff {
@@ -75,7 +75,7 @@ impl Dir2Node {
         res
     }
 
-    pub fn map_dblock_number(&self, dblock: XfsFileoff) -> XfsFsblock {
+    fn map_dblock_number(&self, dblock: XfsFileoff) -> XfsFsblock {
         for record in self.bmx.iter().rev() {
             if dblock >= record.br_startoff {
                 return record.br_startblock + (dblock - record.br_startoff);
