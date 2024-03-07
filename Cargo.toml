@@ -1,7 +1,7 @@
 [package]
 name = "xfs-fuse"
 description = "Read-only FUSE server implementing XFS"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2018"
 authors = ["Khaled Emara <mail@khaledemara.dev>"]
 repository = "https://github.com/KhaledEmaraDev/xfuse"
