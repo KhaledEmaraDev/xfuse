@@ -35,11 +35,12 @@ use super::bmbt_rec::BmbtRec;
 use super::btree::{BmbtKey, BmdrBlock, BtreeRoot, XfsBmbtPtr};
 use super::definitions::*;
 use super::dinode_core::{DinodeCore, XfsDinodeFmt};
-use super::dir3::Dir3;
+use super::dir3::Directory;
 use super::dir3_block::Dir2Block;
 use super::dir3_bptree::Dir2Btree;
 use super::dir3_leaf::Dir2Leaf;
 use super::dir3_node::Dir2Node;
+//use super::dir3_extents::Dir2Extents;
 use super::dir3_sf::Dir2Sf;
 use super::file::File;
 use super::file_btree::FileBtree;
@@ -322,23 +323,24 @@ impl Dinode {
         &self,
         buf_reader: &mut R,
         superblock: &Sb,
-    ) -> Box<dyn Dir3<R>> {
+    ) -> Directory {
         match &self.di_u {
-            DiU::Dir2Sf(dir) => Box::new(dir.clone()),
+            DiU::Dir2Sf(dir) => Directory::Sf(dir.clone()),
             DiU::Bmx(bmx) => {
+                let leaf_start = superblock.get_dir3_leaf_offset();
                 if bmx.len() == 1 {
-                    Box::new(Dir2Block::from(
+                    Directory::Block(Dir2Block::from(
                         buf_reader.by_ref(),
                         superblock,
                         bmx[0].br_startblock,
                     ))
-                } else if bmx.len() > 4 {
-                    Box::new(Dir2Node::from(bmx.clone()))
+                } else if bmx.iter().filter(|e| e.br_startoff >= leaf_start).count() > 1 {
+                    Directory::Node(Dir2Node::from(bmx.clone()))
                 } else {
-                    Box::new(Dir2Leaf::from(buf_reader.by_ref(), superblock, bmx))
+                    Directory::Leaf(Dir2Leaf::from(buf_reader.by_ref(), superblock, bmx))
                 }
             }
-            DiU::Bmbt((bmbt, keys, pointers)) => Box::new(Dir2Btree::from(
+            DiU::Bmbt((bmbt, keys, pointers)) => Directory::Btree(Dir2Btree::from(
                 bmbt.clone(),
                 keys.clone(),
                 pointers.clone(),

@@ -25,22 +25,19 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use std::ffi::{OsStr, OsString};
-use std::io::{BufRead, Seek, SeekFrom};
-use std::mem;
-
-use super::da_btree::hashname;
-use super::definitions::*;
-use super::dinode::Dinode;
-use super::dir3::{
-    Dir2DataEntry, Dir2DataUnused, Dir2LeafEntry, Dir3, Dir3DataHdr, XfsDir2Dataptr,
+use std::{
+    cell::RefCell,
+    io::{BufRead, Seek, SeekFrom},
+    mem,
+    ops::Deref
 };
-use super::sb::Sb;
-use super::utils::{decode, get_file_type, FileKind};
 
-use bincode::Decode;
-use fuser::{FileAttr, FileType};
-use libc::{c_int, ENOENT};
+use super::definitions::*;
+use super::dir3::{Dir2LeafEntry, Dir3, Dir3DataHdr, XfsDir2Dataptr};
+use super::sb::Sb;
+use super::utils::decode;
+
+use bincode::{Decode, de::read::Reader};
 
 #[derive(Debug, Decode)]
 pub struct Dir2BlockTail {
@@ -122,79 +119,24 @@ impl Dir2Block {
             ents: dir_disk.leaf
         }
     }
-
-    // TODO: figure out how to share this code with Dir2LeafDisk::get_address
-    fn get_address(&self, hash: XfsDahash, collision_resolver: usize)
-        -> Result<XfsDir2Dataptr, c_int>
-    {
-        let i = self.ents.partition_point(|ent| ent.hashval < hash);
-        let ent = self.ents.get(i + collision_resolver).ok_or(ENOENT)?;
-        if ent.hashval == hash {
-            Ok(ent.address)
-        } else {
-            Err(ENOENT)
-        }
-    }
 }
 
-impl<R: bincode::de::read::Reader + BufRead + Seek> Dir3<R> for Dir2Block {
-    fn lookup(
-        &self,
-        buf_reader: &mut R,
-        super_block: &Sb,
-        name: &OsStr,
-    ) -> Result<(FileAttr, u64), c_int> {
-        let hash = hashname(name);
-        for collision_resolver in 0.. {
-            let address = self.get_address(hash, collision_resolver)? as usize * 8;
-            let entry: Dir2DataEntry = decode(&self.raw[address..]).unwrap().0;
-            if entry.name != name {
-                // Hash collision
-                continue;
-            }
-            let dinode = Dinode::from(buf_reader.by_ref(), super_block, entry.inumber);
-            let attr = dinode.di_core.stat(entry.inumber)?;
-            return Ok((attr, dinode.di_core.di_gen.into()));
-        }
-        unreachable!()
+impl Dir3 for Dir2Block {
+    fn get_addresses<'a, R>(&'a self, _buf_reader: &'a RefCell<&'a mut R>, hash: XfsDahash)
+        -> Box<dyn Iterator<Item=XfsDir2Dataptr> + 'a>
+            where R: Reader + BufRead + Seek + 'a
+    {
+        let i = self.ents.partition_point(|ent| ent.hashval < hash);
+        let l = self.ents.len();
+        let j = (i..l).find(|x| self.ents[*x].hashval > hash).unwrap_or(l);
+        Box::new(self.ents[i..j].iter().map(|ent| ent.address << 3))
     }
 
-    fn next(
-        &self,
-        _buf_reader: &mut R,
-        _super_block: &Sb,
-        offset: i64,
-    ) -> Result<(XfsIno, i64, FileType, OsString), c_int> {
-        let mut next = offset == 0;
-        let mut offset = if offset == 0 {
-            mem::size_of::<Dir3DataHdr>()
-        } else {
-            offset as usize
-        };
-
-        while offset < self.raw.len() {
-            let freetag: u16 = decode(&self.raw[offset..]).unwrap().0;
-
-            if freetag == 0xffff {
-                let (_, length) = decode::<Dir2DataUnused>(&self.raw[offset..])
-                    .unwrap();
-                offset += length;
-            } else if next {
-                let entry: Dir2DataEntry = decode(&self.raw[offset..]).unwrap().0;
-
-                let kind = get_file_type(FileKind::Type(entry.ftype))?;
-
-                let name = entry.name;
-
-                return Ok((entry.inumber, entry.tag.into(), kind, name));
-            } else {
-                let length = Dir2DataEntry::get_length(&self.raw[offset..]);
-                offset += length as usize;
-
-                next = true;
-            }
-        }
-
-        Err(ENOENT)
+    fn read_dblock<'a, R>(&'a self, _buf_reader: R, _sb: &Sb, dblock: XfsDablk)
+        -> Result<Box<dyn Deref<Target=[u8]> + 'a>, i32>
+        where R: Reader + BufRead + Seek
+    {
+        assert_eq!(dblock, 0);
+        Ok(Box::new(&self.raw[..]))
     }
 }
