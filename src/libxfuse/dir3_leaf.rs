@@ -30,6 +30,8 @@ use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, Seek, SeekFrom};
 use std::mem;
 
+use tracing::warn;
+
 use super::bmbt_rec::BmbtRec;
 use super::da_btree::hashname;
 use super::definitions::*;
@@ -64,6 +66,9 @@ impl Dir2Leaf {
         }
 
         let leaf_extent = bmx.last().unwrap();
+        if leaf_extent.br_startblock != superblock.get_dir3_leaf_offset() {
+            warn!("Leaf directory contains unexpected bmx entry {:?}", &leaf_extent);
+        }
         let offset = superblock.fsb_to_offset(leaf_extent.br_startblock);
 
         let leaf_size = leaf_extent.br_blockcount as usize * superblock.sb_blocksize as usize;
