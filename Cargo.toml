@@ -9,7 +9,10 @@ license = "BSD-2-Clause"
 categories = ["filesystem"]
 exclude = [
   "/.gitignore",
-  "/.cirrus.yml"
+  "/.cirrus.yml",
+  "/resources",
+  "/scripts",
+  "/tests"
 ]
 
 [dependencies]
