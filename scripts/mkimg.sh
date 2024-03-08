@@ -140,6 +140,7 @@ mkfs_4096() {
 	# 16		btree	1		1
 	# 2048		btree	1		9
 	# 4096		btree	2		1
+	fill_file ${MNTDIR}/files/partial_extent.txt 8448 1
 	fill_file ${MNTDIR}/files/single_extent.txt 4096 1
 	fill_file ${MNTDIR}/files/four_extents.txt 4096 4
 	fill_file ${MNTDIR}/files/btree2.txt 4096 16

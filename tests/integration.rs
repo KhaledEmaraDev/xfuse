@@ -126,7 +126,6 @@ fn ents_per_dir_4k(d: &str) -> usize {
         "sf" => 2,
         "block" => 32,
         "leaf" => 384,
-        "node" => 1024,
         "all_name_lengths" => 255,
         _ => unimplemented!()
     }
@@ -322,42 +321,6 @@ impl Drop for Harness {
     }
 }
 
-struct MdHarness {
-    _md: Md,
-    d: TempDir,
-    child: Child
-}
-
-fn mdharness(image: &Path) -> MdHarness {
-    let md = Md::new(image).unwrap();
-    let d = tempdir().unwrap();
-    let child = Command::cargo_bin("xfs-fuse").unwrap()
-        .arg(md.0.as_path())
-        .arg(d.path())
-        .spawn()
-        .unwrap();
-
-    waitfor(Duration::from_secs(5), || {
-        let s = nix::sys::statfs::statfs(d.path()).unwrap();
-        s.filesystem_type_name() == "fusefs.xfs"
-    }).unwrap();
-
-    MdHarness {
-        _md: md,
-        d,
-        child
-    }
-}
-
-impl Drop for MdHarness {
-    fn drop(&mut self) {
-        let _ = Command::new("umount")
-            .arg(self.d.path())
-            .output();
-        let _ = self.child.wait();
-    }
-}
-
 #[template]
 #[rstest]
 // Leaf directory with > 4 directory blocks
@@ -376,7 +339,6 @@ fn all_dir_types_1k(d: &str) {}
 #[case::sf("sf")]
 #[case::block("block")]
 #[case::leaf("leaf")]
-#[case::node("node")]
 fn all_dir_types_4k(d: &str) {}
 
 #[template]
@@ -401,27 +363,87 @@ fn all_xattr_fork_types_with_none(h: fn() -> Harness, d: &str) {}
 
 /// Mount the image via md(4) and read all its metadata, to verify that we work
 /// with devices that require all accesses to be sector size aligned.
-// Regression test for https://github.com/KhaledEmaraDev/xfuse/issues/15
-// TODO: Read all data as well as metadata
-#[named]
-#[rstest]
-#[case(GOLDEN4K.as_path())]
-#[case(GOLDEN1K.as_path())]
-fn dev(#[case] image: &Path) {
-    require_fusefs!();
-    require_root!();
-    let h = mdharness(image);
+mod dev {
+    use super::*;
 
-    let walker = walkdir::WalkDir::new(h.d.path())
-        .into_iter();
-    for entry in walker {
-        let entry = entry.unwrap();
-        let _ = entry.metadata().unwrap();
-        if entry.path().file_name() != Some(OsStr::new("fifo")) {
-            for attr in xattr::list(entry.path()).unwrap() {
-                xattr::get(entry.path(), attr).unwrap().unwrap();
+    struct MdHarness {
+        _md: Md,
+        d: TempDir,
+        child: Child
+    }
+
+    fn mdharness(image: &Path) -> MdHarness {
+        let md = Md::new(image).unwrap();
+        let d = tempdir().unwrap();
+        let child = Command::cargo_bin("xfs-fuse").unwrap()
+            .arg(md.0.as_path())
+            .arg(d.path())
+            .spawn()
+            .unwrap();
+
+        waitfor(Duration::from_secs(5), || {
+            let s = nix::sys::statfs::statfs(d.path()).unwrap();
+            s.filesystem_type_name() == "fusefs.xfs"
+        }).unwrap();
+
+        MdHarness {
+            _md: md,
+            d,
+            child
+        }
+    }
+
+    impl Drop for MdHarness {
+        fn drop(&mut self) {
+            let _ = Command::new("umount")
+                .arg(self.d.path())
+                .output();
+            let _ = self.child.wait();
+        }
+    }
+
+    /// Read all metadata from the file system to verify read alignment.
+    // Regression test for https://github.com/KhaledEmaraDev/xfuse/issues/15
+    // TODO: Read all data as well as metadata
+    #[named]
+    #[rstest]
+    #[case(GOLDEN4K.as_path())]
+    #[case(GOLDEN1K.as_path())]
+    fn metadata(#[case] image: &Path) {
+        require_fusefs!();
+        require_root!();
+        let h = mdharness(image);
+
+        let walker = walkdir::WalkDir::new(h.d.path())
+            .into_iter();
+        for entry in walker {
+            let entry = entry.unwrap();
+            let _ = entry.metadata().unwrap();
+            // xattrs are not supported on fifo devices.  This limitation it
+            // outside of fusefs.
+            if entry.path().file_name() != Some(OsStr::new("fifo")) {
+                for attr in xattr::list(entry.path()).unwrap() {
+                    xattr::get(entry.path(), attr).unwrap().unwrap();
+                }
             }
         }
+    }
+
+    #[named]
+    #[rstest]
+    #[case::partial_extent(GOLDEN4K.as_path(), "partial_extent.txt", 8448)]
+    #[case::single_extent(GOLDEN4K.as_path(), "single_extent.txt", 4096)]
+    #[case::four_extents(GOLDEN4K.as_path(), "four_extents.txt", 16384)]
+    #[case::two_height_btree(GOLDEN4K.as_path(), "btree2.txt", 65536)]
+    fn data(#[case] image: &Path, #[case] file: &str, #[case] size: usize) {
+        require_fusefs!();
+        require_root!();
+        let h = mdharness(image);
+
+        let path = h.d.path().join("files").join(file);
+        let mut buf = vec![0; size];
+        let mut f = fs::File::open(path).unwrap();
+        f.read_exact(&mut buf[..]).unwrap();
     }
 }
 
@@ -645,7 +667,6 @@ mod lookup {
     #[case::sf(harness4k, "sf")]
     #[case::block(harness4k, "block")]
     #[case::leaf(harness4k, "leaf")]
-    #[case::node(harness4k, "node")]
     #[case::btree2_3(harness1k, "btree2.3")]
     #[case::btree3(harness1k, "btree3")]
     fn dots(#[case] h: fn() -> Harness, #[case] d: &str) {
@@ -668,7 +689,6 @@ mod lookup {
     #[case::sf(harness4k, "sf")]
     #[case::block(harness4k, "block")]
     #[case::leaf(harness4k, "leaf")]
-    #[case::node(harness4k, "node")]
     #[case::btree(harness4k, "btree")]
     #[case::btree2_3(harness1k, "btree2.3")]
     #[case::btree3(harness1k, "btree3")]
@@ -807,6 +827,7 @@ mod read {
 
     #[template]
     #[rstest]
+    #[case::partial_extent(harness4k, "partial_extent.txt", 8448)]
     #[case::single_extent(harness4k, "single_extent.txt", 4096)]
     #[case::four_extents(harness4k, "four_extents.txt", 16384)]
     #[case::two_height_btree(harness4k, "btree2.txt", 65536)]
@@ -1063,7 +1084,6 @@ mod readdir {
     #[case::sf(harness4k, "sf")]
     #[case::block(harness4k, "block")]
     #[case::leaf(harness4k, "leaf")]
-    #[case::node(harness4k, "node")]
     #[case::btree2_with_xattrs(harness1k, "btree2.with-xattrs")]
     #[case::btree2_3(harness1k, "btree2.3")]
     #[case::btree3(harness1k, "btree3")]
@@ -1130,7 +1150,7 @@ mod stat {
         // greater than mtime.
         assert!(stat.st_ctime > stat.st_mtime || 
                 stat.st_ctime_nsec > stat.st_mtime_nsec);
-        assert_eq!(stat.st_ino, 197890);
+        assert_eq!(stat.st_ino, 142530);
         assert_eq!(stat.st_size, 14);
         assert_eq!(stat.st_blksize, 4096);
         assert_eq!(stat.st_blocks, 1);
@@ -1171,8 +1191,8 @@ mod stat {
     /// stat should work on symlinks
     #[named]
     #[rstest]
-    #[case::sf("sf", 142530)]
-    #[case::extent("max", 142531)]
+    #[case::sf("sf", 65698)]
+    #[case::extent("max", 65699)]
     fn symlink(harness4k: Harness, #[case] linkname: &str, #[case] ino: libc::ino_t)
     {
         require_fusefs!();
@@ -1204,7 +1224,7 @@ fn statfs(harness4k: Harness) {
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
     // here.
-    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 1768);
+    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 744);
 
     // There are legitimate questions about what the correct value for
     // optimal_transfer_size
@@ -1229,7 +1249,7 @@ fn statvfs(harness4k: Harness) {
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
     // here.
-    assert_eq!(svfs.files() - svfs.files_free(), 1768);
+    assert_eq!(svfs.files() - svfs.files_free(), 744);
     assert_eq!(svfs.files_free(), svfs.files_available());
 
     // Linux's calculation for blocks available and free is complicated and the
