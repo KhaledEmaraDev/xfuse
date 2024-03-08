@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unrelease] - ReleaseDate
+## [0.2.0] - 2024-03-07
 
 Very many bug fixes.  This is the first beta-quality release.
 
