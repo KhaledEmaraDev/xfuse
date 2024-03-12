@@ -6,7 +6,7 @@ use std::{
     io::{self, ErrorKind, Read},
     os::unix::{
         ffi::{OsStrExt, OsStringExt},
-        fs::{DirEntryExt, MetadataExt, FileExt}
+        fs::{DirEntryExt, MetadataExt, FileExt, OpenOptionsExt}
     },
     path::{Path, PathBuf},
     process::{Child, Command},
@@ -445,6 +445,43 @@ mod dev {
         let mut f = fs::File::open(path).unwrap();
         f.read_exact(&mut buf[..]).unwrap();
     }
+
+    /// read a whole file 128 bytes at a time, using direct_io to bypass the cache
+    #[named]
+    #[rstest]
+    #[case::single_extent(GOLDEN4K.as_path(), "single_extent.txt", 4096)]
+    #[case::four_extents(GOLDEN4K.as_path(), "four_extents.txt", 16384)]
+    fn o_direct(#[case] image: &Path, #[case] filename: &str, #[case] size: usize) {
+        require_fusefs!();
+        require_root!();
+        let h = mdharness(image);
+
+        const BUFSIZE: usize = 16;
+        let path = h.d.path().join("files").join(filename);
+        let mut f = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECT)
+            .open(path).unwrap();
+
+        // Verify contents
+        let mut ofs = 0;
+        while ofs < size {
+            let mut buf = [0; BUFSIZE];
+            if let Err(e) = f.read_exact(&mut buf[..]) {
+                if e.kind() == ErrorKind::UnexpectedEof {
+                    break
+                } else {
+                    panic!("read: {:?}", e);
+                }
+            } else {
+                let expected = format!("{:016x}", ofs);
+                assert_eq!(&buf[..], expected.as_bytes());
+                ofs += BUFSIZE;
+            }
+        }
+        assert_eq!(ofs, size);
+    }
+
 }
 
 mod getextattr {

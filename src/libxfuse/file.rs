@@ -43,51 +43,68 @@ pub trait File<R: BufRead + Reader + Seek> {
     /// Return its starting position as an FSblock, and its length in file system block units
     fn get_extent(&self, buf_reader: &mut R, block: XfsFileoff) -> (Option<XfsFsblock>, u64);
 
-    fn read(&mut self, buf_reader: &mut R, offset: i64, size: u32) -> Vec<u8> {
+    /// Perform a sector-size aligned read of the file
+    fn read_sectors(&mut self, buf_reader: &mut R, offset: i64, mut size: usize)
+        -> Result<Vec<u8>, i32>
+    {
         let sb = SUPERBLOCK.get().unwrap();
-        let mut data = Vec::<u8>::with_capacity(size as usize);
-        assert_eq!(offset % i64::from(sb.sb_blocksize), 0,
-                   "fusefs did a non-sector-size aligned read.  offset={:?} size={:?}",
-                   offset, size);
+        debug_assert_eq!(offset & ((1i64 << sb.sb_blocklog) - 1), 0,
+            "fusefs did a non-sector-size aligned read.  offset={:?} size={:?}",
+            offset, size);
+        debug_assert_eq!(size & ((1usize << sb.sb_blocklog) - 1), 0,
+            "fusefs did a non-sector-size aligned read.  offset={:?} size={:?}",
+            offset, size);
 
-        let mut remaining_size = u32::try_from(
-            min(u64::from(size), u64::try_from(self.size() - offset).unwrap())
-        ).unwrap();
+        let mut data = Vec::<u8>::with_capacity(size);
 
         let mut logical_block = u64::try_from(offset >> sb.sb_blocklog).unwrap();
-        let mut block_offset = u32::try_from(offset & ((1i64 << sb.sb_blocklog) - 1)).unwrap();
+        let mut block_offset: u64 = 0;
 
-        while remaining_size > 0 {
+        while size > 0 {
             let (blk, blocks) = self.get_extent(buf_reader.by_ref(), logical_block);
             let z = usize::try_from(
-                min(u64::from(remaining_size), (blocks << sb.sb_blocklog) - u64::from(block_offset))
+                min(u64::try_from(size).unwrap(), (blocks << sb.sb_blocklog) - block_offset)
             ).unwrap();
 
-            // Always read whole blocks from disk.
-            let z_round_up = if z & ((1 << sb.sb_blocklog) - 1) > 0 {
-                z + usize::try_from(sb.sb_blocksize).unwrap() - (z & ((1 << sb.sb_blocklog) - 1))
-            } else {
-                z
-            };
-
             let oldlen = data.len();
-            data.resize(oldlen + z_round_up, 0u8);
+            data.resize(oldlen + z, 0u8);
             if let Some(blk) = blk {
                 buf_reader
-                    .seek(SeekFrom::Start(sb.fsb_to_offset(blk) + u64::from(block_offset)))
-                    .unwrap();
+                    .seek(SeekFrom::Start(sb.fsb_to_offset(blk) + block_offset))
+                    .map_err(|e| e.raw_os_error().unwrap())?;
 
-                buf_reader.read_exact(&mut data[oldlen..]).unwrap();
-                data.resize(oldlen + z, 0u8);
+                buf_reader.read_exact(&mut data[oldlen..])
+                    .map_err(|e| e.raw_os_error().unwrap())?;
             } else {
                 // A hole
             }
             logical_block += blocks;
-            remaining_size -= u32::try_from(z).unwrap();
+            size -= z;
             block_offset = 0;
         }
 
-        data
+        Ok(data)
+    }
+
+    /// Return from a file.  Return a buffer containing the requested data, plus a number of bytes
+    /// that the caller should ignore from the head of the vector.
+    fn read(&mut self, buf_reader: &mut R, offset: i64, size: u32) -> Result<(Vec<u8>, usize), i32>
+    {
+        let sb = SUPERBLOCK.get().unwrap();
+        let size = u32::try_from(i64::from(size).min(self.size() - offset)).unwrap();
+
+        let block_offset = usize::try_from(offset & ((1i64 << sb.sb_blocklog) - 1)).unwrap();
+        let size_with_leader = usize::try_from(size).unwrap() + block_offset;
+        let size_remainder = size_with_leader & ((1 << sb.sb_blocklog) - 1);
+        let actual_size = if size_remainder > 0 {
+            size_with_leader + usize::try_from(sb.sb_blocksize).unwrap() - size_remainder
+        } else {
+            size_with_leader
+        };
+        let actual_offset = offset - i64::try_from(block_offset).unwrap();
+        let mut v = self.read_sectors(buf_reader, actual_offset, actual_size)?;
+        v.resize(size_with_leader, 0);
+        Ok((v, block_offset))
     }
 
     fn size(&self) -> XfsFsize;

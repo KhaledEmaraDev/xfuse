@@ -7,9 +7,12 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Eliminated sector-size-unaligned reads when using `O_DIRECT`.
+  ([#112](https://github.com/KhaledEmaraDev/xfuse/pull/112))
+
 - Eliminated sector-size-unaligned reads from regular files greater than 8 kB in
   size.
-  ([#110](https://github.com/KhaledEmaraDev/xfuse/pull/107))
+  ([#110](https://github.com/KhaledEmaraDev/xfuse/pull/110))
 
 ## [0.2.0] - 2024-03-07
 

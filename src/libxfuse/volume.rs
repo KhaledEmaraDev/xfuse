@@ -179,10 +179,10 @@ impl Filesystem for Volume {
 
         let mut file = dinode.get_file(buf_reader.by_ref());
 
-        reply.data(
-            file.read(buf_reader.by_ref(), offset, size)
-                .as_slice(),
-        );
+        match file.read(buf_reader.by_ref(), offset, size) {
+            Ok((v, ignore)) => reply.data(&v[ignore..]),
+            Err(e) => reply.error(e)
+        }
     }
 
     fn release(
