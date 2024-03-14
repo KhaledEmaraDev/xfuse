@@ -27,6 +27,15 @@ num-traits = "0.2.14"
 tracing = "0.1.37"
 uuid = "0.8.2"
 
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+[[bench]]
+name = "read-amplification"
+path = "benches/read-amplification.rs"
+harness = false
+
 [dependencies.clap]
 version = "4"
 default-features = false
