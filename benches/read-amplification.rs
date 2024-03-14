@@ -233,8 +233,8 @@ fn main() {
 
         let end_bytes = gnop.read_bytes();
         let total_bytes = end_bytes - start_bytes;
-        let ra = total_bytes / useful_bytes;
-        println!("{:19} {:20} {:19}x", bench.name, total_bytes, ra);
+        let ra = total_bytes as f64 / useful_bytes as f64;
+        println!("{:19} {:20} {:19.1}x", bench.name, total_bytes, ra);
         child.wait().unwrap();
     }
 }
