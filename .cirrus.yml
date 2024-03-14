@@ -24,10 +24,13 @@ task:
     fingerprint_script: cat Cargo.lock || echo ""
   build_script:
     - . $HOME/.cargo/env
-    - cargo build
+    - cargo build --all-targets
   test_script:
     - . $HOME/.cargo/env
     - cargo test
+  benchmark_script:
+    - . $HOME/.cargo/env
+    - cargo test --bench read-amplification
   clippy_script:
     - . $HOME/.cargo/env
     - if [ "$VERSION" = "nightly" ]; then rustup component add clippy && cargo clippy --all-targets -- -D warnings; else true; fi

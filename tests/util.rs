@@ -10,7 +10,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use function_name::named;
 use lazy_static::lazy_static;
 
 /// Skip a test.
@@ -83,8 +82,9 @@ impl Md {
         let pb = Path::new("/dev").join(mddev);
         Ok(Self(pb))
     }
-
-    pub fn as_path(&self) -> &Path {
+}
+impl AsRef<Path> for Md {
+    fn as_ref(&self) -> &Path {
         self.0.as_path()
     }
 }
