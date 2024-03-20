@@ -168,38 +168,6 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrNode {
         self.total_size.try_into().unwrap()
     }
 
-    fn get_size(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Result<u32, libc::c_int> {
-        let hash = hashname(name);
-
-        let blk = self.node.lookup(buf_reader.by_ref(), super_block, hash, |block, _| {
-            self.map_logical_block_to_fs_block(block.into())
-        }).map_err(|e| {
-            if e == libc::ENOENT {
-                libc::ENOATTR
-            } else {
-                e
-            }
-        })?;
-        let leaf_offset = super_block.fsb_to_offset(blk);
-
-        buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-        loop {
-            let leaf: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
-
-            match leaf.get_size(hash) {
-                Ok(l) => return Ok(l),
-                Err(libc::ENOATTR) if leaf.entries.last().map(|e| e.hashval) == Some(hash) => {
-                    let forw = leaf.hdr.info.forw.into();
-                    let next_leaf_fsblock = self.map_logical_block_to_fs_block(forw);
-                    buf_reader.seek(SeekFrom::Start(super_block.fsb_to_offset(next_leaf_fsblock)))
-                        .unwrap();
-                    continue;
-                },
-                Err(e) => return Err(e)
-            }
-        }
-    }
-
     fn list(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8> {
         let mut list: Vec<u8> =
             Vec::with_capacity(self.get_total_size(buf_reader.by_ref(), super_block) as usize);
@@ -232,16 +200,16 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrNode {
 
         let blk = self.node.lookup(buf_reader.by_ref(), super_block, hash, |block, _| {
             self.map_logical_block_to_fs_block(block.into())
-        })?;
+        }).map_err(|e| if e == libc::ENOENT {libc::ENOATTR} else {e})?;
         let leaf_offset = super_block.fsb_to_offset(blk);
 
         buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
         let leaf: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
 
-        Ok(leaf.get(
+        leaf.get(
             buf_reader.by_ref(),
             hash,
             |block, _| self.map_logical_block_to_fs_block(block),
-        ))
+        )
     }
 }
