@@ -25,6 +25,7 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
@@ -44,6 +45,7 @@ use fuser::{
     consts::FOPEN_KEEP_CACHE
 };
 use libc::ERANGE;
+use tracing::warn;
 
 /// We must store the Superblock in a global variable.  This is unfortunate, and limits us to only
 /// opening one disk image at a time, but it's necessary in order to use information from the
@@ -51,12 +53,18 @@ use libc::ERANGE;
 pub(super) static SUPERBLOCK: OnceLock<Sb> = OnceLock::new();
 
 #[derive(Debug)]
+struct OpenInode {
+    dinode: Dinode,
+    count: u32
+}
+
+#[derive(Debug)]
 pub struct Volume {
     pub device: File,
     pub sb: Sb,
     pub agi: Agi,
     pub root_ino: Dinode,
-    pub open_files: Vec<Dinode>,
+    open_files: HashMap<u64, OpenInode>,
 }
 
 impl Volume {
@@ -79,7 +87,7 @@ impl Volume {
             sb: superblock,
             agi,
             root_ino,
-            open_files: Vec::new(),
+            open_files: HashMap::new(),
         }
     }
 }
@@ -148,36 +156,41 @@ impl Filesystem for Volume {
     }
 
     fn open(&mut self, _req: &Request, ino: u64, _flags: i32, reply: ReplyOpen) {
-        let dinode = Dinode::from(
-            BufReader::new(&self.device).by_ref(),
-            &self.sb,
-            if ino == FUSE_ROOT_ID {
-                self.sb.sb_rootino
-            } else {
-                ino as XfsIno
-            },
-        );
+        let f = &self.device;
+        let sb = &self.sb;
+        self.open_files.entry(ino)
+            .and_modify(|e| e.count +=1 )
+            .or_insert_with(|| {
+                let dinode = Dinode::from(
+                    BufReader::new(f).by_ref(),
+                    sb,
+                    if ino == FUSE_ROOT_ID {
+                        sb.sb_rootino
+                    } else {
+                        ino as XfsIno
+                    },
+                );
+                OpenInode{dinode, count: 1}
+            });
 
-        self.open_files.push(dinode);
-
-        reply.opened((self.open_files.len() as u64) - 1, FOPEN_KEEP_CACHE)
+        reply.opened(0, FOPEN_KEEP_CACHE)
     }
 
     fn read(
         &mut self,
         _req: &Request,
-        _ino: u64,
-        fh: u64,
+        ino: u64,
+        _fh: u64,
         offset: i64,
         size: u32,
         _flags: i32,
         _lock_owner: Option<u64>,
         reply: fuser::ReplyData,
     ) {
-        let dinode = &self.open_files[fh as usize];
+        let oi = &self.open_files.get(&ino).unwrap();
         let mut buf_reader = BufReader::new(&self.device);
 
-        let mut file = dinode.get_file(buf_reader.by_ref());
+        let mut file = oi.dinode.get_file(buf_reader.by_ref());
 
         match file.read(buf_reader.by_ref(), offset, size) {
             Ok((v, ignore)) => reply.data(&v[ignore..]),
@@ -188,18 +201,27 @@ impl Filesystem for Volume {
     fn release(
         &mut self,
         _req: &Request,
-        _ino: u64,
-        fh: u64,
+        ino: u64,
+        _fh: u64,
         _flags: i32,
         _lock_owner: Option<u64>,
         _flush: bool,
         reply: ReplyEmpty,
     ) {
-        self.open_files.remove(fh as usize);
+        match self.open_files.get_mut(&ino) {
+            Some(oi) => {
+                oi.count -= 1;
+                if oi.count == 0 {
+                    self.open_files.remove(&ino);
+                }
+            },
+            None => warn!("close without open for inode {}", ino)
+        }
 
         reply.ok();
     }
 
+    // TODO: use the inode cache
     fn opendir(&mut self, _req: &Request, _ino: u64, _flags: i32, reply: ReplyOpen) {
         reply.opened(0, 0);
     }

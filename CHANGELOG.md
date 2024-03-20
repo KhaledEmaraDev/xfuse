@@ -7,6 +7,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Fixed a crash when opening and closing multiple files simultaneously but not
+  in LIFO order.
+  ([#116](https://github.com/KhaledEmaraDev/xfuse/pull/116))
+
 - Eliminated sector-size-unaligned reads when using `O_DIRECT`.
   ([#112](https://github.com/KhaledEmaraDev/xfuse/pull/112))
 
