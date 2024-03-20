@@ -217,6 +217,38 @@ fn all_xattr_fork_types(h: fn() -> Harness, d: &str) {}
 #[case::btree3(harness1k, "xattrs/btree3")]
 fn all_xattr_fork_types_with_none(h: fn() -> Harness, d: &str) {}
 
+mod close {
+    use super::*;
+
+    /// Files can be closed in any order, not just LIFO
+    #[named]
+    #[rstest]
+    fn order(harness4k: Harness) {
+        require_fusefs!();
+
+        let path_a = harness4k.d.path().join("files").join("single_extent.txt");
+        let path_b = harness4k.d.path().join("files").join("four_extents.txt");
+
+        // First close in LIFO order
+        {
+            let fa = fs::File::open(&path_a).unwrap();
+            let fb = fs::File::open(&path_b).unwrap();
+            drop(fb);
+            drop(fa);
+        }
+        // Then close in FIFO order
+        {
+            let fa = fs::File::open(&path_a).unwrap();
+            let fb = fs::File::open(&path_b).unwrap();
+            drop(fa);
+            drop(fb);
+        }
+
+        // Ensure that daemon didn't crash
+        access(&path_a, AccessFlags::F_OK).unwrap();
+    }
+}
+
 /// Mount the image via md(4) and read all its metadata, to verify that we work
 /// with devices that require all accesses to be sector size aligned.
 mod dev {
@@ -698,6 +730,28 @@ mod lsextattr {
         } else {
             panic!("{}", io::Error::last_os_error());
         }
+    }
+}
+
+mod open {
+    use super::*;
+
+    /// Files can be opened multiple times
+    #[named]
+    #[rstest]
+    fn multiple(harness4k: Harness) {
+        require_fusefs!();
+
+        let path = harness4k.d.path().join("files").join("single_extent.txt");
+
+        let _f1 = fs::File::open(&path).unwrap();
+        // Open it again with a different mode.  This forces fusefs(4) to send a
+        // separate FUSE_OPEN request.
+        let _f2 = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_EXEC)
+            .open(&path)
+            .unwrap();
     }
 }
 
