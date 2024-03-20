@@ -42,7 +42,7 @@ use super::sb::Sb;
 use fuser::{
     Filesystem, ReplyAttr, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen,
     ReplyStatfs, ReplyXattr, Request, FUSE_ROOT_ID,
-    consts::FOPEN_KEEP_CACHE
+    consts::{FOPEN_KEEP_CACHE, FOPEN_CACHE_DIR}
 };
 use libc::ERANGE;
 use tracing::warn;
@@ -89,6 +89,25 @@ impl Volume {
             root_ino,
             open_files: HashMap::new(),
         }
+    }
+
+    fn open_inode(&mut self, ino: u64) {
+        let f = &self.device;
+        let sb = &self.sb;
+        self.open_files.entry(ino)
+            .and_modify(|e| e.count +=1 )
+            .or_insert_with(|| {
+                let dinode = Dinode::from(
+                    BufReader::new(f).by_ref(),
+                    sb,
+                    if ino == FUSE_ROOT_ID {
+                        sb.sb_rootino
+                    } else {
+                        ino as XfsIno
+                    },
+                );
+                OpenInode{dinode, count: 1}
+            });
     }
 }
 
@@ -156,23 +175,7 @@ impl Filesystem for Volume {
     }
 
     fn open(&mut self, _req: &Request, ino: u64, _flags: i32, reply: ReplyOpen) {
-        let f = &self.device;
-        let sb = &self.sb;
-        self.open_files.entry(ino)
-            .and_modify(|e| e.count +=1 )
-            .or_insert_with(|| {
-                let dinode = Dinode::from(
-                    BufReader::new(f).by_ref(),
-                    sb,
-                    if ino == FUSE_ROOT_ID {
-                        sb.sb_rootino
-                    } else {
-                        ino as XfsIno
-                    },
-                );
-                OpenInode{dinode, count: 1}
-            });
-
+        self.open_inode(ino);
         reply.opened(0, FOPEN_KEEP_CACHE)
     }
 
@@ -221,9 +224,9 @@ impl Filesystem for Volume {
         reply.ok();
     }
 
-    // TODO: use the inode cache
-    fn opendir(&mut self, _req: &Request, _ino: u64, _flags: i32, reply: ReplyOpen) {
-        reply.opened(0, 0);
+    fn opendir(&mut self, _req: &Request, ino: u64, _flags: i32, reply: ReplyOpen) {
+        self.open_inode(ino);
+        reply.opened(0, FOPEN_CACHE_DIR);
     }
 
     fn readdir(
@@ -235,14 +238,9 @@ impl Filesystem for Volume {
         mut reply: ReplyDirectory,
     ) {
         let mut buf_reader = BufReader::new(&self.device);
-        let inode_number = if ino == FUSE_ROOT_ID {
-            self.sb.sb_rootino
-        } else {
-            ino as XfsIno
-        };
-        let dinode = Dinode::from(buf_reader.by_ref(), &self.sb, inode_number);
+        let oi = &self.open_files.get(&ino).unwrap();
 
-        let dir = dinode.get_dir(buf_reader.by_ref(), &self.sb);
+        let dir = oi.dinode.get_dir(buf_reader.by_ref(), &self.sb);
 
         let mut off = offset;
         loop {
@@ -271,8 +269,8 @@ impl Filesystem for Volume {
         }
     }
 
-    fn releasedir(&mut self, _req: &Request, _ino: u64, _fh: u64, _flags: i32, reply: ReplyEmpty) {
-        reply.ok();
+    fn releasedir(&mut self, req: &Request, ino: u64, fh: u64, flags: i32, reply: ReplyEmpty) {
+        self.release(req, ino, fh, flags, None, false, reply)
     }
 
     fn statfs(&mut self, _req: &Request, _ino: u64, reply: ReplyStatfs) {
