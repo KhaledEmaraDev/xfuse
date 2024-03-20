@@ -113,17 +113,20 @@ impl Volume {
 
 impl Filesystem for Volume {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        let mut buf_reader = BufReader::new(&self.device);
-        let inode_number = if parent == FUSE_ROOT_ID {
-            self.sb.sb_rootino
-        } else {
-            parent as XfsIno
-        };
-        let dinode = Dinode::from(buf_reader.by_ref(), &self.sb, inode_number);
-
         let ttl = Duration::new(86400, 0);
-
-        let dir = dinode.get_dir(buf_reader.by_ref(), &self.sb);
+        let mut buf_reader = BufReader::new(&self.device);
+        let dir = match self.open_files.get(&parent) {
+            Some(oi) => oi.dinode.get_dir(buf_reader.by_ref(), &self.sb),
+            None => {
+                let inode_number = if parent == FUSE_ROOT_ID {
+                    self.sb.sb_rootino
+                } else {
+                    parent as XfsIno
+                };
+                let dinode = Dinode::from(buf_reader.by_ref(), &self.sb, inode_number);
+                dinode.get_dir(buf_reader.by_ref(), &self.sb)
+            }
+        };
 
         match dir.lookup(
             BufReader::new(&self.device).by_ref(),
@@ -138,18 +141,20 @@ impl Filesystem for Volume {
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
-        let dinode = Dinode::from(
-            BufReader::new(&self.device).by_ref(),
-            &self.sb,
-            if ino == FUSE_ROOT_ID {
-                self.sb.sb_rootino
-            } else {
-                ino as XfsIno
-            },
-        );
-
         let ttl = Duration::new(86400, 0);
-        let attr = dinode.di_core.stat(ino).expect("Unknown file type");
+        let attr = match self.open_files.get(&ino) {
+            Some(oi) => oi.dinode.di_core.stat(ino),
+            None => {
+                let inode_number = if ino == FUSE_ROOT_ID {
+                    self.sb.sb_rootino
+                } else {
+                    ino as XfsIno
+                };
+                let mut buf_reader = BufReader::new(&self.device);
+                let dinode = Dinode::from(buf_reader.by_ref(), &self.sb, inode_number);
+                dinode.di_core.stat(ino)
+            }
+        }.expect("Unknown file type");
 
         reply.attr(&ttl, &attr)
     }
@@ -292,14 +297,19 @@ impl Filesystem for Volume {
         let name = OsStr::from_bytes(nameparts.next().unwrap());
 
         let mut buf_reader = BufReader::new(&self.device);
-        let inode_number = if ino == FUSE_ROOT_ID {
-            self.sb.sb_rootino
-        } else {
-            ino as XfsIno
+        let attrs = match self.open_files.get(&ino) {
+            Some(oi) => oi.dinode.get_attrs(buf_reader.by_ref(), &self.sb),
+            None => {
+                let inode_number = if ino == FUSE_ROOT_ID {
+                    self.sb.sb_rootino
+                } else {
+                    ino as XfsIno
+                };
+                let dinode = Dinode::from(buf_reader.by_ref(), &self.sb, inode_number);
+                dinode.get_attrs(buf_reader.by_ref(), &self.sb)
+            }
         };
-        let dinode = Dinode::from(buf_reader.by_ref(), &self.sb, inode_number);
 
-        let attrs = dinode.get_attrs(buf_reader.by_ref(), &self.sb);
         match attrs {
             Some(attrs) => {
                 // TODO: make this part more efficient by omitting the
@@ -332,14 +342,19 @@ impl Filesystem for Volume {
 
     fn listxattr(&mut self, _req: &Request, ino: u64, size: u32, reply: ReplyXattr) {
         let mut buf_reader = BufReader::new(&self.device);
-        let inode_number = if ino == FUSE_ROOT_ID {
-            self.sb.sb_rootino
-        } else {
-            ino as XfsIno
+        let attrs = match self.open_files.get(&ino) {
+            Some(oi) => oi.dinode.get_attrs(buf_reader.by_ref(), &self.sb),
+            None => {
+                let inode_number = if ino == FUSE_ROOT_ID {
+                    self.sb.sb_rootino
+                } else {
+                    ino as XfsIno
+                };
+                let dinode = Dinode::from(buf_reader.by_ref(), &self.sb, inode_number);
+                dinode.get_attrs(buf_reader.by_ref(), &self.sb)
+            }
         };
-        let dinode = Dinode::from(buf_reader.by_ref(), &self.sb, inode_number);
 
-        let attrs = dinode.get_attrs(buf_reader.by_ref(), &self.sb);
         match attrs {
             Some(mut attrs) => {
                 let attrs_size = attrs.get_total_size(buf_reader.by_ref(), &self.sb);
