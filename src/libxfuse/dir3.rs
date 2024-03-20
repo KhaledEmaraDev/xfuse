@@ -485,6 +485,7 @@ pub trait Dir3 {
     }
 }
 
+#[derive(Debug)]
 #[enum_dispatch::enum_dispatch(Dir3)]
 pub enum Directory {
     Sf(super::dir3_sf::Dir2Sf),

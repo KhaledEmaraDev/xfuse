@@ -80,6 +80,8 @@ pub struct Dinode {
     pub di_core: DinodeCore,
     pub di_u: DiU,
     pub di_a: Option<DiA>,
+    /// Cache of this inode's directory object, if any.
+    directory: Option<Directory>
 }
 
 impl Dinode {
@@ -316,39 +318,44 @@ impl Dinode {
             di_core,
             di_u: di_u.unwrap(),
             di_a,
+            directory: None
         }
     }
 
     pub fn get_dir<R: bincode::de::read::Reader + BufRead + Seek>(
-        &self,
+        &mut self,
         buf_reader: &mut R,
         superblock: &Sb,
-    ) -> Directory {
-        match &self.di_u {
-            DiU::Dir2Sf(dir) => Directory::Sf(dir.clone()),
-            DiU::Bmx(bmx) => {
-                let leaf_start = superblock.get_dir3_leaf_offset();
-                if bmx.len() == 1 {
-                    Directory::Block(Dir2Block::from(
-                        buf_reader.by_ref(),
-                        superblock,
-                        bmx[0].br_startblock,
-                    ))
-                } else if bmx.iter().filter(|e| e.br_startoff >= leaf_start).count() > 1 {
-                    Directory::Node(Dir2Node::from(bmx.clone()))
-                } else {
-                    Directory::Leaf(Dir2Leaf::from(buf_reader.by_ref(), superblock, bmx))
+    ) -> &Directory {
+        if self.directory.is_none() {
+            let directory = match &self.di_u {
+                DiU::Dir2Sf(dir) => Directory::Sf(dir.clone()),
+                DiU::Bmx(bmx) => {
+                    let leaf_start = superblock.get_dir3_leaf_offset();
+                    if bmx.len() == 1 {
+                        Directory::Block(Dir2Block::from(
+                            buf_reader.by_ref(),
+                            superblock,
+                            bmx[0].br_startblock,
+                        ))
+                    } else if bmx.iter().filter(|e| e.br_startoff >= leaf_start).count() > 1 {
+                        Directory::Node(Dir2Node::from(bmx.clone()))
+                    } else {
+                        Directory::Leaf(Dir2Leaf::from(buf_reader.by_ref(), superblock, bmx))
+                    }
                 }
-            }
-            DiU::Bmbt((bmbt, keys, pointers)) => Directory::Btree(Dir2Btree::from(
-                bmbt.clone(),
-                keys.clone(),
-                pointers.clone(),
-            )),
-            _ => {
-                panic!("Unsupported dir format!");
-            }
+                DiU::Bmbt((bmbt, keys, pointers)) => Directory::Btree(Dir2Btree::from(
+                    bmbt.clone(),
+                    keys.clone(),
+                    pointers.clone(),
+                )),
+                _ => {
+                    panic!("Unsupported dir format!");
+                }
+            };
+            self.directory = Some(directory);
         }
+        self.directory.as_ref().unwrap()
     }
 
     pub fn get_file<R: bincode::de::read::Reader + BufRead + Seek>(
