@@ -26,6 +26,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
@@ -312,26 +313,18 @@ impl Filesystem for Volume {
 
         match attrs {
             Some(attrs) => {
-                // TODO: make this part more efficient by omitting the
-                // "get_size" step.  It doesn't need to be a separate step
-                // because we aren't using a user-supplied buffer.  Instead,
-                // just get the whole value and check its size right here.
-                match attrs.get_size(buf_reader.by_ref(), &self.sb, name) {
-                    Ok(attrs_size) => {
+                match attrs.get(buf_reader.by_ref(), &self.sb, name) {
+                    Ok(value) => {
+                        let len: u32 = value.len().try_into().unwrap();
                         if size == 0 {
-                            reply.size(attrs_size);
-                        } else if attrs_size > size {
+                            reply.size(len);
+                        } else if len > size {
                             reply.error(ERANGE);
                         } else {
-                            match attrs.get(buf_reader.by_ref(), &self.sb, name) {
-                                Ok(a) => reply.data(a.as_slice()),
-                                Err(e) => reply.error(e)
-                            }
+                             reply.data(value.as_slice())
                         }
-                    }
-                    Err(e) => {
-                        reply.error(e)
-                    }
+                    },
+                    Err(e) => reply.error(e)
                 }
             }
             None => {

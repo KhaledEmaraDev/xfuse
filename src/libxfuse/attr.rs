@@ -193,13 +193,6 @@ impl AttrLeafName {
             }
         }
     }
-
-    fn valuelen(&self) -> u32 {
-        match self {
-            AttrLeafName::Local(local) => local.valuelen.into(),
-            AttrLeafName::Remote(remote) => remote.valuelen,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -222,14 +215,6 @@ impl AttrLeafblock {
         total
     }
 
-    pub fn get_size(&self, hash: u32) -> Result<u32, libc::c_int> {
-        // TODO: handle hash collisions
-        match self.entries.binary_search_by_key(&hash, |entry| entry.hashval) {
-            Ok(i) => Ok(self.names[i].valuelen()),
-            Err(_) => Err(libc::ENOATTR)
-        }
-    }
-
     pub fn list(&mut self, list: &mut Vec<u8>) {
         for (entry, name_entry) in std::iter::zip(self.entries.iter(), self.names.iter()) {
             list.extend_from_slice(get_namespace_from_flags(entry.flags));
@@ -238,17 +223,15 @@ impl AttrLeafblock {
         }
     }
 
-    // TODO: return ENOENT instead of panicing.  It might be due to a hash collision one level up
-    // the tree.
     pub fn get<R: BufRead + Reader + Seek, F: Fn(XfsFileoff, &mut R) -> XfsFsblock>(
         &self,
         buf_reader: &mut R,
         hash: u32,
         map_logical_block_to_fs_block: F,
-    ) -> Vec<u8> {
+    ) -> Result<Vec<u8>, i32> {
         match self.entries.binary_search_by_key(&hash, |entry| entry.hashval) {
-            Ok(i) => self.names[i].value(buf_reader, map_logical_block_to_fs_block),
-            Err(_) => panic!("Couldn't find the attribute entry")
+            Ok(i) => Ok(self.names[i].value(buf_reader, map_logical_block_to_fs_block)),
+            Err(_) => Err(libc::ENOATTR)
         }
     }
 }
@@ -353,8 +336,6 @@ impl AttrRmtHdr {
 
 pub trait Attr<R: BufRead + Seek> {
     fn get_total_size(&mut self, buf_reader: &mut R, super_block: &Sb) -> u32;
-
-    fn get_size(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Result<u32, libc::c_int>;
 
     fn list(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8>;
 

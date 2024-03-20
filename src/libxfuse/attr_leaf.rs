@@ -73,12 +73,6 @@ impl<R: BufRead + Reader + Seek> Attr<R> for AttrLeaf {
         }
     }
 
-    fn get_size(&self, _buf_reader: &mut R, _super_block: &Sb, name: &OsStr) -> Result<u32, libc::c_int> {
-        let hash = hashname(name);
-
-        self.leaf.get_size(hash)
-    }
-
     fn list(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8> {
         let mut list: Vec<u8> =
             Vec::with_capacity(self.get_total_size(buf_reader.by_ref(), super_block) as usize);
@@ -91,11 +85,11 @@ impl<R: BufRead + Reader + Seek> Attr<R> for AttrLeaf {
     fn get(&self, buf_reader: &mut R, _super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, i32> {
         let hash = hashname(name);
 
-        Ok(self.leaf.get(
+        self.leaf.get(
             buf_reader.by_ref(),
             hash,
             |block, _| self.map_logical_block_to_actual_block(block),
-        ))
+        )
     }
 }
 

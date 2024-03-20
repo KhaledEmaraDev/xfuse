@@ -106,18 +106,6 @@ impl<R: BufRead + Seek> Attr<R> for AttrShortform {
         self.total_size
     }
 
-    fn get_size(&self, _buf_reader: &mut R, _super_block: &Sb, name: &OsStr) -> Result<u32, libc::c_int> {
-        for entry in &self.list {
-            let entry_name = entry.nameval[0..(entry.namelen as usize)].to_vec();
-
-            if name.as_bytes().to_vec() == entry_name {
-                return Ok(entry.valuelen.into());
-            }
-        }
-
-        Err(libc::ENOATTR)
-    }
-
     fn list(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8> {
         let mut list: Vec<u8> =
             Vec::with_capacity(self.get_total_size(buf_reader.by_ref(), super_block) as usize);
@@ -143,6 +131,6 @@ impl<R: BufRead + Seek> Attr<R> for AttrShortform {
             }
         }
 
-        unreachable!("Volume::getxattr should've already verified that the attribute exists");
+        Err(libc::ENOATTR)
     }
 }
