@@ -114,35 +114,34 @@ impl Volume {
                 OpenInode{dinode, count: 1}
             });
     }
+    
+    // Execute a function that requires a Dinode, which may or may not already be open and cached
+    fn with_inode<F, R>(&mut self, ino: u64, f: F) -> R
+        where F: FnOnce(&File, &Sb, &mut Dinode) -> R
+    {
+        match self.open_files.get_mut(&ino) {
+            Some(oi) => f(&self.device, &self.sb, &mut oi.dinode),
+            None => {
+                let inode_number = if ino == FUSE_ROOT_ID {
+                    self.sb.sb_rootino
+                } else {
+                    ino as XfsIno
+                };
+                let mut buf_reader = BufReader::new(&self.device);
+                let mut dinode = Dinode::from(buf_reader.by_ref(), &self.sb, inode_number);
+                f(&self.device, &self.sb, &mut dinode)
+            }
+        }
+    }
 }
 
 impl Filesystem for Volume {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        let mut buf_reader = BufReader::new(&self.device);
-        let r = match self.open_files.get_mut(&parent) {
-            Some(oi) => {
-                let dir = oi.dinode.get_dir(buf_reader.by_ref(), &self.sb);
-                dir.lookup(
-                    BufReader::new(&self.device).by_ref(),
-                    &self.sb,
-                    name,
-                )
-            },
-            None => {
-                let inode_number = if parent == FUSE_ROOT_ID {
-                    self.sb.sb_rootino
-                } else {
-                    parent as XfsIno
-                };
-                let mut dinode = Dinode::from(buf_reader.by_ref(), &self.sb, inode_number);
-                let dir = dinode.get_dir(buf_reader.by_ref(), &self.sb);
-                dir.lookup(
-                    BufReader::new(&self.device).by_ref(),
-                    &self.sb,
-                    name,
-                )
-            }
-        };
+        let r = self.with_inode(parent, |dev, sb, dinode| {
+            let mut buf_reader = BufReader::new(dev);
+            let dir = dinode.get_dir(buf_reader.by_ref(), sb);
+            dir.lookup(buf_reader.by_ref(), sb, name)
+        });
 
         match r {
             Ok((attr, generation)) => {
@@ -153,19 +152,9 @@ impl Filesystem for Volume {
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
-        let attr = match self.open_files.get(&ino) {
-            Some(oi) => oi.dinode.di_core.stat(ino),
-            None => {
-                let inode_number = if ino == FUSE_ROOT_ID {
-                    self.sb.sb_rootino
-                } else {
-                    ino as XfsIno
-                };
-                let mut buf_reader = BufReader::new(&self.device);
-                let dinode = Dinode::from(buf_reader.by_ref(), &self.sb, inode_number);
-                dinode.di_core.stat(ino)
-            }
-        }.expect("Unknown file type");
+        let attr = self.with_inode(ino, |_dev, _sb, dinode| {
+            dinode.di_core.stat(ino)
+        }).expect("Unknown file type");
 
         reply.attr(&Self::TTL, &attr)
     }
@@ -307,81 +296,59 @@ impl Filesystem for Volume {
         let _namespace = nameparts.next().unwrap();
         let name = OsStr::from_bytes(nameparts.next().unwrap());
 
-        let mut buf_reader = BufReader::new(&self.device);
-        let attrs = match self.open_files.get(&ino) {
-            Some(oi) => oi.dinode.get_attrs(buf_reader.by_ref(), &self.sb),
-            None => {
-                let inode_number = if ino == FUSE_ROOT_ID {
-                    self.sb.sb_rootino
-                } else {
-                    ino as XfsIno
-                };
-                let dinode = Dinode::from(buf_reader.by_ref(), &self.sb, inode_number);
-                dinode.get_attrs(buf_reader.by_ref(), &self.sb)
-            }
-        };
-
-        match attrs {
-            Some(attrs) => {
-                match attrs.get(buf_reader.by_ref(), &self.sb, name) {
-                    Ok(value) => {
-                        let len: u32 = value.len().try_into().unwrap();
-                        if size == 0 {
-                            reply.size(len);
-                        } else if len > size {
-                            reply.error(ERANGE);
-                        } else {
-                             reply.data(value.as_slice())
-                        }
-                    },
-                    Err(e) => reply.error(e)
+        self.with_inode(ino, |dev, sb, dinode| {
+            let mut buf_reader = BufReader::new(dev);
+            match dinode.get_attrs(buf_reader.by_ref(), sb) {
+                Some(attrs) => {
+                    match attrs.get(buf_reader.by_ref(), sb, name) {
+                        Ok(value) => {
+                            let len: u32 = value.len().try_into().unwrap();
+                            if size == 0 {
+                                reply.size(len);
+                            } else if len > size {
+                                reply.error(ERANGE);
+                            } else {
+                                 reply.data(value.as_slice())
+                            }
+                        },
+                        Err(e) => reply.error(e)
+                    }
+                }
+                None => {
+                    reply.error(libc::ENOATTR);
                 }
             }
-            None => {
-                reply.error(libc::ENOATTR);
-            }
-        }
+        });
     }
 
     fn listxattr(&mut self, _req: &Request, ino: u64, size: u32, reply: ReplyXattr) {
-        let mut buf_reader = BufReader::new(&self.device);
-        let attrs = match self.open_files.get(&ino) {
-            Some(oi) => oi.dinode.get_attrs(buf_reader.by_ref(), &self.sb),
-            None => {
-                let inode_number = if ino == FUSE_ROOT_ID {
-                    self.sb.sb_rootino
-                } else {
-                    ino as XfsIno
-                };
-                let dinode = Dinode::from(buf_reader.by_ref(), &self.sb, inode_number);
-                dinode.get_attrs(buf_reader.by_ref(), &self.sb)
-            }
-        };
+        self.with_inode(ino, |dev, sb, dinode| {
+            let mut buf_reader = BufReader::new(dev);
+            match dinode.get_attrs(buf_reader.by_ref(), sb) {
+                Some(mut attrs) => {
+                    let attrs_size = attrs.get_total_size(buf_reader.by_ref(), sb);
 
-        match attrs {
-            Some(mut attrs) => {
-                let attrs_size = attrs.get_total_size(buf_reader.by_ref(), &self.sb);
+                    if size == 0 {
+                        reply.size(attrs_size);
+                        return;
+                    }
 
-                if size == 0 {
-                    reply.size(attrs_size);
-                    return;
+                    if attrs_size > size {
+                        reply.error(ERANGE);
+                        return;
+                    }
+
+                    let list = attrs.list(buf_reader.by_ref(), sb);
+                    // Assert that we calculated the list size correctly.  This assertion is only
+                    // safe since we're a read-only file system.
+                    assert_eq!(list.len(), attrs_size as usize, "size calculation was wrong!");
+                    reply.data(list.as_slice());
                 }
-
-                if attrs_size > size {
-                    reply.error(ERANGE);
-                    return;
+                None => {
+                    reply.size(0);
                 }
-
-                let list = attrs.list(buf_reader.by_ref(), &self.sb);
-                // Assert that we calculated the list size correctly.  This assertion is only safe
-                // since we're a read-only file system.
-                assert_eq!(list.len(), attrs_size as usize, "size calculation was wrong!");
-                reply.data(list.as_slice());
             }
-            None => {
-                reply.size(0);
-            }
-        }
+        })
     }
 
     fn access(&mut self, _req: &Request, _ino: u64, _mask: i32, reply: ReplyEmpty) {
