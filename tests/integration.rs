@@ -319,6 +319,7 @@ mod dev {
 
     #[named]
     #[rstest]
+    #[case::large_extent(GOLDEN4K.as_path(), "large_extent.txt", 8448)]
     #[case::partial_extent(GOLDEN4K.as_path(), "partial_extent.txt", 8448)]
     #[case::single_extent(GOLDEN4K.as_path(), "single_extent.txt", 4096)]
     #[case::four_extents(GOLDEN4K.as_path(), "four_extents.txt", 16384)]
@@ -774,6 +775,8 @@ mod read {
 
     #[template]
     #[rstest]
+    #[case::large_extent_4k(harness4k, "large_extent.txt", 1048576)]
+    #[case::large_extent_1k(harness1k, "large_extent.txt", 1048576)]
     #[case::partial_extent(harness4k, "partial_extent.txt", 8448)]
     #[case::single_extent(harness4k, "single_extent.txt", 4096)]
     #[case::four_extents(harness4k, "four_extents.txt", 16384)]
@@ -1171,7 +1174,7 @@ fn statfs(harness4k: Harness) {
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
     // here.
-    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 744);
+    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 745);
 
     // There are legitimate questions about what the correct value for
     // optimal_transfer_size
@@ -1196,7 +1199,7 @@ fn statvfs(harness4k: Harness) {
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
     // here.
-    assert_eq!(svfs.files() - svfs.files_free(), 744);
+    assert_eq!(svfs.files() - svfs.files_free(), 745);
     assert_eq!(svfs.files_free(), svfs.files_available());
 
     // Linux's calculation for blocks available and free is complicated and the

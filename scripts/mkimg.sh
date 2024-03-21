@@ -50,7 +50,9 @@ mkattrs() {
 		setfattr -n user.remote_attr.% -v ________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________.% $FILE
 }
 
-fill_file() {
+# Write a file that has as many fragments as possible.  Each 16-byte line of
+# the file will contain the byte offset in ASCII.
+write_fragmented_file() {
 	FILE=$1
 	BSIZE=$2
 	EXTENTS=$3
@@ -68,6 +70,15 @@ fill_file() {
 			fallocate -c -o $(( ( $i + 1 ) * $BSIZE )) -l $BSIZE $FILE
 		done
 	fi
+}
+
+# Write a file that has as few fragments as possible.  Each 16-byte line of the
+# file will contain the byte offset in ASCII.
+write_sequential_file() {
+	FILE=$1
+	FSIZE=$2
+
+	jot -n -w %016x -s "" $(( $FSIZE / 16 )) 0 $FSIZE 16 >> $FILE
 }
 
 mkfs_4096() {
@@ -140,20 +151,21 @@ mkfs_4096() {
 	# 16		btree	1		1
 	# 2048		btree	1		9
 	# 4096		btree	2		1
-	fill_file ${MNTDIR}/files/partial_extent.txt 8448 1
-	fill_file ${MNTDIR}/files/single_extent.txt 4096 1
-	fill_file ${MNTDIR}/files/four_extents.txt 4096 4
-	fill_file ${MNTDIR}/files/btree2.txt 4096 16
-	fill_file ${MNTDIR}/files/btree2.4.txt 4096 2048
-	fill_file ${MNTDIR}/files/btree3.txt 4096 4096
+	write_sequential_file ${MNTDIR}/files/large_extent.txt 1048576
+	write_fragmented_file ${MNTDIR}/files/partial_extent.txt 8448 1
+	write_fragmented_file ${MNTDIR}/files/single_extent.txt 4096 1
+	write_fragmented_file ${MNTDIR}/files/four_extents.txt 4096 4
+	write_fragmented_file ${MNTDIR}/files/btree2.txt 4096 16
+	write_fragmented_file ${MNTDIR}/files/btree2.4.txt 4096 2048
+	write_fragmented_file ${MNTDIR}/files/btree3.txt 4096 4096
 
 	# Now create some sparse files
 	truncate -s 1T ${MNTDIR}/files/sparse.fully.txt
-	fill_file ${MNTDIR}/files/sparse.extents.txt 4096 4
+	write_fragmented_file ${MNTDIR}/files/sparse.extents.txt 4096 4
 	fallocate -p -o 0 -l 4096 ${MNTDIR}/files/sparse.extents.txt
-	fill_file ${MNTDIR}/files/sparse.btree.txt 4096 16
+	write_fragmented_file ${MNTDIR}/files/sparse.btree.txt 4096 16
 	fallocate -p -o 0 -l 4096 ${MNTDIR}/files/sparse.btree.txt
-	fill_file ${MNTDIR}/files/hole_at_end.txt 4096 4
+	write_fragmented_file ${MNTDIR}/files/hole_at_end.txt 4096 4
 	truncate -s 20480 ${MNTDIR}/files/hole_at_end.txt 
 
 	# Create a directory containing files of every possible name length
@@ -231,12 +243,13 @@ mkfs_512() {
 	# 32768		btree	2		10
 	# 65536		btree	2		19
 	mkdir ${MNTDIR}/files
-	fill_file ${MNTDIR}/files/btree2.2.txt 1024 64
-	fill_file ${MNTDIR}/files/btree3.txt 1024 2048
-	fill_file ${MNTDIR}/files/btree3.3.txt 1024 8192
+	write_sequential_file ${MNTDIR}/files/large_extent.txt 1048576
+	write_fragmented_file ${MNTDIR}/files/btree2.2.txt 1024 64
+	write_fragmented_file ${MNTDIR}/files/btree3.txt 1024 2048
+	write_fragmented_file ${MNTDIR}/files/btree3.3.txt 1024 8192
 
 	# Create a regular file that also has an xattr
-	fill_file ${MNTDIR}/files/btree2_with_xattrs.txt 1024 64
+	write_fragmented_file ${MNTDIR}/files/btree2_with_xattrs.txt 1024 64
 	setfattr -n user.foo -v bar ${MNTDIR}/files/btree2_with_xattrs.txt
 
 	# Allocate a file with a BTree extent list for its xattrs.  This is

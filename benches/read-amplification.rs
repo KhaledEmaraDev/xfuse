@@ -116,7 +116,10 @@ const BENCHES: &[Bench] = &[
     Bench::new("metadata-node3", Image::Golden1K, stat_node3),
     Bench::new("metadata-btree2.3", Image::Golden1K, stat_btree2_3),
     Bench::new("metadata-btree3", Image::Golden1K, stat_btree3),
-    Bench::new("data", Image::Golden1K, read_all_data),
+    Bench::new("data-fragmented-1k", Image::Golden1K, read_fragmented_1k),
+    Bench::new("data-fragmented-4k", Image::Golden4K, read_fragmented_4k),
+    Bench::new("data-sequential-1k", Image::Golden1K, read_sequential),
+    Bench::new("data-sequential-4k", Image::Golden4K, read_sequential),
     Bench::new("xattr", Image::Golden1K, read_all_xattrs)
 ];
 
@@ -172,19 +175,33 @@ fn stat_btree3(mountpoint: &Path) -> u64 {
     stat_files(&mountpoint.join("btree3"), 1024)
 }
 
-/// Read all dense files, sequentially
-fn read_all_data(path: &Path) -> u64 {
+fn read_files(mountpoint: &Path, files: &[&'static str]) -> u64 {
     let mut user_data = 0;
     let mut buf = Vec::new();
-    for file in [
-        "btree2.2.txt", "btree3.txt", "btree3.3.txt", "btree2_with_xattrs.txt"]
-    {
+    for file in files {
         buf.truncate(0);
-        let mut f = File::open(path.join("files").join(file)).unwrap();
+        let mut f = File::open(mountpoint.join("files").join(file)).unwrap();
         f.read_to_end(&mut buf).unwrap();
         user_data += u64::try_from(buf.len()).unwrap();
     }
     user_data
+}
+
+/// Read all fragmented dense files in the 4k golden image, sequentially
+fn read_fragmented_1k(mountpoint: &Path) -> u64 {
+    read_files(mountpoint,
+               &["btree2.2.txt", "btree3.txt", "btree3.3.txt", "btree2_with_xattrs.txt"])
+}
+
+/// Read all fragmented dense files in the 1k golden image, sequentially
+fn read_fragmented_4k(mountpoint: &Path) -> u64 {
+    read_files(mountpoint, &["partial_extent.txt", "single_extent.txt", "four_extents.txt",
+               "btree2.txt", "btree2.4.txt", "btree3.txt"])
+}
+
+/// Read all sequential dense files, sequentially
+fn read_sequential(mountpoint: &Path) -> u64 {
+    read_files(mountpoint, &["large_extent.txt"])
 }
 
 /// Read all xattrs from files that have them, sequentially.
