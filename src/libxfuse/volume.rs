@@ -69,6 +69,10 @@ pub struct Volume {
 }
 
 impl Volume {
+    // Allow the kernel to cache attributes and entries for an unlimited amount
+    // of time, since nothing will ever change.
+    const TTL: Duration = Duration::from_secs(u64::MAX);
+
     pub fn from(device_name: &str) -> Volume {
         let device = File::open(device_name).unwrap();
         let mut buf_reader = BufReader::new(&device);
@@ -114,7 +118,6 @@ impl Volume {
 
 impl Filesystem for Volume {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        let ttl = Duration::new(86400, 0);
         let mut buf_reader = BufReader::new(&self.device);
         let r = match self.open_files.get_mut(&parent) {
             Some(oi) => {
@@ -143,14 +146,13 @@ impl Filesystem for Volume {
 
         match r {
             Ok((attr, generation)) => {
-                reply.entry(&ttl, &attr, generation);
+                reply.entry(&Self::TTL, &attr, generation);
             }
             Err(err) => reply.error(err),
         };
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
-        let ttl = Duration::new(86400, 0);
         let attr = match self.open_files.get(&ino) {
             Some(oi) => oi.dinode.di_core.stat(ino),
             None => {
@@ -165,7 +167,7 @@ impl Filesystem for Volume {
             }
         }.expect("Unknown file type");
 
-        reply.attr(&ttl, &attr)
+        reply.attr(&Self::TTL, &attr)
     }
 
     fn readlink(&mut self, _req: &Request, ino: u64, reply: fuser::ReplyData) {
