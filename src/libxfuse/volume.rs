@@ -56,7 +56,7 @@ pub(super) static SUPERBLOCK: OnceLock<Sb> = OnceLock::new();
 #[derive(Debug)]
 struct OpenInode {
     dinode: Dinode,
-    count: u32
+    count: u64
 }
 
 #[derive(Debug)]
@@ -64,7 +64,6 @@ pub struct Volume {
     pub device: File,
     pub sb: Sb,
     pub agi: Agi,
-    pub root_ino: Dinode,
     open_files: HashMap<u64, OpenInode>,
 }
 
@@ -85,18 +84,20 @@ impl Volume {
             .unwrap();
         let agi = Agi::from(buf_reader.by_ref());
 
-        let root_ino = Dinode::from(buf_reader.by_ref(), &superblock, superblock.sb_rootino);
+        let root_inode = Dinode::from(buf_reader.by_ref(), &superblock, superblock.sb_rootino);
+        let mut open_files = HashMap::new();
+        // Prepopulate the root inode into the cache, since fusefs never sends a lookup for it.
+        open_files.insert(FUSE_ROOT_ID, OpenInode{dinode: root_inode, count: 1});
 
         Volume {
             device,
             sb: superblock,
             agi,
-            root_ino,
-            open_files: HashMap::new(),
+            open_files
         }
     }
 
-    fn open_inode(&mut self, ino: u64) {
+    fn open_inode(&mut self, ino: u64) -> &mut OpenInode{
         let f = &self.device;
         let sb = &self.sb;
         self.open_files.entry(ino)
@@ -112,78 +113,77 @@ impl Volume {
                     },
                 );
                 OpenInode{dinode, count: 1}
-            });
-    }
-    
-    // Execute a function that requires a Dinode, which may or may not already be open and cached
-    fn with_inode<F, R>(&mut self, ino: u64, f: F) -> R
-        where F: FnOnce(&File, &Sb, &mut Dinode) -> R
-    {
-        match self.open_files.get_mut(&ino) {
-            Some(oi) => f(&self.device, &self.sb, &mut oi.dinode),
-            None => {
-                let inode_number = if ino == FUSE_ROOT_ID {
-                    self.sb.sb_rootino
-                } else {
-                    ino as XfsIno
-                };
-                let mut buf_reader = BufReader::with_capacity(self.sb.sb_inodesize.into(),
-                    &self.device);
-                let mut dinode = Dinode::from(buf_reader.by_ref(), &self.sb, inode_number);
-                f(&self.device, &self.sb, &mut dinode)
-            }
-        }
+            })
     }
 }
 
 impl Filesystem for Volume {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        let r = self.with_inode(parent, |dev, sb, dinode| {
-            let dirsize = sb.sb_blocksize << sb.sb_dirblklog;
-            let mut buf_reader = BufReader::with_capacity(dirsize as usize, dev);
-            let dir = dinode.get_dir(buf_reader.by_ref(), sb);
-            dir.lookup(buf_reader.by_ref(), sb, name)
-        });
-
-        match r {
-            Ok((attr, generation)) => {
-                reply.entry(&Self::TTL, &attr, generation);
+        let parent_oi = &mut self.open_files.get_mut(&parent).unwrap();
+        let dirsize = self.sb.sb_blocksize << self.sb.sb_dirblklog;
+        let mut buf_reader = BufReader::with_capacity(dirsize as usize, &self.device);
+        let dir = parent_oi.dinode.get_dir(buf_reader.by_ref(), &self.sb);
+        match dir.lookup(buf_reader.by_ref(), &self.sb, name) {
+            Ok(ino) => {
+                let oi = self.open_inode(ino);
+                match oi.dinode.di_core.stat(ino) {
+                    Ok(attr) => {
+                        // We don't need to report the inode generation since this is a read-only
+                        // file system.  But we'll do it anyway.
+                        reply.entry(&Self::TTL, &attr, oi.dinode.di_core.di_gen.into())
+                    },
+                    Err(err) => reply.error(err)
+                }
             }
             Err(err) => reply.error(err),
-        };
+        }
+    }
+
+    fn forget(&mut self, _req: &Request, ino: u64, nlookup: u64) {
+        if ino == FUSE_ROOT_ID {
+            // Special case: since fusefs never does a lookup for the root
+            // inode, its FORGETs may be "unmatched"
+            return;
+        }
+        match self.open_files.get_mut(&ino) {
+            Some(oi) => {
+                oi.count -= nlookup;
+                if oi.count == 0 {
+                    self.open_files.remove(&ino);
+                } else {
+                    // AFAICT the kernel will never send a partial forget.  Alert the admin if it
+                    // ever happens.
+                    warn!("Partial forget for ino {}", ino);
+                }
+            },
+            None => warn!("Forget without lookup for inode {}", ino)
+        }
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
-        let attr = self.with_inode(ino, |_dev, _sb, dinode| {
-            dinode.di_core.stat(ino)
-        }).expect("Unknown file type");
+        let attr = self.open_files.get(&ino)
+            .expect("getattr before lookup")
+            .dinode.di_core
+            .stat(ino)
+            .expect("Unknown file type");
 
         reply.attr(&Self::TTL, &attr)
     }
 
     fn readlink(&mut self, _req: &Request, ino: u64, reply: fuser::ReplyData) {
-        let dinode = Dinode::from(
-            BufReader::with_capacity(self.sb.sb_inodesize.into(), &self.device).by_ref(),
-            &self.sb,
-            if ino == FUSE_ROOT_ID {
-                self.sb.sb_rootino
-            } else {
-                ino as XfsIno
-            },
-        );
-
         let mut buf_reader = BufReader::with_capacity(self.sb.sb_blocksize as usize,
                                                       &self.device);
-
         reply.data(
-            dinode
+            self.open_files.get(&ino)
+                .expect("readlink before lookup")
+                .dinode
                 .get_link_data(buf_reader.by_ref(), &self.sb)
                 .as_bytes(),
         );
     }
 
-    fn open(&mut self, _req: &Request, ino: u64, _flags: i32, reply: ReplyOpen) {
-        self.open_inode(ino);
+    // TODO: try FUSE_NO_OPEN_SUPPORT
+    fn open(&mut self, _req: &Request, _ino: u64, _flags: i32, reply: ReplyOpen) {
         reply.opened(0, FOPEN_KEEP_CACHE)
     }
 
@@ -209,31 +209,8 @@ impl Filesystem for Volume {
         }
     }
 
-    fn release(
-        &mut self,
-        _req: &Request,
-        ino: u64,
-        _fh: u64,
-        _flags: i32,
-        _lock_owner: Option<u64>,
-        _flush: bool,
-        reply: ReplyEmpty,
-    ) {
-        match self.open_files.get_mut(&ino) {
-            Some(oi) => {
-                oi.count -= 1;
-                if oi.count == 0 {
-                    self.open_files.remove(&ino);
-                }
-            },
-            None => warn!("close without open for inode {}", ino)
-        }
-
-        reply.ok();
-    }
-
-    fn opendir(&mut self, _req: &Request, ino: u64, _flags: i32, reply: ReplyOpen) {
-        self.open_inode(ino);
+    // TODO: try FUSE_NO_OPENDIR_SUPPORT
+    fn opendir(&mut self, _req: &Request, _ino: u64, _flags: i32, reply: ReplyOpen) {
         reply.opened(0, FOPEN_CACHE_DIR);
     }
 
@@ -278,10 +255,6 @@ impl Filesystem for Volume {
         }
     }
 
-    fn releasedir(&mut self, req: &Request, ino: u64, fh: u64, flags: i32, reply: ReplyEmpty) {
-        self.release(req, ino, fh, flags, None, false, reply)
-    }
-
     fn statfs(&mut self, _req: &Request, _ino: u64, reply: ReplyStatfs) {
         reply.statfs(
             self.sb.sb_dblocks - u64::from(self.sb.sb_logblocks),
@@ -300,59 +273,57 @@ impl Filesystem for Volume {
         let _namespace = nameparts.next().unwrap();
         let name = OsStr::from_bytes(nameparts.next().unwrap());
 
-        self.with_inode(ino, |dev, sb, dinode| {
-            let mut buf_reader = BufReader::with_capacity(sb.sb_blocksize as usize, dev);
-            match dinode.get_attrs(buf_reader.by_ref(), sb) {
-                Some(attrs) => {
-                    match attrs.get(buf_reader.by_ref(), sb, name) {
-                        Ok(value) => {
-                            let len: u32 = value.len().try_into().unwrap();
-                            if size == 0 {
-                                reply.size(len);
-                            } else if len > size {
-                                reply.error(ERANGE);
-                            } else {
-                                 reply.data(value.as_slice())
-                            }
-                        },
-                        Err(e) => reply.error(e)
-                    }
-                }
-                None => {
-                    reply.error(libc::ENOATTR);
+        let oi = &mut self.open_files.get_mut(&ino).unwrap();
+        let mut buf_reader = BufReader::with_capacity(self.sb.sb_blocksize as usize, &self.device);
+        match oi.dinode.get_attrs(buf_reader.by_ref(), &self.sb) {
+            Some(attrs) => {
+                match attrs.get(buf_reader.by_ref(), &self.sb, name) {
+                    Ok(value) => {
+                        let len: u32 = value.len().try_into().unwrap();
+                        if size == 0 {
+                            reply.size(len);
+                        } else if len > size {
+                            reply.error(ERANGE);
+                        } else {
+                             reply.data(value.as_slice())
+                        }
+                    },
+                    Err(e) => reply.error(e)
                 }
             }
-        });
+            None => {
+                reply.error(libc::ENOATTR);
+            }
+        }
     }
 
     fn listxattr(&mut self, _req: &Request, ino: u64, size: u32, reply: ReplyXattr) {
-        self.with_inode(ino, |dev, sb, dinode| {
-            let mut buf_reader = BufReader::with_capacity(sb.sb_blocksize as usize, dev);
-            match dinode.get_attrs(buf_reader.by_ref(), sb) {
-                Some(mut attrs) => {
-                    let attrs_size = attrs.get_total_size(buf_reader.by_ref(), sb);
+        let oi = &mut self.open_files.get_mut(&ino).expect("listxattr before lookup");
+        let mut buf_reader = BufReader::with_capacity(self.sb.sb_blocksize as usize, &self.device);
+        match oi.dinode.get_attrs(buf_reader.by_ref(), &self.sb) {
+            Some(mut attrs) => {
+                let attrs_size = attrs.get_total_size(buf_reader.by_ref(), &self.sb);
 
-                    if size == 0 {
-                        reply.size(attrs_size);
-                        return;
-                    }
-
-                    if attrs_size > size {
-                        reply.error(ERANGE);
-                        return;
-                    }
-
-                    let list = attrs.list(buf_reader.by_ref(), sb);
-                    // Assert that we calculated the list size correctly.  This assertion is only
-                    // safe since we're a read-only file system.
-                    assert_eq!(list.len(), attrs_size as usize, "size calculation was wrong!");
-                    reply.data(list.as_slice());
+                if size == 0 {
+                    reply.size(attrs_size);
+                    return;
                 }
-                None => {
-                    reply.size(0);
+
+                if attrs_size > size {
+                    reply.error(ERANGE);
+                    return;
                 }
+
+                let list = attrs.list(buf_reader.by_ref(), &self.sb);
+                // Assert that we calculated the list size correctly.  This assertion is only
+                // safe since we're a read-only file system.
+                assert_eq!(list.len(), attrs_size as usize, "size calculation was wrong!");
+                reply.data(list.as_slice());
             }
-        })
+            None => {
+                reply.size(0);
+            }
+        }
     }
 
     fn access(&mut self, _req: &Request, _ino: u64, _mask: i32, reply: ReplyEmpty) {

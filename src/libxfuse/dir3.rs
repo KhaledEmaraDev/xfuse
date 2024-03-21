@@ -34,7 +34,6 @@ use std::os::unix::ffi::OsStringExt;
 
 use super::da_btree::{XfsDa3Blkinfo, hashname, XfsDa3Intnode};
 use super::definitions::*;
-use super::dinode::Dinode;
 use super::sb::Sb;
 use super::utils::{FileKind, Uuid, decode, decode_from, get_file_type};
 use super::volume::SUPERBLOCK;
@@ -44,7 +43,7 @@ use bincode::{
     de::{Decoder, read::Reader},
     error::DecodeError
 };
-use fuser::{FileAttr, FileType};
+use fuser::FileType;
 use libc::{c_int, ENOENT};
 use tracing::error;
 
@@ -400,7 +399,7 @@ pub trait Dir3 {
         buf_reader: &mut R,
         sb: &Sb,
         name: &OsStr,
-    ) -> Result<(FileAttr, u64), c_int> {
+    ) -> Result<u64, c_int> {
         let hash = hashname(name);
 
         let brrc = RefCell::new(buf_reader);
@@ -411,9 +410,7 @@ pub trait Dir3 {
             let raw = self.read_dblock(guard.by_ref(), sb, dblock)?;
             let entry: Dir2DataEntry = decode(&raw[blk_offset..]).unwrap().0;
             if entry.name == name {
-                let dinode = Dinode::from(guard.by_ref(), sb, entry.inumber);
-                let attr = dinode.di_core.stat(entry.inumber)?;
-                return Ok((attr, dinode.di_core.di_gen.into()));
+                return Ok(entry.inumber);
             }
         }
         Err(libc::ENOENT)
