@@ -116,24 +116,32 @@ impl Filesystem for Volume {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         let ttl = Duration::new(86400, 0);
         let mut buf_reader = BufReader::new(&self.device);
-        let dir = match self.open_files.get(&parent) {
-            Some(oi) => oi.dinode.get_dir(buf_reader.by_ref(), &self.sb),
+        let r = match self.open_files.get_mut(&parent) {
+            Some(oi) => {
+                let dir = oi.dinode.get_dir(buf_reader.by_ref(), &self.sb);
+                dir.lookup(
+                    BufReader::new(&self.device).by_ref(),
+                    &self.sb,
+                    name,
+                )
+            },
             None => {
                 let inode_number = if parent == FUSE_ROOT_ID {
                     self.sb.sb_rootino
                 } else {
                     parent as XfsIno
                 };
-                let dinode = Dinode::from(buf_reader.by_ref(), &self.sb, inode_number);
-                dinode.get_dir(buf_reader.by_ref(), &self.sb)
+                let mut dinode = Dinode::from(buf_reader.by_ref(), &self.sb, inode_number);
+                let dir = dinode.get_dir(buf_reader.by_ref(), &self.sb);
+                dir.lookup(
+                    BufReader::new(&self.device).by_ref(),
+                    &self.sb,
+                    name,
+                )
             }
         };
 
-        match dir.lookup(
-            BufReader::new(&self.device).by_ref(),
-            &self.sb,
-            name,
-        ) {
+        match r {
             Ok((attr, generation)) => {
                 reply.entry(&ttl, &attr, generation);
             }
@@ -244,7 +252,7 @@ impl Filesystem for Volume {
         mut reply: ReplyDirectory,
     ) {
         let mut buf_reader = BufReader::new(&self.device);
-        let oi = &self.open_files.get(&ino).unwrap();
+        let oi = &mut self.open_files.get_mut(&ino).unwrap();
 
         let dir = oi.dinode.get_dir(buf_reader.by_ref(), &self.sb);
 

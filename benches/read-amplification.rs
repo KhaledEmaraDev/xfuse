@@ -19,7 +19,7 @@ use xattr::FileExt;
 mod util {
     include!("../tests/util.rs");
 }
-use util::{GOLDEN1K, Md, waitfor};
+use util::{GOLDEN1K, GOLDEN4K, Md, waitfor};
 
 pub struct Gnop {
     path: PathBuf
@@ -73,9 +73,17 @@ impl Drop for Gnop {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Image {
+    Golden1K,
+    Golden4K
+}
+
 struct Bench {
     /// Name of the benchmark
     name: &'static str,
+    /// The disk image to use
+    image: Image,
     /// The benchmark's function.  The argument is the path to the mounted file
     /// sytem.  The return value is the number of "useful" bytes the benchmark
     /// read.  An ideal file system would never read anything else.
@@ -83,8 +91,15 @@ struct Bench {
 }
 
 impl Bench {
-    const fn new(name: &'static str, f: fn(&Path) -> u64) -> Self {
-        Self{name, f}
+    const fn new(name: &'static str, image: Image, f: fn(&Path) -> u64) -> Self {
+        Self{name, image, f}
+    }
+
+    fn image(&self) -> &Path {
+        match self.image {
+            Image::Golden1K => GOLDEN1K.as_path(),
+            Image::Golden4K => GOLDEN4K.as_path(),
+        }
     }
 
     fn run(&self, path: &Path) -> u64 {
@@ -92,18 +107,20 @@ impl Bench {
     }
 }
 
-const BENCHES: [Bench; 3] = [
-    Bench::new("metadata", stat_all),
-    Bench::new("data", read_all_data),
-    Bench::new("xattr", read_all_xattrs)
+const BENCHES: &[Bench] = &[
+    Bench::new("metadata-sf", Image::Golden4K, stat_sf),
+    Bench::new("metadata-block", Image::Golden4K, stat_block),
+    Bench::new("metadata-leaf1k", Image::Golden1K, stat_leaf_1k),
+    Bench::new("metadata-leaf4k", Image::Golden4K, stat_leaf_4k),
+    Bench::new("metadata-node1", Image::Golden1K, stat_node1),
+    Bench::new("metadata-node3", Image::Golden1K, stat_node3),
+    Bench::new("metadata-btree2.3", Image::Golden1K, stat_btree2_3),
+    Bench::new("metadata-btree3", Image::Golden1K, stat_btree3),
+    Bench::new("data", Image::Golden1K, read_all_data),
+    Bench::new("xattr", Image::Golden1K, read_all_xattrs)
 ];
 
-/// Read all metadata from all files in the file system
-fn stat_all(path: &Path) -> u64 {
-    // inode size is 512B by default and we don't currently have any golden
-    // images that use other values.
-    const INODE_SIZE: u64 = 512;
-
+fn stat_files(path: &Path, inode_size: u64) -> u64 {
     let mut nfiles = 0;
     let walker = walkdir::WalkDir::new(path)
         .into_iter();
@@ -112,7 +129,47 @@ fn stat_all(path: &Path) -> u64 {
         let _ = entry.metadata().unwrap();
         nfiles += 1;
     }
-    nfiles * INODE_SIZE
+    nfiles * inode_size
+}
+
+/// Read all metadata from all files in the shortform directory
+fn stat_sf(mountpoint: &Path) -> u64 {
+    stat_files(&mountpoint.join("sf"), 4096)
+}
+
+/// Read all metadata from all files in the block directory
+fn stat_block(mountpoint: &Path) -> u64 {
+    stat_files(&mountpoint.join("block"), 4096)
+}
+
+/// Read all metadata from all files in the leaf directory
+fn stat_leaf_1k(mountpoint: &Path) -> u64 {
+    stat_files(&mountpoint.join("leaf"), 1024)
+}
+
+/// Read all metadata from all files in the leaf directory
+fn stat_leaf_4k(mountpoint: &Path) -> u64 {
+    stat_files(&mountpoint.join("leaf"), 4096)
+}
+
+/// Read all metadata from all files in the node1 directory
+fn stat_node1(mountpoint: &Path) -> u64 {
+    stat_files(&mountpoint.join("node1"), 1024)
+}
+
+/// Read all metadata from all files in the node3 directory
+fn stat_node3(mountpoint: &Path) -> u64 {
+    stat_files(&mountpoint.join("node3"), 1024)
+}
+
+/// Read all metadata from all files in the btree2.3 directory
+fn stat_btree2_3(mountpoint: &Path) -> u64 {
+    stat_files(&mountpoint.join("btree2.3"), 1024)
+}
+
+/// Read all metadata from all files in the btree3 directory
+fn stat_btree3(mountpoint: &Path) -> u64 {
+    stat_files(&mountpoint.join("btree3"), 1024)
 }
 
 /// Read all dense files, sequentially
@@ -168,16 +225,15 @@ fn main() {
     //   4) unmount
     //   5) Check the gnop's stats and print the difference
 
-    let image = &GOLDEN1K;
-    let md = Md::new(image).unwrap();
-    let gnop = Gnop::new(md.as_ref()).unwrap();
-    let d = tempdir().unwrap();
-
     println!("{:^19} {:^20} {:^20}", "Benchmark", "Total bytes read",
              "Read Amplification");
     println!("{:=^19} {:=^20} {:=^20}", "", "", "");
 
-    for bench in &BENCHES {
+    for bench in BENCHES {
+        let md = Md::new(bench.image()).unwrap();
+        let gnop = Gnop::new(md.as_ref()).unwrap();
+        let d = tempdir().unwrap();
+
         let start_bytes = gnop.read_bytes();
 
         let mut child = Command::cargo_bin("xfs-fuse").unwrap()
