@@ -31,7 +31,6 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
 use super::{
     definitions::*,
-    dinode::Dinode,
     dir3::{Dir3, XFS_DIR3_FT_DIR},
     sb::Sb,
     utils::{get_file_type, FileKind},
@@ -42,7 +41,7 @@ use bincode::{
     de::{Decoder, read::Reader},
     error::DecodeError
 };
-use fuser::{FileAttr, FileType};
+use fuser::FileType;
 use libc::{c_int, ENOENT};
 
 // pub type XfsDir2SfOff = [u8; 2];
@@ -197,10 +196,10 @@ impl Decode for Dir2Sf {
 impl Dir3 for Dir2Sf {
     fn lookup<R: bincode::de::read::Reader + BufRead + Seek>(
         &self,
-        buf_reader: &mut R,
-        super_block: &Sb,
+        _buf_reader: &mut R,
+        _super_block: &Sb,
         name: &OsStr,
-    ) -> Result<(FileAttr, u64), c_int> {
+    ) -> Result<u64, c_int> {
         let mut inode: Option<XfsIno> = None;
 
         for entry in self.list.iter() {
@@ -210,11 +209,7 @@ impl Dir3 for Dir2Sf {
         }
 
         if let Some(ino) = inode {
-            let dinode = Dinode::from(buf_reader.by_ref(), super_block, ino);
-
-            let attr = dinode.di_core.stat(ino)?;
-
-            Ok((attr, dinode.di_core.di_gen.into()))
+            Ok(ino)
         } else {
             Err(ENOENT)
         }
