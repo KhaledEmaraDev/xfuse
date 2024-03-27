@@ -137,42 +137,42 @@ fn stat_files(path: &Path, inode_size: u64) -> u64 {
 
 /// Read all metadata from all files in the shortform directory
 fn stat_sf(mountpoint: &Path) -> u64 {
-    stat_files(&mountpoint.join("sf"), 4096)
+    stat_files(&mountpoint.join("sf"), 512)
 }
 
 /// Read all metadata from all files in the block directory
 fn stat_block(mountpoint: &Path) -> u64 {
-    stat_files(&mountpoint.join("block"), 4096)
+    stat_files(&mountpoint.join("block"), 512)
 }
 
 /// Read all metadata from all files in the leaf directory
 fn stat_leaf_1k(mountpoint: &Path) -> u64 {
-    stat_files(&mountpoint.join("leaf"), 1024)
+    stat_files(&mountpoint.join("leaf"), 512)
 }
 
 /// Read all metadata from all files in the leaf directory
 fn stat_leaf_4k(mountpoint: &Path) -> u64 {
-    stat_files(&mountpoint.join("leaf"), 4096)
+    stat_files(&mountpoint.join("leaf"), 512)
 }
 
 /// Read all metadata from all files in the node1 directory
 fn stat_node1(mountpoint: &Path) -> u64 {
-    stat_files(&mountpoint.join("node1"), 1024)
+    stat_files(&mountpoint.join("node1"), 512)
 }
 
 /// Read all metadata from all files in the node3 directory
 fn stat_node3(mountpoint: &Path) -> u64 {
-    stat_files(&mountpoint.join("node3"), 1024)
+    stat_files(&mountpoint.join("node3"), 512)
 }
 
 /// Read all metadata from all files in the btree2.3 directory
 fn stat_btree2_3(mountpoint: &Path) -> u64 {
-    stat_files(&mountpoint.join("btree2.3"), 1024)
+    stat_files(&mountpoint.join("btree2.3"), 512)
 }
 
 /// Read all metadata from all files in the btree3 directory
 fn stat_btree3(mountpoint: &Path) -> u64 {
-    stat_files(&mountpoint.join("btree3"), 1024)
+    stat_files(&mountpoint.join("btree3"), 512)
 }
 
 fn read_files(mountpoint: &Path, files: &[&'static str]) -> u64 {
@@ -251,8 +251,6 @@ fn main() {
         let gnop = Gnop::new(md.as_ref()).unwrap();
         let d = tempdir().unwrap();
 
-        let start_bytes = gnop.read_bytes();
-
         let mut child = Command::cargo_bin("xfs-fuse").unwrap()
             .arg(gnop.as_path())
             .arg(d.path())
@@ -263,6 +261,9 @@ fn main() {
             let s = nix::sys::statfs::statfs(d.path()).unwrap();
             s.filesystem_type_name() == "fusefs.xfs"
         }).unwrap();
+
+        // start_bytes excludes whatever was necessary to mount the file system.
+        let start_bytes = gnop.read_bytes();
 
         let useful_bytes = bench.run(d.path());
 
