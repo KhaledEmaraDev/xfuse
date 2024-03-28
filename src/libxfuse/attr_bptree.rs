@@ -71,7 +71,7 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrBtree {
                 .unwrap();
             buf_reader.seek(SeekFrom::Start(super_block.fsb_to_offset(intermediate_blk))).unwrap();
 
-            let node = XfsDa3Intnode::from(buf_reader.by_ref(), super_block);
+            let node = XfsDa3Intnode::from(buf_reader.by_ref());
 
             // Now read the first leaf block of the btree
             let lfblk0 = node.first_block(buf_reader.by_ref(), super_block, |block, reader| {
@@ -106,7 +106,7 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrBtree {
         let blk = self.map_block(buf_reader.by_ref(), 0).unwrap();
         buf_reader.seek(SeekFrom::Start(super_block.fsb_to_offset(blk))).unwrap();
 
-        let node = XfsDa3Intnode::from(buf_reader.by_ref(), super_block);
+        let node = XfsDa3Intnode::from(buf_reader.by_ref());
 
         let blk = node.first_block(buf_reader.by_ref(), super_block, |block, reader| {
             self.map_block(reader.by_ref(), block.into()).unwrap()
@@ -136,7 +136,7 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrBtree {
         let blk = self.map_block(buf_reader.by_ref(), 0)?;
         buf_reader.seek(SeekFrom::Start(super_block.fsb_to_offset(blk))).unwrap();
 
-        let node = XfsDa3Intnode::from(buf_reader.by_ref(), super_block);
+        let node = XfsDa3Intnode::from(buf_reader.by_ref());
 
         let blk = node.lookup(buf_reader.by_ref(), super_block, hash, |block, reader| {
             self.map_block(reader.by_ref(), block.into()).unwrap()

@@ -41,8 +41,8 @@ use bincode::{Decode, de::read::Reader};
 
 #[derive(Debug, Decode)]
 pub struct Dir2BlockTail {
-    pub count: u32,
-    pub stale: u32,
+    count: u32,
+    _stale: u32,
 }
 
 impl Dir2BlockTail {
@@ -52,8 +52,6 @@ impl Dir2BlockTail {
 
 #[derive(Debug)]
 pub struct Dir2BlockDisk {
-    pub hdr: Dir3DataHdr,
-    // pub u: Vec<Dir2DataUnion>,
     pub leaf: Vec<Dir2LeafEntry>,
     pub tail: Dir2BlockTail,
     raw: Vec<u8>,
@@ -79,7 +77,7 @@ impl Dir2BlockDisk {
             leaf_offset += Dir2LeafEntry::SIZE;
         }
 
-        Dir2BlockDisk { hdr, leaf, tail, raw }
+        Dir2BlockDisk { leaf, tail, raw }
     }
 
     /// get the length of the raw data region
@@ -92,7 +90,6 @@ impl Dir2BlockDisk {
 
 #[derive(Debug)]
 pub struct Dir2Block {
-    pub offset: u64,
     ents: Vec<Dir2LeafEntry>,
     raw: Box<[u8]>,
 }
@@ -114,7 +111,6 @@ impl Dir2Block {
         raw.truncate(data_len as usize);
 
         Dir2Block {
-            offset,
             raw: raw.into(),
             ents: dir_disk.leaf
         }

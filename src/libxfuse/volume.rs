@@ -29,12 +29,11 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::ffi::OsStr;
 use std::fs::File;
-use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::io::{BufReader, Read};
 use std::os::unix::ffi::OsStrExt;
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use super::agi::Agi;
 use super::definitions::XfsIno;
 use super::dinode::Dinode;
 use super::dir3::Dir3;
@@ -63,7 +62,6 @@ struct OpenInode {
 pub struct Volume {
     pub device: File,
     pub sb: Sb,
-    pub agi: Agi,
     open_files: HashMap<u64, OpenInode>,
 }
 
@@ -79,11 +77,6 @@ impl Volume {
         let superblock = Sb::from(buf_reader.by_ref());
         SUPERBLOCK.set(superblock).unwrap();
 
-        buf_reader
-            .seek(SeekFrom::Start(u64::from(superblock.sb_sectsize) * 2))
-            .unwrap();
-        let agi = Agi::from(buf_reader.by_ref());
-
         let root_inode = Dinode::from(buf_reader.by_ref(), &superblock, superblock.sb_rootino);
         let mut open_files = HashMap::new();
         // Prepopulate the root inode into the cache, since fusefs never sends a lookup for it.
@@ -92,7 +85,6 @@ impl Volume {
         Volume {
             device,
             sb: superblock,
-            agi,
             open_files
         }
     }

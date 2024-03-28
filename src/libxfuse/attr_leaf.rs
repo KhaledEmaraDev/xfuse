@@ -46,8 +46,6 @@ use super::{
 pub struct AttrLeaf {
     pub bmx: Vec<BmbtRec>,
     pub leaf: AttrLeafblock,
-
-    pub leaf_offset: u64,
     pub total_size: i64,
 }
 
@@ -95,10 +93,8 @@ impl<R: BufRead + Reader + Seek> Attr<R> for AttrLeaf {
 
 #[cfg(test)]
 mod tests {
-    use crate::libxfuse::utils::Uuid;
-
     use crate::libxfuse::{
-        attr::{AttrLeafHdr, AttrLeafMap, AttrLeafblock},
+        attr::{AttrLeafHdr, AttrLeafblock},
         attr_leaf::AttrLeaf,
         bmbt_rec::BmbtRec,
         da_btree::XfsDa3Blkinfo,
@@ -111,19 +107,16 @@ mod tests {
                 br_startoff: 0,
                 br_startblock: 20,
                 br_blockcount: 2,
-                br_state: crate::libxfuse::bmbt_rec::XfsExntst::Norm,
             },
             BmbtRec {
                 br_startoff: 2,
                 br_startblock: 30,
                 br_blockcount: 3,
-                br_state: crate::libxfuse::bmbt_rec::XfsExntst::Norm,
             },
             BmbtRec {
                 br_startoff: 5,
                 br_startblock: 40,
                 br_blockcount: 2,
-                br_state: crate::libxfuse::bmbt_rec::XfsExntst::Norm,
             },
         ];
 
@@ -131,26 +124,9 @@ mod tests {
             hdr: AttrLeafHdr {
                 info: XfsDa3Blkinfo {
                     forw: 0,
-                    back: 0,
                     magic: 0,
-                    pad: 0,
-                    crc: 0,
-                    blkno: 0,
-                    lsn: 0,
-                    uuid: Uuid::default(),
-                    owner: 0,
                 },
                 count: 0,
-                usedbytes: 0,
-                firstused: 0,
-                holes: 0,
-                pad1: 0,
-                freemap: [
-                    AttrLeafMap { base: 0, size: 0 },
-                    AttrLeafMap { base: 0, size: 0 },
-                    AttrLeafMap { base: 0, size: 0 },
-                ],
-                pad2: 0,
             },
             entries: vec![],
             names: vec![],
@@ -159,7 +135,6 @@ mod tests {
         let attr = AttrLeaf {
             bmx,
             leaf,
-            leaf_offset: 0,
             total_size: 0,
         };
 

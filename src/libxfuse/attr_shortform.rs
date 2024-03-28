@@ -42,7 +42,7 @@ use bincode::{
 
 #[derive(Debug, Clone, Decode)]
 pub struct AttrSfHdr {
-    pub totsize: u16,
+    _totsize: u16,
     pub count: u8,
     _padding: u8,
 }
@@ -50,7 +50,6 @@ pub struct AttrSfHdr {
 #[derive(Debug, Clone)]
 pub struct AttrSfEntry {
     pub namelen: u8,
-    pub valuelen: u8,
     pub flags: u8,
     pub nameval: Vec<u8>,
 }
@@ -65,7 +64,6 @@ impl Decode for AttrSfEntry {
 
         Ok(AttrSfEntry {
             namelen,
-            valuelen,
             flags,
             nameval
         })
@@ -74,7 +72,6 @@ impl Decode for AttrSfEntry {
 
 #[derive(Debug, Clone)]
 pub struct AttrShortform {
-    pub hdr: AttrSfHdr,
     pub list: Vec<AttrSfEntry>,
 
     pub total_size: u32,
@@ -94,7 +91,6 @@ impl Decode for AttrShortform {
         }
 
         Ok(AttrShortform {
-            hdr,
             list,
             total_size
         })
