@@ -331,7 +331,7 @@ impl Dinode {
             let directory = match &self.di_u {
                 DiU::Dir2Sf(dir) => Directory::Sf(dir.clone()),
                 DiU::Bmx(bmx) => {
-                    let leaf_start = superblock.get_dir3_leaf_offset();
+                    let leaf_start = superblock.get_dir3_leaf_offset().into();
                     if bmx.len() == 1 {
                         Directory::Block(Dir2Block::from(
                             buf_reader.by_ref(),

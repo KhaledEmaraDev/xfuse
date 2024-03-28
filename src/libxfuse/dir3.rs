@@ -247,7 +247,7 @@ impl Leaf {
             Leaf::LeafN(leafn) => Ok(leafn),
             Leaf::Btree(btree) => {
                 let fsblock: XfsFsblock = btree.lookup(buf_reader.by_ref(), sb, hash,
-                    |block, br| dir.map_dblock(br, block.into()).unwrap()
+                    |block, br| dir.map_dblock(br, block).unwrap()
                 )?;
                 buf_reader.seek(SeekFrom::Start(sb.fsb_to_offset(fsblock))).unwrap();
                 Ok(decode_from(buf_reader.by_ref()).unwrap())
@@ -300,7 +300,7 @@ impl<'a, D: NodeLikeDir, R: Reader + BufRead + Seek + 'a> Iterator for NodeLikeA
                     // frequently, since the hash is only 32 bits.  Tragically, the colliding
                     // entries were located in different leaf blocks.
                     // Traverse the forw pointer
-                    let forw = self.leaf.hdr.info.forw.into();
+                    let forw = self.leaf.hdr.info.forw;
                     let mut buf_reader = self.brrc.borrow_mut();
                     let next_fsblock = match self.dir.map_dblock(buf_reader.by_ref(), forw) {
                         Ok(fsb) => fsb,
@@ -345,7 +345,7 @@ pub trait NodeLikeDir {
     fn map_dblock<R: Reader + BufRead + Seek>(
         &self,
         buf_reader: &mut R,
-        logical_block: XfsFileoff,
+        logical_block: XfsDablk,
     ) -> Result<XfsFsblock, i32>;
 }
 

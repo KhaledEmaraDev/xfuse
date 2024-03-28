@@ -37,7 +37,7 @@ use super::{
     attr::{Attr, AttrLeafblock},
     bmbt_rec::BmbtRec,
     da_btree::{hashname, XfsDa3Intnode},
-    definitions::{XfsFileoff, XfsFsblock},
+    definitions::{XfsDablk, XfsFsblock, XfsFileoff},
     sb::Sb,
     utils::decode_from
 };
@@ -51,10 +51,10 @@ pub struct AttrNode {
 }
 
 impl AttrNode {
-    fn map_logical_block_to_fs_block(&self, block: XfsFileoff) -> XfsFsblock {
+    fn map_logical_block_to_fs_block(&self, block: XfsDablk) -> XfsFsblock {
         for entry in self.bmx.iter().rev() {
-            if block >= entry.br_startoff {
-                return entry.br_startblock + (block - entry.br_startoff);
+            if XfsFileoff::from(block) >= entry.br_startoff {
+                return entry.br_startblock + (XfsFileoff::from(block) - entry.br_startoff);
             }
         }
 
@@ -145,7 +145,7 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrNode {
             let blk = self
                 .node
                 .first_block(buf_reader.by_ref(), super_block, |block, _| {
-                    self.map_logical_block_to_fs_block(block.into())
+                    self.map_logical_block_to_fs_block(block)
                 });
             let leaf_offset = super_block.fsb_to_offset(blk);
 
@@ -155,7 +155,7 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrNode {
             total_size += node.get_total_size();
 
             while node.hdr.info.forw != 0 {
-                let lfblk = self.map_logical_block_to_fs_block(node.hdr.info.forw.into());
+                let lfblk = self.map_logical_block_to_fs_block(node.hdr.info.forw);
                 let lfofs = super_block.fsb_to_offset(lfblk);
                 buf_reader.seek(SeekFrom::Start(lfofs)).unwrap();
                 node = decode_from(buf_reader.by_ref()).unwrap();
@@ -175,7 +175,7 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrNode {
         let blk = self
             .node
             .first_block(buf_reader.by_ref(), super_block, |block, _| {
-                self.map_logical_block_to_fs_block(block.into())
+                self.map_logical_block_to_fs_block(block)
             });
         let leaf_offset = super_block.fsb_to_offset(blk);
 
@@ -185,7 +185,7 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrNode {
         leaf.list(&mut list);
 
         while leaf.hdr.info.forw != 0 {
-            let lfblk = self.map_logical_block_to_fs_block(leaf.hdr.info.forw.into());
+            let lfblk = self.map_logical_block_to_fs_block(leaf.hdr.info.forw);
             let lfofs = super_block.fsb_to_offset(lfblk);
             buf_reader.seek(SeekFrom::Start(lfofs)).unwrap();
             leaf = decode_from(buf_reader.by_ref()).unwrap();
@@ -199,7 +199,7 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrNode {
         let hash = hashname(name);
 
         let blk = self.node.lookup(buf_reader.by_ref(), super_block, hash, |block, _| {
-            self.map_logical_block_to_fs_block(block.into())
+            self.map_logical_block_to_fs_block(block)
         }).map_err(|e| if e == libc::ENOENT {libc::ENOATTR} else {e})?;
         let leaf_offset = super_block.fsb_to_offset(blk);
 

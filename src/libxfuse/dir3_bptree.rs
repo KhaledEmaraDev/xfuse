@@ -97,7 +97,7 @@ impl Dir3 for Dir2Btree {
         -> Result<Box<dyn Deref<Target=[u8]> + 'a>, i32>
         where R: Reader + BufRead + Seek
     {
-        let fsblock = self.map_dblock(buf_reader.by_ref(), dblock.into())?;
+        let fsblock = self.map_dblock(buf_reader.by_ref(), dblock)?;
         self.read_fsblock(buf_reader.by_ref(), sb, fsblock)
     }
 }
@@ -107,8 +107,8 @@ impl NodeLikeDir for Dir2Btree {
 
         &self,
         buf_reader: &mut R,
-        logical_block: XfsFileoff,
+        logical_block: XfsDablk,
     ) -> Result<XfsFsblock, i32> {
-        self.root.map_block(buf_reader, logical_block)?.0.ok_or(libc::ENOENT)
+        self.root.map_block(buf_reader, logical_block.into())?.0.ok_or(libc::ENOENT)
     }
 }

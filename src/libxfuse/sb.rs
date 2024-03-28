@@ -242,8 +242,8 @@ impl Sb {
     }
 
     #[inline]
-    pub fn get_dir3_leaf_offset(&self) -> u64 {
-        (32 * 1024 * 1024 * 1024) / (self.sb_blocksize as u64)
+    pub fn get_dir3_leaf_offset(&self) -> XfsDablk {
+        1 << (35 - self.sb_blocklog)
     }
 
     /// Given a file system block number, calculate its disk address in units of 512B blocks
