@@ -42,7 +42,7 @@ use super::{
     attr_node::AttrNode,
     bmbt_rec::BmbtRec,
     da_btree::{XfsDa3Blkinfo, XfsDa3Intnode},
-    definitions::{XFS_ATTR3_LEAF_MAGIC, XFS_DA3_NODE_MAGIC, XfsFileoff, XfsFsblock},
+    definitions::{XFS_ATTR3_LEAF_MAGIC, XFS_DA3_NODE_MAGIC, XfsDablk, XfsFsblock},
     sb::Sb,
     utils,
     volume::SUPERBLOCK
@@ -157,7 +157,7 @@ impl AttrLeafName {
         map_logical_block_to_fs_block: F,
     ) -> Vec<u8>
         where R: BufRead + Reader + Seek,
-              F: Fn(XfsFileoff, &mut R) -> XfsFsblock
+              F: Fn(XfsDablk, &mut R) -> XfsFsblock
     {
         match self {
             AttrLeafName::Local(local) => {
@@ -166,7 +166,7 @@ impl AttrLeafName {
             AttrLeafName::Remote(remote) => {
                 let sb = SUPERBLOCK.get().unwrap();
                 let mut res: Vec<u8> = Vec::with_capacity(remote.valuelen as usize);
-                let mut valueblk = remote.valueblk.into();
+                let mut valueblk = remote.valueblk;
                 let mut valuelen: i64 = remote.valuelen.into();
 
                 while valuelen > 0 {
@@ -214,7 +214,7 @@ impl AttrLeafblock {
         }
     }
 
-    pub fn get<R: BufRead + Reader + Seek, F: Fn(XfsFileoff, &mut R) -> XfsFsblock>(
+    pub fn get<R: BufRead + Reader + Seek, F: Fn(XfsDablk, &mut R) -> XfsFsblock>(
         &self,
         buf_reader: &mut R,
         hash: u32,

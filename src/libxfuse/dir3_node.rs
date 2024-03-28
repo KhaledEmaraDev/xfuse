@@ -94,7 +94,7 @@ impl Dir3 for Dir2Node {
         -> Result<Box<dyn Deref<Target=[u8]> + 'a>, i32>
         where R: Reader + BufRead + Seek
     {
-        let fsblock = self.map_dblock(buf_reader.by_ref(), dblock.into())?;
+        let fsblock = self.map_dblock(buf_reader.by_ref(), dblock)?;
         self.read_fsblock(buf_reader.by_ref(), sb, fsblock)
     }
 }
@@ -103,8 +103,9 @@ impl NodeLikeDir for Dir2Node {
     fn map_dblock<R: Reader + BufRead + Seek>(
         &self,
         _buf_reader: &mut R,
-        dblock: XfsFileoff,
+        dblock: XfsDablk,
     ) -> Result<XfsFsblock, i32> {
+        let dblock = XfsFileoff::from(dblock);
         let i = self.bmx.partition_point(|rec| rec.br_startoff <= dblock);
         let rec = &self.bmx[i - 1];
         if i == 0 || rec.br_startoff > dblock || rec.br_startoff + rec.br_blockcount <= dblock {

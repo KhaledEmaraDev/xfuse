@@ -37,7 +37,7 @@ use super::{
     attr::{Attr, AttrLeafblock},
     bmbt_rec::BmbtRec,
     da_btree::hashname,
-    definitions::{XfsFileoff, XfsFsblock},
+    definitions::{XfsDablk, XfsFileoff, XfsFsblock},
     sb::Sb,
 };
 
@@ -50,10 +50,10 @@ pub struct AttrLeaf {
 }
 
 impl AttrLeaf {
-    fn map_logical_block_to_actual_block(&self, block: XfsFileoff) -> XfsFsblock {
+    fn map_logical_block_to_actual_block(&self, block: XfsDablk) -> XfsFsblock {
         for entry in self.bmx.iter().rev() {
-            if block >= entry.br_startoff {
-                return entry.br_startblock + (block - entry.br_startoff);
+            if XfsFileoff::from(block) >= entry.br_startoff {
+                return entry.br_startblock + (XfsFileoff::from(block) - entry.br_startoff);
             }
         }
 
