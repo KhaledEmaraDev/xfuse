@@ -27,6 +27,7 @@
  */
 use std::{
     cell::{Ref, RefCell},
+    collections::BTreeMap,
     io::{BufRead, Seek, SeekFrom},
     ops::Deref
 };
@@ -37,15 +38,12 @@ use super::btree::{BmbtKey, BmdrBlock, Btree, BtreeRoot, XfsBmbtPtr};
 use super::definitions::*;
 use super::dir3::{XfsDir2Dataptr, Dir3, NodeLikeDir};
 use super::sb::Sb;
-use super::volume::SUPERBLOCK;
 
 #[derive(Debug)]
 pub struct Dir2Btree{
     root: BtreeRoot,
-    /// A cache of the last extent and its starting block number read by lookup
-    /// or readdir.
-    // TODO: try to eliminate this refcell by giving Dir3::next a mutable pointer
-    block_cache: RefCell<(XfsFsblock, Vec<u8>)>
+    /// A cache of directory blocks, indexed by directory block number
+    blocks: RefCell<BTreeMap<XfsDablk, Vec<u8>>>,
 }
 
 impl Dir2Btree {
@@ -54,34 +52,25 @@ impl Dir2Btree {
         keys: Vec<BmbtKey>,
         pointers: Vec<XfsBmbtPtr>,
     ) -> Self {
-        let sb = SUPERBLOCK.get().unwrap();
-        let dblksize: usize = 1 << (sb.sb_blocklog + sb.sb_dirblklog);
         let root = BtreeRoot::new(bmbt, keys, pointers);
-        let block_cache = RefCell::new((XfsFsblock::max_value(), Vec::with_capacity(dblksize)));
-        Self{root, block_cache}
+        let blocks = Default::default();
+        Self{root, blocks}
     }
 
     // Directory blocks always have the same size, so we don't need to return the extent length
     /// Read one directory block and return a reference to its data.
-    fn read_fsblock<'a, R>(&'a self, mut buf_reader: R, sb: &Sb, fsblock: XfsFsblock)
-        -> Result<Box<dyn Deref<Target=[u8]> + 'a>, i32>
+    fn read_fsblock<R>(&self, mut buf_reader: R, sb: &Sb, fsblock: XfsFsblock)
+        -> Result<Vec<u8>, i32>
         where R: Reader + BufRead + Seek
     {
         let dblksize: usize = 1 << (sb.sb_blocklog + sb.sb_dirblklog);
 
-        let mut cache_guard = self.block_cache.borrow_mut();
-        if cache_guard.0 != fsblock || cache_guard.1.len() != dblksize {
-            cache_guard.1.resize(dblksize, 0u8);
-            buf_reader
-                .seek(SeekFrom::Start(sb.fsb_to_offset(fsblock)))
-                .unwrap();
-            buf_reader.read_exact(&mut cache_guard.1).unwrap();
-            cache_guard.0 = fsblock;
-        }
-        // Annoyingly, there's no function to downgrade a RefMut into a Ref.
-        drop(cache_guard);
-        let cache_guard = self.block_cache.borrow();
-        Ok(Box::new(Ref::map(cache_guard, |v| v.1.as_ref())))
+        let mut buf = vec![0; dblksize];
+        buf_reader
+            .seek(SeekFrom::Start(sb.fsb_to_offset(fsblock)))
+            .unwrap();
+        buf_reader.read_exact(&mut buf).unwrap();
+        Ok(buf)
     }
 }
 
@@ -98,7 +87,13 @@ impl Dir3 for Dir2Btree {
         where R: Reader + BufRead + Seek
     {
         let fsblock = self.map_dblock(buf_reader.by_ref(), dblock)?;
-        self.read_fsblock(buf_reader.by_ref(), sb, fsblock)
+        let mut cache_guard = self.blocks.borrow_mut();
+        cache_guard.entry(dblock)
+            .or_insert_with(|| self.read_fsblock(buf_reader.by_ref(), sb, fsblock).unwrap());
+        // Annoyingly, there's no function to downgrade a RefMut into a Ref.
+        drop(cache_guard);
+        let cache_guard = self.blocks.borrow();
+        Ok(Box::new(Ref::map(cache_guard, |v| &v[&dblock][..])))
     }
 }
 
