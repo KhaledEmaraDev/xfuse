@@ -198,6 +198,7 @@ impl XfsDa3Intnode {
                 .seek(SeekFrom::Start(offset))
                 .unwrap();
 
+            eprint!("1");
             let node = XfsDa3Intnode::from(buf_reader.by_ref());
             node.lookup(
                 buf_reader.by_ref(),

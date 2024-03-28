@@ -408,11 +408,7 @@ impl Dinode {
                 }
             }
             Some(DiA::Abmbt((bmdr, keys, pointers))) => Some(Box::new(AttrBtree {
-                btree: BtreeRoot {
-                    bmdr: bmdr.clone(),
-                    keys: keys.clone(),
-                    ptrs: pointers.clone(),
-                },
+                btree: BtreeRoot::new(bmdr.clone(), keys.clone(), pointers.clone()),
                 total_size: -1,
             })),
             None => None,

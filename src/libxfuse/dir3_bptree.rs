@@ -27,7 +27,7 @@
  */
 use std::{
     cell::{Ref, RefCell},
-    collections::BTreeMap,
+    collections::{BTreeMap, btree_map::Entry},
     io::{BufRead, Seek, SeekFrom},
     ops::Deref
 };
@@ -86,10 +86,13 @@ impl Dir3 for Dir2Btree {
         -> Result<Box<dyn Deref<Target=[u8]> + 'a>, i32>
         where R: Reader + BufRead + Seek
     {
-        let fsblock = self.map_dblock(buf_reader.by_ref(), dblock)?;
         let mut cache_guard = self.blocks.borrow_mut();
-        cache_guard.entry(dblock)
-            .or_insert_with(|| self.read_fsblock(buf_reader.by_ref(), sb, fsblock).unwrap());
+        let entry = cache_guard.entry(dblock);
+        if matches!(entry, Entry::Vacant(_)) {
+            let fsblock = self.map_dblock(buf_reader.by_ref(), dblock)?;
+            let buf = self.read_fsblock(buf_reader.by_ref(), sb, fsblock)?;
+            entry.or_insert(buf);
+        }
         // Annoyingly, there's no function to downgrade a RefMut into a Ref.
         drop(cache_guard);
         let cache_guard = self.blocks.borrow();

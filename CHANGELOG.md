@@ -5,6 +5,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased] - ReleaseDate
 
+### Changed
+
+- The MSRV is now 1.74.0
+  ([#128](https://github.com/KhaledEmaraDev/xfuse/pull/128))
+
 ### Fixed
 
 - Fixed a crash when opening and closing multiple files simultaneously but not
