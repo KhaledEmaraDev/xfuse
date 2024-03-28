@@ -37,7 +37,7 @@ use tracing::warn;
 
 use super::bmbt_rec::BmbtRec;
 use super::definitions::*;
-use super::dir3::{Dir2Data, Dir2LeafEntry, Dir3, Dir3LeafHdr, XfsDir2Dataptr};
+use super::dir3::{Dir2LeafEntry, Dir3, Dir3LeafHdr, XfsDir2Dataptr};
 use super::sb::Sb;
 
 #[derive(Debug)]
@@ -80,7 +80,6 @@ impl Dir2LeafDisk {
 #[derive(Debug)]
 pub struct Dir2Leaf {
     bmx: Vec<BmbtRec>,
-    pub entries: Vec<Dir2Data>,
     leaf: Dir2LeafDisk,
     /// A cache of the last extent and its starting block number read by lookup
     /// or readdir.
@@ -93,14 +92,6 @@ impl Dir2Leaf {
         superblock: &Sb,
         bmx: &[BmbtRec],
     ) -> Dir2Leaf {
-        let mut entries = Vec::<Dir2Data>::new();
-        for record in bmx.iter().take(bmx.len() - 1) {
-            for i in (0..record.br_blockcount).step_by(1 << superblock.sb_dirblklog) {
-                let entry = Dir2Data::from(buf_reader.by_ref(), superblock, record.br_startblock + i);
-                entries.push(entry);
-            }
-        }
-
         let leaf_extent = bmx.last().unwrap();
         if leaf_extent.br_startblock != superblock.get_dir3_leaf_offset() {
             warn!("Leaf directory contains unexpected bmx entry {:?}", &leaf_extent);
@@ -116,7 +107,6 @@ impl Dir2Leaf {
 
         Dir2Leaf {
             bmx: bmx.to_vec(),
-            entries,
             leaf,
             block_cache
         }

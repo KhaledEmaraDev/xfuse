@@ -377,7 +377,9 @@ impl Dinode {
         }
     }
 
-    pub fn get_link_data<R: BufRead + Seek>(&self, buf_reader: &mut R, superblock: &Sb) -> CString {
+    pub fn get_link_data<R>(&self, buf_reader: &mut R, superblock: &Sb) -> CString
+        where R: BufRead + Reader + Seek
+    {
         match &self.di_u {
             DiU::Symlink(data) => CString::new(data.clone()).unwrap(),
             DiU::Bmx(bmx) => SymlinkExtents::get_target(buf_reader.by_ref(), bmx, superblock),

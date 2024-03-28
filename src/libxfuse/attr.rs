@@ -36,8 +36,6 @@ use bincode::{
     error::DecodeError,
     impl_borrow_decode
 };
-use byteorder::{BigEndian, ReadBytesExt};
-use uuid::Uuid;
 
 use super::{
     attr_leaf::AttrLeaf,
@@ -79,36 +77,30 @@ pub const fn get_namespace_size_from_flags(flags: u8) -> u32 {
 
 #[derive(Debug, Decode)]
 pub struct AttrLeafMap {
-    pub base: u16,
-    pub size: u16,
+    _base: u16,
+    _size: u16,
 }
 
 #[derive(Debug)]
 pub struct AttrLeafHdr {
     pub info: XfsDa3Blkinfo,
     pub count: u16,
-    pub usedbytes: u16,
-    pub firstused: u16,
-    pub holes: u8,
-    pub pad1: u8,
-    pub freemap: [AttrLeafMap; 3],
-    pub pad2: u32,
 }
 
 impl Decode for AttrLeafHdr {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let info: XfsDa3Blkinfo = Decode::decode(decoder)?;
         let count = Decode::decode(decoder)?;
-        let usedbytes = Decode::decode(decoder)?;
-        let firstused = Decode::decode(decoder)?;
-        let holes = Decode::decode(decoder)?;
-        let pad1 = Decode::decode(decoder)?;
-        let freemap = Decode::decode(decoder)?;
-        let pad2 = Decode::decode(decoder)?;
+        let _usedbytes: u16 = Decode::decode(decoder)?;
+        let _firstused: u16 = Decode::decode(decoder)?;
+        let _holes: u8 = Decode::decode(decoder)?;
+        let _pad1: u8 = Decode::decode(decoder)?;
+        let _freemap: [AttrLeafMap; 3] = Decode::decode(decoder)?;
+        let _pad2: u32 = Decode::decode(decoder)?;
 
         assert_eq!(info.magic, XFS_ATTR3_LEAF_MAGIC,
            "bad magic!  expected {:#x} but found {:#x}", XFS_ATTR3_LEAF_MAGIC, info.magic);
-        Ok(Self{info, count, usedbytes, firstused, holes, pad1, freemap, pad2})
+        Ok(Self{info, count})
     }
 }
 impl_borrow_decode!(AttrLeafHdr);
@@ -118,24 +110,23 @@ pub struct AttrLeafEntry {
     pub hashval: u32,
     pub nameidx: u16,
     pub flags: u8,
-    pub pad2: u8,
+    _pad2: u8,
 }
 
 #[derive(Debug)]
 pub struct AttrLeafNameLocal {
-    pub valuelen: u16,
     pub namelen: u8,
     pub nameval: Vec<u8>,
 }
 
 impl Decode for AttrLeafNameLocal {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let valuelen = Decode::decode(decoder)?;
+        let valuelen: u16 = Decode::decode(decoder)?;
         let namelen: u8 = Decode::decode(decoder)?;
         let mut nameval = vec![0u8; usize::from(namelen) + usize::from(valuelen)];
         decoder.reader().read(&mut nameval[..])?;
 
-        Ok(Self{ valuelen, namelen, nameval})
+        Ok(Self{ namelen, nameval})
     }
 }
 
@@ -182,11 +173,11 @@ impl AttrLeafName {
                     let blk_num =
                         map_logical_block_to_fs_block(valueblk, buf_reader.by_ref());
                     buf_reader.seek(SeekFrom::Start(sb.fsb_to_offset(blk_num))).unwrap();
-
-                    let (_, data) = AttrRmtHdr::from(buf_reader.by_ref());
-
-                    valuelen -= data.len() as i64;
-                    res.extend(data);
+                    let hdr: AttrRmtHdr = utils::decode_from(buf_reader.by_ref()).unwrap();
+                    let oldlen = res.len();
+                    res.resize(oldlen + hdr.rm_bytes as usize, 0);
+                    buf_reader.read_exact(&mut res[oldlen..]).unwrap();
+                    valuelen -= i64::from(hdr.rm_bytes);
                     valueblk += 1;
                 }
                 res
@@ -290,48 +281,16 @@ impl Decode for AttrLeafNameRemote {
     }
 }
 
-#[derive(Debug)]
-pub struct AttrRmtHdr {
-    pub rm_magic: u32,
-    pub rm_offset: u32,
-    pub rm_bytes: u32,
-    pub rm_crc: u32,
-    pub rm_uuid: Uuid,
-    pub rm_owner: u64,
-    pub rm_blkno: u64,
-    pub rm_lsn: u64,
-}
-
-impl AttrRmtHdr {
-    pub fn from<R: BufRead + Seek>(buf_reader: &mut R) -> (AttrRmtHdr, Vec<u8>) {
-        let rm_magic = buf_reader.read_u32::<BigEndian>().unwrap();
-        let rm_offset = buf_reader.read_u32::<BigEndian>().unwrap();
-        let rm_bytes = buf_reader.read_u32::<BigEndian>().unwrap();
-        let rm_crc = buf_reader.read_u32::<BigEndian>().unwrap();
-
-        let rm_uuid = Uuid::from_u128(buf_reader.read_u128::<BigEndian>().unwrap());
-
-        let rm_owner = buf_reader.read_u64::<BigEndian>().unwrap();
-        let rm_blkno = buf_reader.read_u64::<BigEndian>().unwrap();
-        let rm_lsn = buf_reader.read_u64::<BigEndian>().unwrap();
-
-        let mut data = vec![0; rm_bytes as usize];
-        buf_reader.read_exact(&mut data).unwrap();
-
-        (
-            AttrRmtHdr {
-                rm_magic,
-                rm_offset,
-                rm_bytes,
-                rm_crc,
-                rm_uuid,
-                rm_owner,
-                rm_blkno,
-                rm_lsn,
-            },
-            data,
-        )
-    }
+#[derive(Debug, Decode)]
+struct AttrRmtHdr {
+    _rm_magic: u32,
+    _rm_offset: u32,
+    rm_bytes: u32,
+    _rm_crc: u32,
+    _rm_uuid: utils::Uuid,
+    _rm_owner: u64,
+    _rm_blkno: u64,
+    _rm_lsn: u64,
 }
 
 pub trait Attr<R: BufRead + Seek> {
@@ -362,7 +321,6 @@ pub fn open<R: Reader + BufRead + Seek>(
                 Box::new(AttrLeaf {
                     bmx,
                     leaf,
-                    leaf_offset: ofs,
                     total_size: -1,
                 })
             },

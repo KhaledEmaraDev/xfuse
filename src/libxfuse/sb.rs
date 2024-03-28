@@ -78,56 +78,56 @@ mod constants {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Sb {
-    pub sb_magicnum: u32,
+    // sb_magicnum: u32,
     pub sb_blocksize: u32,
     pub sb_dblocks: XfsRfsblock,
-    pub sb_rblocks: XfsRfsblock,
-    pub sb_rextents: XfsRtblock,
+    // sb_rblocks: XfsRfsblock,
+    // sb_rextents: XfsRtblock,
     pub sb_uuid: Uuid,
-    pub sb_logstart: XfsFsblock,
+    // sb_logstart: XfsFsblock,
     pub sb_rootino: XfsIno,
-    pub sb_rbmino: XfsIno,
-    pub sb_rsumino: XfsIno,
-    pub sb_rextsize: XfsAgblock,
+    // sb_rbmino: XfsIno,
+    // sb_rsumino: XfsIno,
+    // sb_rextsize: XfsAgblock,
     pub sb_agblocks: XfsAgblock,
     pub sb_agcount: XfsAgnumber,
-    pub sb_rbmblocks: XfsExtlen,
+    // sb_rbmblocks: XfsExtlen,
     pub sb_logblocks: XfsExtlen,
-    pub sb_versionnum: u16,
-    pub sb_sectsize: u16,
+    // sb_versionnum: u16,
+    // sb_sectsize: u16,
     pub sb_inodesize: u16,
-    pub sb_inopblock: u16,
-    pub sb_fname: [u8; 12],
+    // sb_inopblock: u16,
+    // sb_fname: [u8; 12],
     pub sb_blocklog: u8,
-    pub sb_sectlog: u8,
-    pub sb_inodelog: u8,
+    // sb_sectlog: u8,
+    // sb_inodelog: u8,
     pub sb_inopblog: u8,
     pub sb_agblklog: u8,
-    pub sb_rextslog: u8,
-    pub sb_inprogress: u8,
-    pub sb_imax_pct: u8,
+    // sb_rextslog: u8,
+    // sb_inprogress: u8,
+    // sb_imax_pct: u8,
     pub sb_icount: u64,
     pub sb_ifree: u64,
     pub sb_fdblocks: u64,
-    pub sb_frextents: u64,
-    pub sb_uquotino: XfsIno,
-    pub sb_gquotino: XfsIno,
-    pub sb_qflags: u16,
-    pub sb_flags: u8,
-    pub sb_shared_vn: u8,
-    pub sb_inoalignmt: XfsExtlen,
-    pub sb_unit: u32,
-    pub sb_width: u32,
+    // sb_frextents: u64,
+    // sb_uquotino: XfsIno,
+    // sb_gquotino: XfsIno,
+    // sb_qflags: u16,
+    // sb_flags: u8,
+    // sb_shared_vn: u8,
+    // sb_inoalignmt: XfsExtlen,
+    // sb_unit: u32,
+    // sb_width: u32,
     pub sb_dirblklog: u8,
-    pub sb_logsectlog: u8,
-    pub sb_logsectsize: u16,
-    pub sb_logsunit: u32,
-    pub sb_features2: u32,
-    pub sb_bad_features2: u32,
-    pub sb_features_compat: u32,
-    pub sb_features_ro_compat: u32,
-    pub sb_features_incompat: u32,
-    pub sb_features_log_incompat: u32,
+    // sb_logsectlog: u8,
+    // sb_logsectsize: u16,
+    // sb_logsunit: u32,
+    // sb_features2: u32,
+    // sb_bad_features2: u32,
+    // sb_features_compat: u32,
+    // sb_features_ro_compat: u32,
+    // sb_features_incompat: u32,
+    // sb_features_log_incompat: u32,
 }
 
 impl Sb {
@@ -141,59 +141,59 @@ impl Sb {
 
         let sb_blocksize = buf_reader.read_u32::<BigEndian>().unwrap();
         let sb_dblocks = buf_reader.read_u64::<BigEndian>().unwrap();
-        let sb_rblocks = buf_reader.read_u64::<BigEndian>().unwrap();
-        let sb_rextents = buf_reader.read_u64::<BigEndian>().unwrap();
+        let _sb_rblocks = buf_reader.read_u64::<BigEndian>().unwrap();
+        let _sb_rextents = buf_reader.read_u64::<BigEndian>().unwrap();
         let sb_uuid = Uuid::from_u128(buf_reader.read_u128::<BigEndian>().unwrap());
-        let sb_logstart = buf_reader.read_u64::<BigEndian>().unwrap();
+        let _sb_logstart = buf_reader.read_u64::<BigEndian>().unwrap();
         let sb_rootino = buf_reader.read_u64::<BigEndian>().unwrap();
-        let sb_rbmino = buf_reader.read_u64::<BigEndian>().unwrap();
-        let sb_rsumino = buf_reader.read_u64::<BigEndian>().unwrap();
-        let sb_rextsize = buf_reader.read_u32::<BigEndian>().unwrap();
+        let _sb_rbmino = buf_reader.read_u64::<BigEndian>().unwrap();
+        let _sb_rsumino = buf_reader.read_u64::<BigEndian>().unwrap();
+        let _sb_rextsize = buf_reader.read_u32::<BigEndian>().unwrap();
         let sb_agblocks = buf_reader.read_u32::<BigEndian>().unwrap();
         let sb_agcount = buf_reader.read_u32::<BigEndian>().unwrap();
-        let sb_rbmblocks = buf_reader.read_u32::<BigEndian>().unwrap();
+        let _sb_rbmblocks = buf_reader.read_u32::<BigEndian>().unwrap();
         let sb_logblocks = buf_reader.read_u32::<BigEndian>().unwrap();
         let sb_versionnum = buf_reader.read_u16::<BigEndian>().unwrap();
-        let sb_sectsize = buf_reader.read_u16::<BigEndian>().unwrap();
+        let _sb_sectsize = buf_reader.read_u16::<BigEndian>().unwrap();
         let sb_inodesize = buf_reader.read_u16::<BigEndian>().unwrap();
-        let sb_inopblock = buf_reader.read_u16::<BigEndian>().unwrap();
+        let _sb_inopblock = buf_reader.read_u16::<BigEndian>().unwrap();
 
         let mut buf_fname = [0u8; 12];
         buf_reader.read_exact(&mut buf_fname[..]).unwrap();
-        let sb_fname = buf_fname;
+        let _sb_fname = buf_fname;
 
         let sb_blocklog = buf_reader.read_u8().unwrap();
-        let sb_sectlog = buf_reader.read_u8().unwrap();
-        let sb_inodelog = buf_reader.read_u8().unwrap();
+        let _sb_sectlog = buf_reader.read_u8().unwrap();
+        let _sb_inodelog = buf_reader.read_u8().unwrap();
         let sb_inopblog = buf_reader.read_u8().unwrap();
         let sb_agblklog = buf_reader.read_u8().unwrap();
-        let sb_rextslog = buf_reader.read_u8().unwrap();
-        let sb_inprogress = buf_reader.read_u8().unwrap();
-        let sb_imax_pct = buf_reader.read_u8().unwrap();
+        let _sb_rextslog = buf_reader.read_u8().unwrap();
+        let _sb_inprogress = buf_reader.read_u8().unwrap();
+        let _sb_imax_pct = buf_reader.read_u8().unwrap();
         let sb_icount = buf_reader.read_u64::<BigEndian>().unwrap();
         let sb_ifree = buf_reader.read_u64::<BigEndian>().unwrap();
         let sb_fdblocks = buf_reader.read_u64::<BigEndian>().unwrap();
-        let sb_frextents = buf_reader.read_u64::<BigEndian>().unwrap();
-        let sb_uquotino = buf_reader.read_u64::<BigEndian>().unwrap();
-        let sb_gquotino = buf_reader.read_u64::<BigEndian>().unwrap();
-        let sb_qflags = buf_reader.read_u16::<BigEndian>().unwrap();
-        let sb_flags = buf_reader.read_u8().unwrap();
-        let sb_shared_vn = buf_reader.read_u8().unwrap();
-        let sb_inoalignmt = buf_reader.read_u32::<BigEndian>().unwrap();
-        let sb_unit = buf_reader.read_u32::<BigEndian>().unwrap();
-        let sb_width = buf_reader.read_u32::<BigEndian>().unwrap();
+        let _sb_frextents = buf_reader.read_u64::<BigEndian>().unwrap();
+        let _sb_uquotino = buf_reader.read_u64::<BigEndian>().unwrap();
+        let _sb_gquotino = buf_reader.read_u64::<BigEndian>().unwrap();
+        let _sb_qflags = buf_reader.read_u16::<BigEndian>().unwrap();
+        let _sb_flags = buf_reader.read_u8().unwrap();
+        let _sb_shared_vn = buf_reader.read_u8().unwrap();
+        let _sb_inoalignmt = buf_reader.read_u32::<BigEndian>().unwrap();
+        let _sb_unit = buf_reader.read_u32::<BigEndian>().unwrap();
+        let _sb_width = buf_reader.read_u32::<BigEndian>().unwrap();
         let sb_dirblklog = buf_reader.read_u8().unwrap();
-        let sb_logsectlog = buf_reader.read_u8().unwrap();
-        let sb_logsectsize = buf_reader.read_u16::<BigEndian>().unwrap();
-        let sb_logsunit = buf_reader.read_u32::<BigEndian>().unwrap();
+        let _sb_logsectlog = buf_reader.read_u8().unwrap();
+        let _sb_logsectsize = buf_reader.read_u16::<BigEndian>().unwrap();
+        let _sb_logsunit = buf_reader.read_u32::<BigEndian>().unwrap();
         let sb_features2 = buf_reader.read_u32::<BigEndian>().unwrap();
-        let sb_bad_features2 = buf_reader.read_u32::<BigEndian>().unwrap();
+        let _sb_bad_features2 = buf_reader.read_u32::<BigEndian>().unwrap();
 
         /* Version 5 superblock features */
-        let sb_features_compat = buf_reader.read_u32::<BigEndian>().unwrap();
-        let sb_features_ro_compat = buf_reader.read_u32::<BigEndian>().unwrap();
-        let sb_features_incompat = buf_reader.read_u32::<BigEndian>().unwrap();
-        let sb_features_log_incompat = buf_reader.read_u32::<BigEndian>().unwrap();
+        let _sb_features_compat = buf_reader.read_u32::<BigEndian>().unwrap();
+        let _sb_features_ro_compat = buf_reader.read_u32::<BigEndian>().unwrap();
+        let _sb_features_incompat = buf_reader.read_u32::<BigEndian>().unwrap();
+        let _sb_features_log_incompat = buf_reader.read_u32::<BigEndian>().unwrap();
 
         buf_reader.seek(SeekFrom::Start(0)).unwrap();
 
@@ -223,56 +223,21 @@ impl Sb {
         }
 
         Sb {
-            sb_magicnum,
             sb_blocksize,
             sb_dblocks,
-            sb_rblocks,
-            sb_rextents,
             sb_uuid,
-            sb_logstart,
             sb_rootino,
-            sb_rbmino,
-            sb_rsumino,
-            sb_rextsize,
             sb_agblocks,
             sb_agcount,
-            sb_rbmblocks,
             sb_logblocks,
-            sb_versionnum,
-            sb_sectsize,
             sb_inodesize,
-            sb_inopblock,
-            sb_fname,
             sb_blocklog,
-            sb_sectlog,
-            sb_inodelog,
             sb_inopblog,
             sb_agblklog,
-            sb_rextslog,
-            sb_inprogress,
-            sb_imax_pct,
             sb_icount,
             sb_ifree,
             sb_fdblocks,
-            sb_frextents,
-            sb_uquotino,
-            sb_gquotino,
-            sb_qflags,
-            sb_flags,
-            sb_shared_vn,
-            sb_inoalignmt,
-            sb_unit,
-            sb_width,
             sb_dirblklog,
-            sb_logsectlog,
-            sb_logsectsize,
-            sb_logsunit,
-            sb_features2,
-            sb_bad_features2,
-            sb_features_compat,
-            sb_features_ro_compat,
-            sb_features_incompat,
-            sb_features_log_incompat,
         }
     }
 

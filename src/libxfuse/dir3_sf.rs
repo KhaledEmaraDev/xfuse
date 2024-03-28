@@ -72,7 +72,6 @@ impl Decode for Dir2SfHdr {
 
 #[derive(Debug, Clone)]
 pub struct Dir2SfEntry32 {
-    pub namelen: u8,
     pub offset: u16,
     pub name: OsString,
     pub ftype: u8,
@@ -89,7 +88,6 @@ impl Decode for Dir2SfEntry32 {
         let ftype: u8 = Decode::decode(decoder)?;
         let inumber: u32 = Decode::decode(decoder)?;
         Ok(Dir2SfEntry32 {
-            namelen,
             offset,
             name,
             ftype,
@@ -100,7 +98,6 @@ impl Decode for Dir2SfEntry32 {
 
 #[derive(Debug, Clone)]
 pub struct Dir2SfEntry64 {
-    pub namelen: u8,
     pub offset: u16,
     pub name: OsString,
     pub ftype: u8,
@@ -111,10 +108,8 @@ impl Dir2SfEntry64 {
     pub fn new(name: &[u8], ftype: u8, offset: u16, inumber: XfsIno)
         -> Self
     {
-        let namelen = name.len() as u8;
         let name = OsStr::from_bytes(name).to_owned();
         Self {
-            namelen,
             offset,
             name,
             ftype,
@@ -133,7 +128,6 @@ impl Decode for Dir2SfEntry64 {
         let ftype: u8 = Decode::decode(decoder)?;
         let inumber: XfsIno = Decode::decode(decoder)?;
         Ok(Dir2SfEntry64 {
-            namelen,
             offset,
             name,
             ftype,
@@ -148,7 +142,6 @@ impl Decode for Dir2SfEntry64 {
 impl From<Dir2SfEntry32> for Dir2SfEntry64 {
     fn from(e32: Dir2SfEntry32) -> Self {
         Self {
-            namelen: e32.namelen,
             offset: e32.offset,
             name: e32.name,
             ftype: e32.ftype,
@@ -159,7 +152,6 @@ impl From<Dir2SfEntry32> for Dir2SfEntry64 {
 
 #[derive(Debug, Clone)]
 pub struct Dir2Sf {
-    pub hdr: Dir2SfHdr,
     pub list: Vec<Dir2SfEntry64>,
 }
 
@@ -189,7 +181,7 @@ impl Decode for Dir2Sf {
             }
         }
 
-        Ok(Dir2Sf { hdr, list })
+        Ok(Dir2Sf { list })
     }
 }
 

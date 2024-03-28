@@ -69,11 +69,11 @@ pub use constants::*;
 #[derive(Debug, Decode)]
 pub struct Dir3BlkHdr {
     pub magic: u32,
-    pub crc: u32,
-    pub blkno: u64,
-    pub lsn: u64,
-    pub uuid: Uuid,
-    pub owner: u64,
+    _crc: u32,
+    _blkno: u64,
+    _lsn: u64,
+    _uuid: Uuid,
+    _owner: u64,
 }
 
 impl Dir3BlkHdr {
@@ -82,8 +82,8 @@ impl Dir3BlkHdr {
 
 #[derive(Debug, Decode, Clone, Copy)]
 pub struct Dir2DataFree {
-    pub offset: XfsDir2DataOff,
-    pub length: XfsDir2DataOff,
+    _offset: XfsDir2DataOff,
+    _length: XfsDir2DataOff,
 }
 
 impl Dir2DataFree {
@@ -93,8 +93,8 @@ impl Dir2DataFree {
 #[derive(Debug, Decode)]
 pub struct Dir3DataHdr {
     pub hdr: Dir3BlkHdr,
-    pub best_free: [Dir2DataFree; constants::XFS_DIR2_DATA_FD_COUNT],
-    pub pad: u32,
+    _best_free: [Dir2DataFree; constants::XFS_DIR2_DATA_FD_COUNT],
+    _pad: u32,
 }
 
 impl Dir3DataHdr {
@@ -140,57 +140,22 @@ impl Decode for Dir2DataEntry {
 
 #[derive(Debug)]
 pub struct Dir2DataUnused {
-    pub freetag: u16,
-    pub length: XfsDir2DataOff,
-    pub tag: XfsDir2DataOff,
-}
-
-impl From<&[u8]> for Dir2DataUnused {
-    fn from(raw: &[u8]) -> Self {
-        let freetag = decode(raw).unwrap().0;
-        let length = decode(&raw[2..]).unwrap().0;
-        let tag  = decode(&raw[(length - 2) as usize..]).unwrap().0;
-
-        Dir2DataUnused {
-            freetag,
-            length,
-            tag,
-        }
-    }
+    _freetag: u16,
+    _length: XfsDir2DataOff,
+    _tag: XfsDir2DataOff,
 }
 
 impl Decode for Dir2DataUnused {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let freetag = Decode::decode(decoder)?;
+        let _freetag = Decode::decode(decoder)?;
         let length = Decode::decode(decoder)?;
         decoder.reader().consume(length as usize - 6);
-        let tag = Decode::decode(decoder)?;
+        let _tag = Decode::decode(decoder)?;
         Ok(Dir2DataUnused {
-            freetag,
-            length,
-            tag,
+            _freetag,
+            _length: length,
+            _tag,
         })
-    }
-}
-
-#[derive(Debug)]
-pub struct Dir2Data {
-    pub hdr: Dir3DataHdr,
-    pub offset: u64,
-}
-
-impl Dir2Data {
-    pub fn from<T: Reader + BufRead + Seek>(
-        buf_reader: &mut T,
-        superblock: &Sb,
-        start_block: u64,
-    ) -> Dir2Data {
-        let offset = superblock.fsb_to_offset(start_block);
-        buf_reader.seek(SeekFrom::Start(offset)).unwrap();
-
-        let hdr = decode_from(buf_reader.by_ref()).unwrap();
-
-        Dir2Data { hdr, offset }
     }
 }
 
@@ -198,8 +163,8 @@ impl Dir2Data {
 pub struct Dir3LeafHdr {
     pub info: XfsDa3Blkinfo,
     pub count: u16,
-    pub stale: u16,
-    pub pad: u32,
+    _stale: u16,
+    _pad: u32,
 }
 
 #[derive(Clone, Copy, Debug, Decode, Default)]

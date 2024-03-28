@@ -30,54 +30,33 @@ use std::{
     io::{BufRead, Seek, SeekFrom},
 };
 
-use super::{bmbt_rec::BmbtRec, sb::Sb};
+use bincode::{Decode, de::read::Reader};
+use byteorder::ReadBytesExt;
 
-use byteorder::{BigEndian, ReadBytesExt};
-use uuid::Uuid;
+use super::{
+    bmbt_rec::BmbtRec, 
+    definitions::XFS_SYMLINK_MAGIC,
+    sb::Sb,
+    utils::{Uuid, decode_from}
+};
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, Decode)]
 pub struct DsymlinkHdr {
-    pub sl_magic: u32,
-    pub sl_offset: u32,
-    pub sl_bytes: u32,
-    pub sl_crc: u32,
-    pub sl_uuid: Uuid,
-    pub sl_owner: u64,
-    pub sl_blkno: u64,
-    pub sl_lsn: u64,
-}
-
-impl DsymlinkHdr {
-    pub fn from<T: BufRead>(buf_reader: &mut T) -> DsymlinkHdr {
-        let sl_magic = buf_reader.read_u32::<BigEndian>().unwrap();
-        let sl_offset = buf_reader.read_u32::<BigEndian>().unwrap();
-        let sl_bytes = buf_reader.read_u32::<BigEndian>().unwrap();
-        let sl_crc = buf_reader.read_u32::<BigEndian>().unwrap();
-
-        let sl_uuid = Uuid::from_u128(buf_reader.read_u128::<BigEndian>().unwrap());
-
-        let sl_owner = buf_reader.read_u64::<BigEndian>().unwrap();
-        let sl_blkno = buf_reader.read_u64::<BigEndian>().unwrap();
-        let sl_lsn = buf_reader.read_u64::<BigEndian>().unwrap();
-
-        DsymlinkHdr {
-            sl_magic,
-            sl_offset,
-            sl_bytes,
-            sl_crc,
-            sl_uuid,
-            sl_owner,
-            sl_blkno,
-            sl_lsn,
-        }
-    }
+    sl_magic: u32,
+    sl_offset: u32,
+    sl_bytes: u32,
+    _sl_crc: u32,
+    _sl_uuid: Uuid,
+    _sl_owner: u64,
+    _sl_blkno: u64,
+    _sl_lsn: u64,
 }
 
 #[derive(Debug)]
 pub struct SymlinkExtents;
 
 impl SymlinkExtents {
-    pub fn get_target<T: BufRead + Seek>(
+    pub fn get_target<T: BufRead + Reader + Seek>(
         buf_reader: &mut T,
         bmx: &[BmbtRec],
         superblock: &Sb,
@@ -88,7 +67,8 @@ impl SymlinkExtents {
             buf_reader.seek(SeekFrom::Start(superblock.fsb_to_offset(bmbt_rec.br_startblock)))
                 .unwrap();
 
-            let hdr = DsymlinkHdr::from(buf_reader);
+            let hdr: DsymlinkHdr = decode_from(buf_reader.by_ref()).unwrap();
+            assert_eq!(XFS_SYMLINK_MAGIC, hdr.sl_magic);
 
             buf_reader
                 .seek(SeekFrom::Current(hdr.sl_offset as i64))

@@ -34,7 +34,7 @@ use std::{
 
 use bincode::{
     Decode,
-    de::Decoder,
+    de::{Decoder, read::Reader},
     error::DecodeError,
     impl_borrow_decode,
 };
@@ -45,6 +45,7 @@ use super::{
     definitions::*,
     utils::Uuid,
     sb::Sb,
+    utils::decode_from,
     volume::SUPERBLOCK
 };
 
@@ -87,71 +88,25 @@ pub fn hashname(name: &OsStr) -> XfsDahash {
 #[derive(Debug)]
 pub struct XfsDa3Blkinfo {
     pub forw: u32,
-    pub back: u32,
     pub magic: u16,
-    pub pad: u16,
-
-    pub crc: u32,
-    pub blkno: u64,
-    pub lsn: u64,
-    pub uuid: Uuid,
-    pub owner: u64,
-}
-
-impl XfsDa3Blkinfo {
-    pub fn from<R: BufRead + Seek>(buf_reader: &mut R, super_block: &Sb) -> XfsDa3Blkinfo {
-        let forw = buf_reader.read_u32::<BigEndian>().unwrap();
-        let back = buf_reader.read_u32::<BigEndian>().unwrap();
-        let magic = buf_reader.read_u16::<BigEndian>().unwrap();
-        let pad = buf_reader.read_u16::<BigEndian>().unwrap();
-
-        let crc = buf_reader.read_u32::<BigEndian>().unwrap();
-        let blkno = buf_reader.read_u64::<BigEndian>().unwrap();
-        let lsn = buf_reader.read_u64::<BigEndian>().unwrap();
-        let uuid = Uuid::from_u128(buf_reader.read_u128::<BigEndian>().unwrap());
-        let owner = buf_reader.read_u64::<BigEndian>().unwrap();
-
-        if uuid != super_block.sb_uuid {
-            panic!("UUID mismatch!");
-        }
-
-        XfsDa3Blkinfo {
-            forw,
-            back,
-            magic,
-            pad,
-            crc,
-            blkno,
-            lsn,
-            uuid,
-            owner,
-        }
-    }
 }
 
 impl Decode for XfsDa3Blkinfo {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let forw = Decode::decode(decoder)?;
-        let back = Decode::decode(decoder)?;
+        let _back: u32 = Decode::decode(decoder)?;
         let magic = Decode::decode(decoder)?;
-        let pad = Decode::decode(decoder)?;
-        let crc = Decode::decode(decoder)?;
-        let blkno = Decode::decode(decoder)?;
-        let lsn = Decode::decode(decoder)?;
-        let uuid = Decode::decode(decoder)?;
-        let owner = Decode::decode(decoder)?;
+        let _pad: u16 = Decode::decode(decoder)?;
+        let _crc: u32 = Decode::decode(decoder)?;
+        let _blkno: u64 = Decode::decode(decoder)?;
+        let _lsn: u64 = Decode::decode(decoder)?;
+        let uuid: Uuid = Decode::decode(decoder)?;
+        let _owner: u64 = Decode::decode(decoder)?;
         assert_eq!(uuid, SUPERBLOCK.get().unwrap().sb_uuid, "UUID mismatch!");
 
         Ok(XfsDa3Blkinfo {
             forw,
-            back,
             magic,
-            pad,
-            crc,
-            blkno,
-            lsn,
-            uuid,
-            owner,
         })
     }
 }
@@ -163,23 +118,6 @@ pub struct XfsDa3NodeHdr {
     pub info: XfsDa3Blkinfo,
     pub count: u16,
     pub level: u16,
-    pub pad32: u32,
-}
-
-impl XfsDa3NodeHdr {
-    pub fn from<R: BufRead + Seek>(buf_reader: &mut R, super_block: &Sb) -> XfsDa3NodeHdr {
-        let info = XfsDa3Blkinfo::from(buf_reader.by_ref(), super_block);
-        let count = buf_reader.read_u16::<BigEndian>().unwrap();
-        let level = buf_reader.read_u16::<BigEndian>().unwrap();
-        let pad32 = buf_reader.read_u32::<BigEndian>().unwrap();
-
-        XfsDa3NodeHdr {
-            info,
-            count,
-            level,
-            pad32,
-        }
-    }
 }
 
 impl Decode for XfsDa3NodeHdr {
@@ -190,12 +128,11 @@ impl Decode for XfsDa3NodeHdr {
         }
         let count = Decode::decode(decoder)?;
         let level = Decode::decode(decoder)?;
-        let pad32 = Decode::decode(decoder)?;
+        let _pad32: u32 = Decode::decode(decoder)?;
         Ok(XfsDa3NodeHdr {
             info,
             count,
             level,
-            pad32
         })
     }
 }
@@ -223,8 +160,8 @@ pub struct XfsDa3Intnode {
 }
 
 impl XfsDa3Intnode {
-    pub fn from<R: BufRead + Seek>(buf_reader: &mut R, super_block: &Sb) -> XfsDa3Intnode {
-        let hdr = XfsDa3NodeHdr::from(buf_reader.by_ref(), super_block);
+    pub fn from<R: BufRead + Reader + Seek>(buf_reader: &mut R) -> XfsDa3Intnode {
+        let hdr: XfsDa3NodeHdr = decode_from(buf_reader.by_ref()).unwrap();
         assert_eq!(hdr.info.magic, XFS_DA3_NODE_MAGIC, "bad magic!  Expected {:#x}, found {:#x}",
                    XFS_DA3_NODE_MAGIC, hdr.info.magic);
 
@@ -236,7 +173,7 @@ impl XfsDa3Intnode {
         XfsDa3Intnode { hdr, btree }
     }
 
-    pub fn lookup<R: BufRead + Seek, F: Fn(XfsDablk, &mut R) -> XfsFsblock>(
+    pub fn lookup<R: BufRead + Reader + Seek, F: Fn(XfsDablk, &mut R) -> XfsFsblock>(
         &self,
         buf_reader: &mut R,
         super_block: &Sb,
@@ -261,7 +198,7 @@ impl XfsDa3Intnode {
                 .seek(SeekFrom::Start(offset))
                 .unwrap();
 
-            let node = XfsDa3Intnode::from(buf_reader.by_ref(), super_block);
+            let node = XfsDa3Intnode::from(buf_reader.by_ref());
             node.lookup(
                 buf_reader.by_ref(),
                 super_block,
@@ -271,7 +208,7 @@ impl XfsDa3Intnode {
         }
     }
 
-    pub fn first_block<R: BufRead + Seek, F: Fn(XfsDablk, &mut R) -> XfsFsblock>(
+    pub fn first_block<R: BufRead + Reader + Seek, F: Fn(XfsDablk, &mut R) -> XfsFsblock>(
         &self,
         buf_reader: &mut R,
         super_block: &Sb,
@@ -287,7 +224,7 @@ impl XfsDa3Intnode {
                 .seek(SeekFrom::Start(offset))
                 .unwrap();
 
-            let node = XfsDa3Intnode::from(buf_reader.by_ref(), super_block);
+            let node = XfsDa3Intnode::from(buf_reader.by_ref());
             node.first_block(buf_reader.by_ref(), super_block, map_da_block_to_fs_block)
         }
     }

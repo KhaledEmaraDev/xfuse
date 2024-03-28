@@ -33,7 +33,6 @@ use bincode::{
     error::DecodeError
 };
 use num_derive::FromPrimitive;
-use num_traits::FromPrimitive;
 
 #[derive(Debug, FromPrimitive, Clone)]
 pub enum XfsExntst {
@@ -47,7 +46,6 @@ pub struct BmbtRec {
     pub br_startoff: XfsFileoff,
     pub br_startblock: XfsFsblock,
     pub br_blockcount: XfsFilblks,
-    pub br_state: XfsExntst,
 }
 
 impl Decode for BmbtRec {
@@ -61,15 +59,11 @@ impl Decode for BmbtRec {
         let br = br >> 52;
 
         let br_startoff = (br & ((1 << 54) - 1)) as u64;
-        let br = br >> 54;
-
-        let br_state = XfsExntst::from_u8((br & 1) as u8).unwrap();
 
         Ok(BmbtRec {
             br_startoff,
             br_startblock,
             br_blockcount,
-            br_state,
         })
     }
 }

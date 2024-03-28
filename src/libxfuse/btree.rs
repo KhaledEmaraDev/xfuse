@@ -47,17 +47,17 @@ use super::{
 
 #[derive(Clone, Copy, Debug, Decode)]
 pub struct BtreeBlockHdr<T: PrimInt + Unsigned> {
-    pub bb_magic: u32,
+    _bb_magic: u32,
     pub bb_level: u16,
     pub bb_numrecs: u16,
-    pub bb_leftsib: T,
-    pub bb_rightsib: T,
-    pub bb_blkno: u64,
-    pub bb_lsn: u64,
+    _bb_leftsib: T,
+    _bb_rightsib: T,
+    _bb_blkno: u64,
+    _bb_lsn: u64,
     pub bb_uuid: Uuid,
-    pub bb_owner: u64,
-    pub bb_crc: u32,
-    pub bb_pad: u32,
+    _bb_owner: u64,
+    _bb_crc: u32,
+    _bb_pad: u32,
 }
 
 impl<T: PrimInt + Unsigned> BtreeBlockHdr<T> {
