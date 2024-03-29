@@ -246,9 +246,10 @@ impl Leaf {
         match self {
             Leaf::LeafN(leafn) => Ok(leafn),
             Leaf::Btree(btree) => {
-                let fsblock: XfsFsblock = btree.lookup(buf_reader.by_ref(), sb, hash,
+                let dablk: XfsDablk = btree.lookup(buf_reader.by_ref(), sb, hash,
                     |block, br| dir.map_dblock(br, block).unwrap()
                 )?;
+                let fsblock = dir.map_dblock(buf_reader.by_ref(), dablk)?;
                 buf_reader.seek(SeekFrom::Start(sb.fsb_to_offset(fsblock))).unwrap();
                 Ok(decode_from(buf_reader.by_ref()).unwrap())
             }

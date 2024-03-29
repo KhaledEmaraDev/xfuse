@@ -179,26 +179,24 @@ impl XfsDa3Intnode {
         super_block: &Sb,
         hash: u32,
         map_da_block_to_fs_block: F,
-    ) -> Result<XfsFsblock, i32> {
+    ) -> Result<XfsDablk, i32> {
         let pidx = self.btree.partition_point(|k| k.hashval < hash);
         if pidx >= self.btree.len() {
             return Err(libc::ENOENT);
         }
         let before = self.btree[pidx].before;
 
-        let blk =
-            map_da_block_to_fs_block(before, buf_reader.by_ref());
-
         if self.hdr.level == 1 {
-            Ok(blk)
+            Ok(before)
         } else {
+            let fsblock = map_da_block_to_fs_block(before, buf_reader.by_ref());
+
             assert!(self.hdr.level > 1);
-            let offset = super_block.fsb_to_offset(blk);
+            let offset = super_block.fsb_to_offset(fsblock);
             buf_reader
                 .seek(SeekFrom::Start(offset))
                 .unwrap();
 
-            eprint!("1");
             let node = XfsDa3Intnode::from(buf_reader.by_ref());
             node.lookup(
                 buf_reader.by_ref(),

@@ -198,10 +198,11 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrNode {
     fn get(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, i32> {
         let hash = hashname(name);
 
-        let blk = self.node.lookup(buf_reader.by_ref(), super_block, hash, |block, _| {
+        let dablk = self.node.lookup(buf_reader.by_ref(), super_block, hash, |block, _| {
             self.map_logical_block_to_fs_block(block)
         }).map_err(|e| if e == libc::ENOENT {libc::ENOATTR} else {e})?;
-        let leaf_offset = super_block.fsb_to_offset(blk);
+        let fsblock = self.map_logical_block_to_fs_block(dablk);
+        let leaf_offset = super_block.fsb_to_offset(fsblock);
 
         buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
         let leaf: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
