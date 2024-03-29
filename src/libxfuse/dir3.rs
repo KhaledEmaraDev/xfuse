@@ -249,9 +249,8 @@ impl Leaf {
                 let dablk: XfsDablk = btree.lookup(buf_reader.by_ref(), sb, hash,
                     |block, br| dir.map_dblock(br, block).unwrap()
                 )?;
-                let fsblock = dir.map_dblock(buf_reader.by_ref(), dablk)?;
-                buf_reader.seek(SeekFrom::Start(sb.fsb_to_offset(fsblock))).unwrap();
-                Ok(decode_from(buf_reader.by_ref()).unwrap())
+                let raw = dir.read_dblock(buf_reader.by_ref(), sb, dablk)?;
+                Ok(decode(&raw).unwrap().0)
             }
         }
     }
@@ -273,8 +272,10 @@ impl<'a, D: NodeLikeDir, R: Reader + BufRead + Seek + 'a> NodeLikeAddressIterato
         let sb = SUPERBLOCK.get().unwrap();
         let dblock = sb.get_dir3_leaf_offset();
         let mut buf_reader = brrc.borrow_mut();
-        let raw = dir.read_dblock(buf_reader.by_ref(), sb, dblock)?;
-        let leaf_btree = Leaf::open(raw.deref());
+        let leaf_btree = {
+            let raw = dir.read_dblock(buf_reader.by_ref(), sb, dblock)?;
+            Leaf::open(raw.deref())
+        };
         let leaf = leaf_btree.lookup_leaf_blk(buf_reader.by_ref(), sb, dir, hash)?;
 
         let leaf_range = leaf.get_address_range(hash);
