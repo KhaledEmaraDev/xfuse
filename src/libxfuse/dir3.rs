@@ -270,17 +270,10 @@ impl<'a, D: NodeLikeDir, R: Reader + BufRead + Seek + 'a> NodeLikeAddressIterato
     pub fn new(dir: &'a D, brrc: &'a RefCell<&'a mut R>, hash: XfsDahash) -> Result<Self, i32>
     {
         let sb = SUPERBLOCK.get().unwrap();
-        let blocksize: u64 = sb.sb_blocksize.into();
-        let dblksize: u64 = blocksize * (1 << sb.sb_dirblklog);
         let dblock = sb.get_dir3_leaf_offset();
         let mut buf_reader = brrc.borrow_mut();
-
-        let fsblock = dir.map_dblock(buf_reader.by_ref(), dblock)?;
-
-        let mut raw = vec![0u8; dblksize as usize];
-        buf_reader.seek(SeekFrom::Start(sb.fsb_to_offset(fsblock))).unwrap();
-        buf_reader.read_exact(&mut raw).unwrap();
-        let leaf_btree = Leaf::open(&raw);
+        let raw = dir.read_dblock(buf_reader.by_ref(), sb, dblock)?;
+        let leaf_btree = Leaf::open(raw.deref());
         let leaf = leaf_btree.lookup_leaf_blk(buf_reader.by_ref(), sb, dir, hash)?;
 
         let leaf_range = leaf.get_address_range(hash);
@@ -330,7 +323,7 @@ impl<'a, D: NodeLikeDir, R: Reader + BufRead + Seek + 'a> Iterator for NodeLikeA
 }
 
 /// Directories whose Leaf information takes up more than one block.
-pub trait NodeLikeDir {
+pub trait NodeLikeDir: Dir3 {
     fn get_addresses<'a, R>(&'a self, brrc: &'a RefCell<&'a mut R>, hash: XfsDahash)
         -> Box<dyn Iterator<Item=XfsDir2Dataptr> + 'a>
             where R: Reader + BufRead + Seek + 'a, Self: Sized
