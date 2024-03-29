@@ -28,14 +28,14 @@
 use std::cell::RefCell;
 use std::convert::TryInto;
 use std::ffi::{OsStr, OsString};
-use std::io::{BufRead, Seek, SeekFrom};
+use std::io::{BufRead, Seek};
 use std::ops::{Deref, Range};
 use std::os::unix::ffi::OsStringExt;
 
 use super::da_btree::{XfsDa3Blkinfo, hashname, XfsDa3Intnode};
 use super::definitions::*;
 use super::sb::Sb;
-use super::utils::{FileKind, Uuid, decode, decode_from, get_file_type};
+use super::utils::{FileKind, Uuid, decode, get_file_type};
 use super::volume::SUPERBLOCK;
 
 use bincode::{
@@ -297,18 +297,16 @@ impl<'a, D: NodeLikeDir, R: Reader + BufRead + Seek + 'a> Iterator for NodeLikeA
                     // Traverse the forw pointer
                     let forw = self.leaf.hdr.info.forw;
                     let mut buf_reader = self.brrc.borrow_mut();
-                    let next_fsblock = match self.dir.map_dblock(buf_reader.by_ref(), forw) {
-                        Ok(fsb) => fsb,
+                    let sb = SUPERBLOCK.get().unwrap();
+                    let raw = match self.dir.read_dblock(buf_reader.by_ref(), sb, forw) {
+                        Ok(raw) => raw,
                         Err(e) => {
                             // It would be nice to print inode number here
-                            error!("Cannot find dblock {}: {}", forw, e);
+                            error!("Cannot read dblock {}: {}", forw, e);
                             return None;
                         }
                     };
-                    let sb = SUPERBLOCK.get().unwrap();
-                    buf_reader.seek(SeekFrom::Start(sb.fsb_to_offset(next_fsblock)))
-                        .unwrap();
-                    self.leaf = decode_from(buf_reader.by_ref()).unwrap();
+                    self.leaf = decode(raw.deref()).unwrap().0;
                     self.leaf_range = self.leaf.get_address_range(self.hash);
                 } else {
                     return None;
