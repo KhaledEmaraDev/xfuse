@@ -26,6 +26,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 use std::{
+    cell::RefCell,
+    collections::{BTreeMap, btree_map::Entry},
     io::{prelude::*, SeekFrom},
     mem,
 };
@@ -87,11 +89,16 @@ pub type XfsBmbtPtr = XfsFsblock;
 pub type XfsBmdrPtr = XfsFsblock;
 pub type XfsBmbtLblock = BtreeBlockHdr<u64>;
 
-/// Methods that are common to both BtreeRoot and BtreeIntermediate
-pub trait Btree {
+trait BtreePriv {
     fn keys(&self) -> &[BmbtKey];
     fn level(&self) -> u16;
+    fn block_cache(&self) -> &RefCell<BlockCache>;
+    fn ptrs(&self) -> &[XfsBmbtPtr];
+}
 
+/// Methods that are common to both BtreeRoot and BtreeIntermediate
+#[allow(private_bounds)]
+pub trait Btree: BtreePriv {
     /// Return the extent, if any, that contains the given block within the file.
     /// Return its starting position as an FSblock, and its length in file system block units.
     /// If the length extents to EoF, return None for length.
@@ -106,23 +113,68 @@ pub trait Btree {
         // BtreeLeaf::get_extent will calculate the hole's size.
         let idx = pp.saturating_sub(1);
 
-        let offset = super_block.fsb_to_offset(self.ptrs()[idx]);
-        buf_reader
-            .seek(SeekFrom::Start(offset))
-            .map_err(|e| e.raw_os_error().unwrap())?;
+        let mut guard = self.block_cache().borrow_mut();
+        match &mut *guard {
+            BlockCache::Intermediate(bci) => {
+                assert!(self.level() > 1);
 
-        if self.level() > 1 {
-            let bti: BtreeIntermediate = decode_from(buf_reader.by_ref()).map_err(|_| libc::EDESTADDRREQ)?;
-            assert_eq!(bti.hdr.bb_uuid, super_block.sb_uuid);
-            bti.map_block(buf_reader, logical_block)
-        } else {
-            let btl: BtreeLeaf = decode_from(buf_reader.by_ref()).map_err(|_| libc::ENOTSOCK)?;
-            assert_eq!(btl.hdr.bb_uuid, super_block.sb_uuid);
-            Ok(btl.get_extent(logical_block))
+                let entry = bci.entry(idx);
+                match entry {
+                    Entry::Vacant(ve) => {
+                        let offset = super_block.fsb_to_offset(self.ptrs()[idx]);
+                        buf_reader
+                            .seek(SeekFrom::Start(offset))
+                            .map_err(|e| e.raw_os_error().unwrap())?;
+                        let bti: BtreeIntermediate = decode_from(buf_reader.by_ref())
+                            .map_err(|_| libc::EDESTADDRREQ)?;
+                        assert_eq!(bti.hdr.bb_uuid, super_block.sb_uuid);
+                        ve.insert(bti).map_block(buf_reader, logical_block)
+                    }
+                    Entry::Occupied(oe) => {
+                        let v: &BtreeIntermediate = oe.get();
+                        v.map_block(buf_reader, logical_block)
+                    }
+                }
+            },
+            BlockCache::Leaf(bcl) => {
+                assert!(self.level() <= 1);
+
+                let entry = bcl.entry(idx);
+                match entry {
+                    Entry::Vacant(ve) => {
+                        let offset = super_block.fsb_to_offset(self.ptrs()[idx]);
+                        buf_reader
+                            .seek(SeekFrom::Start(offset))
+                            .map_err(|e| e.raw_os_error().unwrap())?;
+                        let btl: BtreeLeaf = decode_from(buf_reader.by_ref())
+                            .map_err(|_| libc::EDESTADDRREQ)?;
+                        assert_eq!(btl.hdr.bb_uuid, super_block.sb_uuid);
+                        Ok(ve.insert(btl).get_extent(logical_block))
+                    }
+                    Entry::Occupied(oe) => {
+                        let v: &BtreeLeaf = oe.get();
+                        Ok(v.get_extent(logical_block))
+                    }
+                }
+            }
         }
     }
+}
 
-    fn ptrs(&self) -> &[XfsBmbtPtr];
+#[derive(Debug)]
+enum BlockCache {
+    Intermediate(BTreeMap<usize, BtreeIntermediate>),
+    Leaf(BTreeMap<usize, BtreeLeaf>)
+}
+
+impl BlockCache {
+    fn new(level: u16) -> Self {
+        if level > 1 {
+            BlockCache::Intermediate(Default::default())
+        } else {
+            BlockCache::Leaf(Default::default())
+        }
+    }
 }
 
 /// A root BTree in an extent list.
@@ -130,20 +182,29 @@ pub trait Btree {
 /// This is actually part of the inode, not a separate disk block.  Note that root and intermediate
 /// nodes are stored differently on disk: root btrees are stored in the inode, whereas intermediate
 /// btrees are stored in a BMA3 block.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BtreeRoot {
     pub bmdr: BmdrBlock,
     pub keys: Vec<BmbtKey>,
     pub ptrs: Vec<XfsBmdrPtr>,
+    /// A cache of the object's extents, indexed by block number
+    blocks: RefCell<BlockCache>
 }
 
 impl BtreeRoot {
     pub fn new(bmdr: BmdrBlock, keys: Vec<BmbtKey>, ptrs: Vec<XfsBmdrPtr>) -> Self {
-        Self {bmdr, keys, ptrs}
+        let blocks = RefCell::new(BlockCache::new(bmdr.bb_level));
+        Self {bmdr, keys, ptrs,
+        blocks
+        }
     }
 }
 
-impl Btree for BtreeRoot {
+impl BtreePriv for BtreeRoot {
+    fn block_cache(&self) -> &RefCell<BlockCache> {
+        &self.blocks
+    }
+
     fn keys(&self) -> &[BmbtKey] {
         &self.keys
     }
@@ -157,15 +218,23 @@ impl Btree for BtreeRoot {
     }
 }
 
+impl Btree for BtreeRoot {}
+
 /// An intermediate Btree.
 #[derive(Debug)]
 struct BtreeIntermediate {
     hdr: XfsBmbtLblock,
     keys: Vec<BmbtKey>,
     ptrs: Vec<XfsBmbtPtr>,
+    /// A cache of the object's extents, indexed by block number
+    blocks: RefCell<BlockCache>
 }
 
-impl Btree for BtreeIntermediate {
+impl BtreePriv for BtreeIntermediate {
+    fn block_cache(&self) -> &RefCell<BlockCache> {
+        &self.blocks
+    }
+
     fn keys(&self) -> &[BmbtKey] {
         &self.keys
     }
@@ -178,6 +247,8 @@ impl Btree for BtreeIntermediate {
         &self.ptrs
     }
 }
+
+impl Btree for BtreeIntermediate {}
 
 
 impl Decode for BtreeIntermediate {
@@ -201,10 +272,12 @@ impl Decode for BtreeIntermediate {
             Decode::decode(decoder).unwrap()
         }).collect::<Vec<XfsBmbtPtr>>();
 
+        let blocks = RefCell::new(BlockCache::new(hdr.bb_level));
         Ok(Self {
             hdr,
             keys,
-            ptrs
+            ptrs,
+            blocks
         })
     }
 }

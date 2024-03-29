@@ -138,10 +138,11 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrBtree {
 
         let node = XfsDa3Intnode::from(buf_reader.by_ref());
 
-        let blk = node.lookup(buf_reader.by_ref(), super_block, hash, |block, reader| {
+        let dablk = node.lookup(buf_reader.by_ref(), super_block, hash, |block, reader| {
             self.map_block(reader.by_ref(), block).unwrap()
         }).map_err(|e| if e == libc::ENOENT {libc::ENOATTR} else {e})?;
-        let leaf_offset = super_block.fsb_to_offset(blk);
+        let fsblock = self.map_block(buf_reader.by_ref(), dablk)?;
+        let leaf_offset = super_block.fsb_to_offset(fsblock);
 
         buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
 

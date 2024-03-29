@@ -81,9 +81,8 @@ impl Dir2LeafDisk {
 pub struct Dir2Leaf {
     bmx: Vec<BmbtRec>,
     leaf: Dir2LeafDisk,
-    /// A cache of the last extent and its starting block number read by lookup
-    /// or readdir.
-    block_cache: RefCell<(XfsFsblock, Vec<u8>)>
+    /// A cache of directory blocks, indexed by directory block number divided by dlksize
+    blocks: RefCell<Vec<Option<Vec<u8>>>>,
 }
 
 impl Dir2Leaf {
@@ -102,13 +101,12 @@ impl Dir2Leaf {
         let leaf = Dir2LeafDisk::from(buf_reader, offset, leaf_size);
         assert_eq!(leaf.hdr.info.magic, XFS_DIR3_LEAF1_MAGIC);
 
-        let dblksize: usize = 1 << (superblock.sb_blocklog + superblock.sb_dirblklog);
-        let block_cache = RefCell::new((XfsFsblock::max_value(), Vec::with_capacity(dblksize)));
+        let blocks = RefCell::new(Vec::new());
 
         Dir2Leaf {
             bmx: bmx.to_vec(),
             leaf,
-            block_cache
+            blocks
         }
     }
 
@@ -124,25 +122,18 @@ impl Dir2Leaf {
         }
     }
 
-    fn read_fsblock<'a, R>(&'a self, mut buf_reader: R, sb: &Sb, fsblock: XfsFsblock)
-        -> Result<Box<dyn Deref<Target=[u8]> + 'a>, i32>
+    fn read_fsblock<R>(&self, mut buf_reader: R, sb: &Sb, fsblock: XfsFsblock)
+        -> Result<Vec<u8>, i32>
         where R: Reader + BufRead + Seek
     {
         let dblksize: usize = 1 << (sb.sb_blocklog + sb.sb_dirblklog);
 
-        let mut cache_guard = self.block_cache.borrow_mut();
-        if cache_guard.0 != fsblock || cache_guard.1.len() != dblksize {
-            cache_guard.1.resize(dblksize, 0u8);
-            buf_reader
-                .seek(SeekFrom::Start(sb.fsb_to_offset(fsblock)))
-                .unwrap();
-            buf_reader.read_exact(&mut cache_guard.1).unwrap();
-            cache_guard.0 = fsblock;
-        }
-        // Annoyingly, there's no function to downgrade a RefMut into a Ref.
-        drop(cache_guard);
-        let cache_guard = self.block_cache.borrow();
-        Ok(Box::new(Ref::map(cache_guard, |v| v.1.as_ref())))
+        let mut buf = vec![0u8; dblksize];
+        buf_reader
+            .seek(SeekFrom::Start(sb.fsb_to_offset(fsblock)))
+            .unwrap();
+        buf_reader.read_exact(&mut buf).unwrap();
+        Ok(buf)
     }
 }
 
@@ -162,6 +153,15 @@ impl Dir3 for Dir2Leaf {
         where R: Reader + BufRead + Seek
     {
         let fsblock = self.map_dblock(dblock)?;
-        self.read_fsblock(buf_reader.by_ref(), sb, fsblock)
+        let key = (dblock >> sb.sb_dirblklog) as usize;
+        let mut cache_guard = self.blocks.borrow_mut();
+        if cache_guard.len() <= key || cache_guard[key].is_none() {
+            cache_guard.resize(key + 1, None);
+            cache_guard[key] = Some(self.read_fsblock(buf_reader.by_ref(), sb, fsblock)?);
+        }
+        // Annoyingly, there's no function to downgrade a RefMut into a Ref.
+        drop(cache_guard);
+        let cache_guard = self.blocks.borrow();
+        Ok(Box::new(Ref::map(cache_guard, |v| &v[key].as_ref().unwrap()[..])))
     }
 }
