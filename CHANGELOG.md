@@ -10,6 +10,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - The MSRV is now 1.74.0
   ([#128](https://github.com/KhaledEmaraDev/xfuse/pull/128))
 
+- When run as root, the `default_permissions` and `allow_other` mount options
+  are always set.
+  ([#131](https://github.com/KhaledEmaraDev/xfuse/pull/131))
+
 ### Fixed
 
 - Fixed a crash when opening and closing multiple files simultaneously but not

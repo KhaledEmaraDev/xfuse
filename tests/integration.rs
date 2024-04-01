@@ -743,7 +743,7 @@ mod open {
     fn multiple(harness4k: Harness) {
         require_fusefs!();
 
-        let path = harness4k.d.path().join("files").join("single_extent.txt");
+        let path = harness4k.d.path().join("files").join("executable");
 
         let _f1 = fs::File::open(&path).unwrap();
         // Open it again with a different mode.  This forces fusefs(4) to send a
@@ -1174,7 +1174,7 @@ fn statfs(harness4k: Harness) {
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
     // here.
-    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 745);
+    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 746);
 
     // There are legitimate questions about what the correct value for
     // optimal_transfer_size
@@ -1199,7 +1199,7 @@ fn statvfs(harness4k: Harness) {
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
     // here.
-    assert_eq!(svfs.files() - svfs.files_free(), 745);
+    assert_eq!(svfs.files() - svfs.files_free(), 746);
     assert_eq!(svfs.files_free(), svfs.files_available());
 
     // Linux's calculation for blocks available and free is complicated and the

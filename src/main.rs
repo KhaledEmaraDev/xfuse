@@ -60,6 +60,11 @@ fn main() {
         MountOption::Subtype("xfs".to_string()),
         MountOption::RO
     ];
+    // geteuid is always safe
+    if unsafe { libc::geteuid() } == 0 {
+        opts.push(MountOption::AllowOther);
+        opts.push(MountOption::DefaultPermissions);
+    }
     for o in app.options.iter() {
         opts.push(match o.as_str() {
             "auto_unmount" => MountOption::AutoUnmount,

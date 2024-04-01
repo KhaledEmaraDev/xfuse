@@ -134,6 +134,10 @@ mkfs_4096() {
 	ln ${MNTDIR}/files/hello.txt ${MNTDIR}/files/hello2.txt
 	chown 1234:5678 ${MNTDIR}/files/hello.txt
 	chmod 01234 ${MNTDIR}/files/hello.txt
+
+	touch ${MNTDIR}/files/executable
+	chmod 755 ${MNTDIR}/files/executable
+
 	touch -t 191811111111.11 ${MNTDIR}/files/old.txt    # Armistice day
 	mkfifo ${MNTDIR}/files/fifo
 	python3 -c "import socket as s; sock = s.socket(s.AF_UNIX); sock.bind('${MNTDIR}/files/sock')"
