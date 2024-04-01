@@ -392,8 +392,8 @@ pub trait Dir3 {
         sb: &Sb,
         offset: i64,
     ) -> Result<(XfsIno, i64, FileType, OsString), c_int> {
-        let blocksize: u64 = sb.sb_blocksize.into();
-        let dblksize: u64 = blocksize * (1 << sb.sb_dirblklog);
+        let dblksize: u64 = 1 << (sb.sb_blocklog + sb.sb_dirblklog);
+        let dblkmask: u64 = dblksize - 1;
         let mut offset: u64 = offset.try_into().unwrap();
         let mut next = offset == 0;
 
@@ -406,8 +406,8 @@ pub trait Dir3 {
             let dblock = (offset >> sb.sb_blocklog & !((1u64 << sb.sb_dirblklog) - 1)).try_into().unwrap();
             let raw = self.read_dblock(buf_reader.by_ref(), sb, dblock)?;
 
-            let mut blk_offset = if offset % dblksize > 0 {
-                (offset % dblksize) as usize
+            let mut blk_offset = if offset & dblkmask > 0 {
+                (offset & dblkmask) as usize
             } else {
                 Dir3DataHdr::SIZE as usize
             };
