@@ -29,7 +29,6 @@ use std::{
     cell::RefCell,
     collections::{BTreeMap, btree_map::Entry},
     io::{prelude::*, SeekFrom},
-    mem,
 };
 
 use bincode::{
@@ -43,7 +42,7 @@ use super::utils::Uuid;
 use super::{
     bmbt_rec::BmbtRec,
     definitions::{XfsFileoff, XfsFsblock},
-    utils::decode_from,
+    utils::{decode, decode_from},
     volume::SUPERBLOCK
 };
 
@@ -60,10 +59,6 @@ pub struct BtreeBlockHdr<T: PrimInt + Unsigned> {
     _bb_owner: u64,
     _bb_crc: u32,
     _bb_pad: u32,
-}
-
-impl<T: PrimInt + Unsigned> BtreeBlockHdr<T> {
-    pub const SIZE: usize = 56 + 2 * mem::size_of::<T>();
 }
 
 #[derive(Debug, Clone, Decode)]
@@ -253,24 +248,29 @@ impl Btree for BtreeIntermediate {}
 
 impl Decode for BtreeIntermediate {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let hdr: XfsBmbtLblock = Decode::decode(decoder)?;
+        let blocksize = SUPERBLOCK.get().unwrap().sb_blocksize as usize;
+        let mut raw = vec![0u8; blocksize];
+        decoder.reader().read(&mut raw)?;
+        let (hdr, mut ofs) = decode::<XfsBmbtLblock>(&raw)?;
         assert!(hdr.bb_level > 0);
 
-        let keys = (0..hdr.bb_numrecs).map(|_| {
-            Decode::decode(decoder).unwrap()
-        }).collect::<Vec<BmbtKey>>();
+        let mut keys = Vec::with_capacity(usize::from(hdr.bb_numrecs));
+        for _ in 0..hdr.bb_numrecs {
+            let (key, keylen) = decode(&raw[ofs..])?;
+            ofs += keylen;
+            keys.push(key);
+        }
 
-        // Now skip ahead to the pointers.  The XFS Algorithms & Data Structures document section
-        // 16.2 says that they start at offset 0x808 within the block.  But it looks to me like
-        // they really start at offset 0x820.
-        let read_so_far = XfsBmbtLblock::SIZE + usize::from(hdr.bb_numrecs) * BmbtKey::SIZE;
-        let blocksize = SUPERBLOCK.get().unwrap().sb_blocksize;
-        let pointers_area_offset = blocksize as usize / 2 + 0x20;
-        decoder.reader().consume(pointers_area_offset - read_so_far);
-
-        let ptrs = (0..hdr.bb_numrecs).map(|_| {
-            Decode::decode(decoder).unwrap()
-        }).collect::<Vec<XfsBmbtPtr>>();
+        // The XFS Algorithms & Data Structures document section
+        // 16.2 says that the pointers start at offset 0x808 within the block.  But it looks to me
+        // like they really start at offset 0x820.
+        ofs = blocksize / 2 + 0x20;
+        let mut ptrs = Vec::with_capacity(usize::from(hdr.bb_numrecs));
+        for _ in 0..hdr.bb_numrecs {
+            let (ptr, ptrlen) = decode(&raw[ofs..])?;
+            ofs += ptrlen;
+            ptrs.push(ptr);
+        }
 
         let blocks = RefCell::new(BlockCache::new(hdr.bb_level));
         Ok(Self {
