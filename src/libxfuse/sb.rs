@@ -100,7 +100,7 @@ pub struct Sb {
     // sb_fname: [u8; 12],
     pub sb_blocklog: u8,
     // sb_sectlog: u8,
-    // sb_inodelog: u8,
+    pub sb_inodelog: u8,
     pub sb_inopblog: u8,
     pub sb_agblklog: u8,
     // sb_rextslog: u8,
@@ -164,7 +164,7 @@ impl Sb {
 
         let sb_blocklog = buf_reader.read_u8().unwrap();
         let _sb_sectlog = buf_reader.read_u8().unwrap();
-        let _sb_inodelog = buf_reader.read_u8().unwrap();
+        let sb_inodelog = buf_reader.read_u8().unwrap();
         let sb_inopblog = buf_reader.read_u8().unwrap();
         let sb_agblklog = buf_reader.read_u8().unwrap();
         let _sb_rextslog = buf_reader.read_u8().unwrap();
@@ -232,6 +232,7 @@ impl Sb {
             sb_logblocks,
             sb_inodesize,
             sb_blocklog,
+            sb_inodelog,
             sb_inopblog,
             sb_agblklog,
             sb_icount,

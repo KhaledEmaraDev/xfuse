@@ -100,9 +100,9 @@ impl Dinode {
             (inode_number >> superblock.sb_inopblog) & ((1 << superblock.sb_agblklog) - 1);
         let blk_ino = inode_number & ((1 << superblock.sb_inopblog) - 1);
 
-        let off = ag_no * u64::from(superblock.sb_agblocks) * u64::from(superblock.sb_blocksize)
-            + ag_blk * u64::from(superblock.sb_blocksize)
-            + blk_ino * u64::from(superblock.sb_inodesize);
+        let off: u64 = ((ag_no * u64::from(superblock.sb_agblocks)) << superblock.sb_blocklog)
+            + (ag_blk << superblock.sb_blocklog)
+            + (blk_ino << superblock.sb_inodelog);
 
         buf_reader.seek(SeekFrom::Start(off)).unwrap();
         let mut raw = vec![0u8; superblock.sb_inodesize.into()];
