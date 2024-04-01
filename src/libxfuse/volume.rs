@@ -40,9 +40,12 @@ use super::dir3::Dir3;
 use super::sb::Sb;
 
 use fuser::{
-    Filesystem, ReplyAttr, ReplyDirectory, ReplyEntry, ReplyOpen,
+    Filesystem, KernelConfig, ReplyAttr, ReplyDirectory, ReplyEntry, ReplyOpen,
     ReplyStatfs, ReplyXattr, Request, FUSE_ROOT_ID,
-    consts::{FOPEN_KEEP_CACHE, FOPEN_CACHE_DIR}
+    consts::{
+        FOPEN_KEEP_CACHE, FOPEN_CACHE_DIR, FUSE_NO_OPEN_SUPPORT, FUSE_NO_OPENDIR_SUPPORT,
+        FUSE_ASYNC_READ, FUSE_EXPORT_SUPPORT
+    }
 };
 use libc::ERANGE;
 use tracing::warn;
@@ -63,6 +66,8 @@ pub struct Volume {
     pub device: File,
     pub sb: Sb,
     open_files: HashMap<u64, OpenInode>,
+    no_open: bool,
+    no_opendir: bool,
 }
 
 impl Volume {
@@ -85,7 +90,9 @@ impl Volume {
         Volume {
             device,
             sb: superblock,
-            open_files
+            open_files,
+            no_open: false,
+            no_opendir: false
         }
     }
 
@@ -162,6 +169,17 @@ impl Filesystem for Volume {
         reply.attr(&Self::TTL, &attr)
     }
 
+    fn init(&mut self, _req: &Request, config: &mut KernelConfig) -> Result<(), i32> {
+        if config.add_capabilities(FUSE_NO_OPEN_SUPPORT).is_ok() {
+            self.no_open = true;
+        }
+        if config.add_capabilities(FUSE_NO_OPENDIR_SUPPORT).is_ok() {
+            self.no_opendir = true;
+        }
+        let _ = config.add_capabilities(FUSE_ASYNC_READ | FUSE_EXPORT_SUPPORT);
+        Ok(())
+    }
+
     fn readlink(&mut self, _req: &Request, ino: u64, reply: fuser::ReplyData) {
         let mut buf_reader = BufReader::with_capacity(self.sb.sb_blocksize as usize,
                                                       &self.device);
@@ -174,9 +192,12 @@ impl Filesystem for Volume {
         );
     }
 
-    // TODO: try FUSE_NO_OPEN_SUPPORT
     fn open(&mut self, _req: &Request, _ino: u64, _flags: i32, reply: ReplyOpen) {
-        reply.opened(0, FOPEN_KEEP_CACHE)
+        if self.no_open {
+            reply.error(libc::ENOSYS)
+        } else {
+            reply.opened(0, FOPEN_KEEP_CACHE)
+        }
     }
 
     fn read(
@@ -201,9 +222,12 @@ impl Filesystem for Volume {
         }
     }
 
-    // TODO: try FUSE_NO_OPENDIR_SUPPORT
     fn opendir(&mut self, _req: &Request, _ino: u64, _flags: i32, reply: ReplyOpen) {
-        reply.opened(0, FOPEN_CACHE_DIR);
+        if self.no_opendir {
+            reply.error(libc::ENOSYS)
+        } else {
+            reply.opened(0, FOPEN_CACHE_DIR)
+        }
     }
 
     fn readdir(
