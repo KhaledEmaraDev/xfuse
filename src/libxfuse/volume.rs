@@ -40,7 +40,7 @@ use super::dir3::Dir3;
 use super::sb::Sb;
 
 use fuser::{
-    Filesystem, ReplyAttr, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen,
+    Filesystem, ReplyAttr, ReplyDirectory, ReplyEntry, ReplyOpen,
     ReplyStatfs, ReplyXattr, Request, FUSE_ROOT_ID,
     consts::{FOPEN_KEEP_CACHE, FOPEN_CACHE_DIR}
 };
@@ -316,9 +316,5 @@ impl Filesystem for Volume {
                 reply.size(0);
             }
         }
-    }
-
-    fn access(&mut self, _req: &Request, _ino: u64, _mask: i32, reply: ReplyEmpty) {
-        reply.ok();
     }
 }
