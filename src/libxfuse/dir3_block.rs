@@ -28,7 +28,6 @@
 use std::{
     cell::RefCell,
     io::{BufRead, Seek, SeekFrom},
-    mem,
     ops::Deref
 };
 
@@ -81,10 +80,10 @@ impl Dir2BlockDisk {
     }
 
     /// get the length of the raw data region
-    pub fn get_data_len(&self, directory_block_size: u32) -> u64 {
-        (directory_block_size as u64)
-            - (mem::size_of::<Dir2BlockTail>() as u64)
-            - ((mem::size_of::<Dir2LeafEntry>() as u64) * (self.tail.count as u64))
+    fn get_data_len(&self, directory_block_size: u32) -> u64 {
+        directory_block_size as u64
+            - Dir2BlockTail::SIZE as u64
+            - Dir2LeafEntry::SIZE as u64 * (self.tail.count as u64)
     }
 }
 
@@ -101,7 +100,7 @@ impl Dir2Block {
         start_block: u64,
     ) -> Dir2Block {
         let offset = superblock.fsb_to_offset(start_block);
-        let dir_blk_size = superblock.sb_blocksize * (1 << superblock.sb_dirblklog);
+        let dir_blk_size = superblock.sb_blocksize << superblock.sb_dirblklog;
 
         let dir_disk = Dir2BlockDisk::from(buf_reader.by_ref(), offset, dir_blk_size);
 
