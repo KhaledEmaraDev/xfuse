@@ -5,6 +5,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- Added support for `FUSE_LSEEK` to efficiently copy sparse files.
+  ([#133](https://github.com/KhaledEmaraDev/xfuse/pull/133))
+
 ### Changed
 
 - The MSRV is now 1.74.0
@@ -15,6 +20,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   ([#131](https://github.com/KhaledEmaraDev/xfuse/pull/131))
 
 ### Fixed
+
+- Fixed a crash when reading a hole from a Btree-formatted file that is just
+  past a data extent.
+  ([#133](https://github.com/KhaledEmaraDev/xfuse/pull/133))
 
 - Fixed a crash when opening and closing multiple files simultaneously but not
   in LIFO order.

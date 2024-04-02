@@ -43,6 +43,9 @@ pub trait File<R: BufRead + Reader + Seek> {
     /// Return its starting position as an FSblock, and its length in file system block units
     fn get_extent(&self, buf_reader: &mut R, block: XfsFileoff) -> (Option<XfsFsblock>, u64);
 
+    /// Like lseek(2), but only works for SEEK_HOLE and SEEK_DATA
+    fn lseek(&mut self, buf_reader: &mut R, offset: u64, whence: i32) -> Result<u64, i32>;
+
     /// Perform a sector-size aligned read of the file
     fn read_sectors(&mut self, buf_reader: &mut R, offset: i64, mut size: usize)
         -> Result<Vec<u8>, i32>

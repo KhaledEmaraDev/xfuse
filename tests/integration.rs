@@ -3,9 +3,12 @@ use std::{
     ffi::{OsStr, OsString},
     fs,
     io::{self, ErrorKind, Read},
-    os::unix::{
-        ffi::{OsStrExt, OsStringExt},
-        fs::{DirEntryExt, MetadataExt, FileExt, OpenOptionsExt}
+    os::{
+        fd::AsRawFd,
+        unix::{
+            ffi::{OsStrExt, OsStringExt},
+            fs::{DirEntryExt, MetadataExt, FileExt, OpenOptionsExt}
+        },
     },
     path::Path,
     process::{Child, Command},
@@ -15,7 +18,7 @@ use std::{
 
 use assert_cmd::cargo::CommandCargoExt;
 use function_name::named;
-use nix::unistd::{AccessFlags, access};
+use nix::{errno::Errno, unistd::{AccessFlags, Whence, access}};
 use rstest::{fixture, rstest};
 use rstest_reuse::{self, apply, template};
 use tempfile::{tempdir, TempDir};
@@ -628,6 +631,126 @@ mod lookup {
     }
 }
 
+mod lseek {
+    use super::*;
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum Offset {
+        FromStart(libc::off_t),
+        Eof,
+        BeyondEof
+    }
+
+    #[template]
+    #[rstest]
+    /// Already at EOF
+    #[case::eof_data(Whence::SeekData, Offset::Eof, Err(Errno::ENXIO))]
+    /// The virtual hole at EOF
+    #[case::eof_hole(Whence::SeekHole, Offset::Eof, Ok(Offset::Eof))]
+    /// Seeking for hole beyond EOF
+    #[case::beyond_eof_hole(Whence::SeekHole, Offset::BeyondEof, Err(Errno::ENXIO))]
+    /// Seek for data
+    #[case::data_at_start(Whence::SeekData, Offset::FromStart(0), Ok(Offset::FromStart(4096)))]
+    #[case::data_in_middle(Whence::SeekData, Offset::FromStart(8192), Ok(Offset::FromStart(12288)))]
+    /// Seek for a hole
+    #[case::hole_in_middle(Whence::SeekHole, Offset::FromStart(4096), Ok(Offset::FromStart(8192)))]
+    /// Try to seek to a data region, but we're already there.
+    #[case::data_in_data_at_start(Whence::SeekData, Offset::FromStart(4096), Ok(Offset::FromStart(4096)))]
+    #[case::data_in_data_in_middle(Whence::SeekData, Offset::FromStart(12288), Ok(Offset::FromStart(12288)))]
+    /// Try to seek to a hole, but it's only data until EOF
+    #[case::data_until_eof(Whence::SeekHole, Offset::FromStart(12288), Ok(Offset::Eof))]
+    /// Try to seek to a hole, but we're already there.
+    #[case::hole_in_hole_at_start(Whence::SeekHole, Offset::FromStart(0), Ok(Offset::FromStart(0)))]
+    #[case::hole_in_hole_in_middle(Whence::SeekHole, Offset::FromStart(8192), Ok(Offset::FromStart(8192)))]
+    /// Searching from a negative offset always returns EINVAL
+    #[case::negative_offset(Whence::SeekHole, Offset::FromStart(-1), Err(Errno::EINVAL))]
+    fn all_scenarios(
+        #[case] whence: Whence,
+        #[case] ofs: Offset,
+        #[case] expected: nix::Result<Offset>)
+    {}
+
+    #[named]
+    #[apply(all_scenarios)]
+    fn scenarios(
+        harness4k: Harness,
+        #[values("sparse.extents.txt", "sparse.btree.txt")]
+        path: &str,
+        whence: Whence,
+        ofs: Offset,
+        expected: nix::Result<Offset>)
+    {
+        require_fusefs!();
+
+        let p = harness4k.d.path().join("files").join(path);
+        let f = fs::File::open(p).unwrap();
+        let expected = match expected {
+            Ok(Offset::FromStart(ofs)) => Ok(ofs),
+            Ok(Offset::Eof) => Ok(f.metadata().unwrap().size() as libc::off_t),
+            Ok(Offset::BeyondEof) => unreachable!(),
+            Err(e) => Err(e),
+        };
+        let ofs = match ofs {
+            Offset::FromStart(ofs) => ofs,
+            Offset::Eof => f.metadata().unwrap().size() as libc::off_t,
+            Offset::BeyondEof => f.metadata().unwrap().size() as libc::off_t + 1,
+        };
+        assert_eq!(expected, nix::unistd::lseek(f.as_raw_fd(), ofs, whence));
+    }
+
+    /// A completely sparse file has no data regions
+    #[named]
+    #[rstest]
+    fn fully_sparse(harness4k: Harness) {
+        require_fusefs!();
+
+        let p = harness4k.d.path().join("files/sparse.fully.txt");
+        let f = fs::File::open(p).unwrap();
+        assert_eq!(Err(Errno::ENXIO), nix::unistd::lseek(f.as_raw_fd(), 0, Whence::SeekData));
+    }
+
+    /// Try to seek to a data region, but it's only hole untiL EOF
+    #[named]
+    #[rstest]
+    fn hole_at_end(harness4k: Harness) {
+        require_fusefs!();
+
+        let p = harness4k.d.path().join("files/hole_at_end.txt");
+        let f = fs::File::open(p).unwrap();
+        assert_eq!(Err(Errno::ENXIO), nix::unistd::lseek(f.as_raw_fd(), 16384, Whence::SeekData));
+    }
+
+    #[named]
+    #[rstest]
+    #[cfg(any(target_os = "freebsd", target_os = "illumos", target_os = "netbsd"))]
+    fn pathconf(harness4k: Harness) {
+        require_fusefs!();
+
+        let p = harness4k.d.path().join("files/hello.txt");
+
+        let f = fs::File::open(p).unwrap();
+        // We have to use FFI directly until Nix 0.29.0 is released.
+        // https://github.com/nix-rust/nix/pull/2349
+        // pathconf is always safe, as long as the path is valid
+        let raw = unsafe {
+            nix::errno::Errno::clear();
+            libc::fpathconf(f.as_raw_fd(), libc::_PC_MIN_HOLE_SIZE)
+        };
+        if raw == -1 {
+            let e = io::Error::last_os_error();
+            if e.raw_os_error().is_some() {
+                panic!("{}", e);
+            } else {
+                panic!("_PC_MIN_HOLE_SIZE not supported");
+            }
+        } else {
+            // The FUSE protocol doesn't give the server any way to tell the kernel its minimum
+            // hole size, so all the kernel can report to userland is "1" or "not supported".
+            // "1" means "The file system does not specify the minimum".
+            assert_eq!(1, raw);
+        }
+    }
+}
 
 mod lsextattr {
     use super::*;
