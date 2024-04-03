@@ -50,14 +50,13 @@ pub struct AttrLeaf {
 }
 
 impl AttrLeaf {
-    fn map_logical_block_to_actual_block(&self, block: XfsDablk) -> XfsFsblock {
-        for entry in self.bmx.iter().rev() {
-            if XfsFileoff::from(block) >= entry.br_startoff {
-                return entry.br_startblock + (XfsFileoff::from(block) - entry.br_startoff);
-            }
-        }
-
-        panic!("Couldn't find logical block!");
+    fn map_dblock(&self, dblock: XfsDablk) -> XfsFsblock {
+        let dblock = XfsFileoff::from(dblock);
+        let i = self.bmx.partition_point(|rec| rec.br_startoff <= dblock);
+        let entry = &self.bmx[i - 1];
+        assert!(i > 0 && entry.br_startoff <= dblock && entry.br_startoff + entry.br_blockcount > dblock,
+            "dblock not found");
+        entry.br_startblock + (XfsFileoff::from(dblock) - entry.br_startoff)
     }
 }
 
@@ -86,7 +85,7 @@ impl<R: BufRead + Reader + Seek> Attr<R> for AttrLeaf {
         self.leaf.get(
             buf_reader.by_ref(),
             hash,
-            |block, _| self.map_logical_block_to_actual_block(block),
+            |block, _| self.map_dblock(block),
         )
     }
 }
@@ -138,6 +137,6 @@ mod tests {
             total_size: 0,
         };
 
-        assert_eq!(attr.map_logical_block_to_actual_block(6), 41);
+        assert_eq!(attr.map_dblock(6), 41);
     }
 }
