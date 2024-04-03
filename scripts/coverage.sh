@@ -9,14 +9,18 @@
 # Usage:
 # scripts/coverage.sh
 
-export LLVM_PROFILE_FILE="xfuse-%p-%m.profraw"
+CRATEDIR=$(realpath $(dirname $0)/..)
+PROFRAWDIR=$CRATEDIR/target/tmp
+echo $PROFRAWDIR
+export LLVM_PROFILE_FILE="$PROFRAWDIR/xfuse-%p-%m.profraw"
 export RUSTFLAGS="-Cinstrument-coverage"
 TOOLCHAIN=nightly
 cargo +$TOOLCHAIN build --all-features
-cargo +$TOOLCHAIN test --all-features
+cargo +$TOOLCHAIN test --all-features -- --test-threads=1
 
-grcov . --binary-path $PWD/target/debug -s . -t html --branch \
+grcov . --binary-path $CRATEDIR/target/debug -s . -t html --branch \
 	--ignore-not-existing \
 	--ignore "tests/*" \
 	--excl-line "#\[derive\(" \
-	-o ./coverage/
+	-o ./coverage/ \
+	$PROFRAWDIR
