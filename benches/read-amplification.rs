@@ -120,7 +120,9 @@ const BENCHES: &[Bench] = &[
     Bench::new("data-fragmented-4k", Image::Golden4K, read_fragmented_4k),
     Bench::new("data-sequential-1k", Image::Golden1K, read_sequential),
     Bench::new("data-sequential-4k", Image::Golden4K, read_sequential),
-    Bench::new("xattr", Image::Golden1K, read_all_xattrs)
+    Bench::new("getxattr-local", Image::Golden4K, get_local_xattrs),
+    Bench::new("getxattr-extents", Image::Golden4K, get_extents_xattrs),
+    Bench::new("getxattr-btree", Image::Golden1K, get_btree_xattrs),
 ];
 
 fn stat_files(path: &Path, inode_size: u64) -> u64 {
@@ -204,26 +206,34 @@ fn read_sequential(mountpoint: &Path) -> u64 {
     read_files(mountpoint, &["large_extent.txt"])
 }
 
-/// Read all xattrs from files that have them, sequentially.
-// Note that all of these xattrs are short.  Longer xattrs should give lower RA.
-fn read_all_xattrs(path: &Path) -> u64 {
+fn get_xattrs(mountpoint: &Path, files: &[&'static str]) -> u64 {
     let mut user_data = 0;
-    for file in [
-        "xattrs/btree2",
-        "xattrs/btree2.3",
-        "xattrs/btree3",
-        "btree2.with-xattrs"
-    ] {
-        let p = path.join(file);
+
+    for file in files {
+        let p = mountpoint.join(file);
         let f = File::open(p).unwrap();
         for attrname in f.list_xattr().unwrap() {
             let value = f.get_xattr(&attrname).unwrap().unwrap();
-            user_data += u64::try_from(value.len()).unwrap();
+            user_data += u64::try_from(attrname.len() + value.len()).unwrap();
         }
     }
     user_data
 }
 
+/// Get all extended attributes that are stored in their inode's attribute fork
+fn get_local_xattrs(mountpoint: &Path) -> u64 {
+    get_xattrs(mountpoint, &["xattrs/local"])
+}
+
+/// Get all extended attributes that are stored in a separate extents list
+fn get_extents_xattrs(mountpoint: &Path) -> u64 {
+    get_xattrs(mountpoint, &["xattrs/extents"])
+}
+
+/// Get all extended attributes that are stored in a btree
+fn get_btree_xattrs(mountpoint: &Path) -> u64 {
+    get_xattrs(mountpoint, &["xattrs/btree2", "xattrs/btree2.3", "xattrs/btree3"])
+}
 
 #[named]
 fn main() {
