@@ -96,7 +96,7 @@ trait BtreePriv {
 pub trait Btree: BtreePriv {
     /// Return the extent, if any, that contains the given block within the file.
     /// Return its starting position as an FSblock, and its length in file system block units.
-    /// If the length extents to EoF, return None for length.
+    /// If a hole's length extents to EoF, return None for length.
     fn map_block<R: bincode::de::read::Reader + BufRead + Seek>(
         &self,
         buf_reader: &mut R,
@@ -292,7 +292,7 @@ struct BtreeLeaf {
 impl BtreeLeaf {
     /// Return the extent, if any, that contains the given block within the file.
     /// Return its starting position as an FSblock, and its length in file system block units.
-    /// If the length extents to EoF, return None for length.
+    /// If a hole's length extends to EoF, return None for length.
     pub fn get_extent(&self, dblock: XfsFileoff) -> (Option<XfsFsblock>, Option<u64>) {
         match self.recs.partition_point(|entry| entry.br_startoff <= dblock) {
             0 => {
@@ -309,7 +309,7 @@ impl BtreeLeaf {
                 } else {
                     // It's a hole
                     let len = self.recs.get(i)
-                        .map(|e| e.br_startoff - entry.br_startblock - skip);
+                        .map(|e| e.br_startoff - entry.br_startoff - skip);
                     (None, len)
                 }
             }

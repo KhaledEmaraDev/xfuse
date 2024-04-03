@@ -26,7 +26,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 use std::collections::HashMap;
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{BufReader, Read};
@@ -40,7 +40,7 @@ use super::dir3::Dir3;
 use super::sb::Sb;
 
 use fuser::{
-    Filesystem, KernelConfig, ReplyAttr, ReplyDirectory, ReplyEntry, ReplyOpen,
+    Filesystem, KernelConfig, ReplyAttr, ReplyDirectory, ReplyEntry, ReplyLseek, ReplyOpen,
     ReplyStatfs, ReplyXattr, Request, FUSE_ROOT_ID,
     consts::{
         FOPEN_KEEP_CACHE, FOPEN_CACHE_DIR, FUSE_NO_OPEN_SUPPORT, FUSE_NO_OPENDIR_SUPPORT,
@@ -135,6 +135,36 @@ impl Filesystem for Volume {
                 }
             }
             Err(err) => reply.error(err),
+        }
+    }
+
+    fn lseek(&mut self,
+        _req: &Request<'_>,
+        ino: u64,
+        _fh: u64,
+        offset: i64,
+        whence: i32,
+        reply: ReplyLseek
+    )
+    {
+        let uoffset = if let Ok(offs) = u64::try_from(offset) {
+            offs
+        } else {
+            reply.error(libc::EINVAL);
+            return
+        };
+
+        let oi = &self.open_files.get(&ino).unwrap();
+        let mut buf_reader = BufReader::with_capacity(self.sb.sb_blocksize as usize, &self.device);
+        let mut file = oi.dinode.get_file(buf_reader.by_ref());
+        if offset > file.size() {
+            reply.error(libc::ENXIO);
+            return;
+        }
+
+        match file.lseek(buf_reader.by_ref(), uoffset, whence) {
+            Ok(ofs) => reply.offset(i64::try_from(ofs).unwrap()),
+            Err(e) => reply.error(e)
         }
     }
 

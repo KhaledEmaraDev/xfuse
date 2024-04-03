@@ -167,8 +167,10 @@ mkfs_4096() {
 	truncate -s 1T ${MNTDIR}/files/sparse.fully.txt
 	write_fragmented_file ${MNTDIR}/files/sparse.extents.txt 4096 4
 	fallocate -p -o 0 -l 4096 ${MNTDIR}/files/sparse.extents.txt
+	fallocate -p -o 8192 -l 4096 ${MNTDIR}/files/sparse.extents.txt
 	write_fragmented_file ${MNTDIR}/files/sparse.btree.txt 4096 16
 	fallocate -p -o 0 -l 4096 ${MNTDIR}/files/sparse.btree.txt
+	fallocate -p -o 8192 -l 4096 ${MNTDIR}/files/sparse.btree.txt
 	write_fragmented_file ${MNTDIR}/files/hole_at_end.txt 4096 4
 	truncate -s 20480 ${MNTDIR}/files/hole_at_end.txt 
 
