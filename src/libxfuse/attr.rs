@@ -293,12 +293,14 @@ struct AttrRmtHdr {
     _rm_lsn: u64,
 }
 
-pub trait Attr<R: BufRead + Seek> {
-    fn get_total_size(&mut self, buf_reader: &mut R, super_block: &Sb) -> u32;
+#[enum_dispatch::enum_dispatch]
+pub trait Attr {
+    fn get_total_size<R: BufRead + Reader + Seek>(&mut self, buf_reader: &mut R, super_block: &Sb) -> u32;
 
-    fn list(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8>;
+    fn list<R: BufRead + Reader + Seek>(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8>;
 
-    fn get(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, libc::c_int>;
+    fn get<R>(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, libc::c_int>
+        where R: BufRead + Reader + Seek;
 }
 
 /// Open an attribute block, whose type may be unknown until its contents are examined.
@@ -306,7 +308,7 @@ pub fn open<R: Reader + BufRead + Seek>(
         buf_reader: &mut R,
         superblock: &Sb,
         bmx: Vec<BmbtRec>,
-    ) -> Box<dyn Attr<R>>
+    ) -> Attributes
 {
     if let Some(rec) = bmx.first() {
         let ofs = superblock.fsb_to_offset(rec.br_startblock);
@@ -318,7 +320,7 @@ pub fn open<R: Reader + BufRead + Seek>(
         match info.magic {
             XFS_ATTR3_LEAF_MAGIC => {
                 let leaf: AttrLeafblock = utils::decode(&raw).unwrap().0;
-                Box::new(AttrLeaf {
+                Attributes::Leaf(AttrLeaf {
                     bmx,
                     leaf,
                     total_size: -1,
@@ -326,7 +328,7 @@ pub fn open<R: Reader + BufRead + Seek>(
             },
             XFS_DA3_NODE_MAGIC => {
                 let node: XfsDa3Intnode = utils::decode(&raw).unwrap().0;
-                Box::new(AttrNode {
+                Attributes::Node(AttrNode {
                     bmx,
                     node,
                     total_size: -1
@@ -340,4 +342,13 @@ pub fn open<R: Reader + BufRead + Seek>(
     } else {
         panic!("Extent records missing!");
     }
+}
+
+#[derive(Debug)]
+#[enum_dispatch::enum_dispatch(Attr)]
+pub enum Attributes {
+    Sf(crate::libxfuse::attr_shortform::AttrShortform),
+    Leaf(AttrLeaf),
+    Node(AttrNode),
+    Btree(crate::libxfuse::attr_bptree::AttrBtree)
 }

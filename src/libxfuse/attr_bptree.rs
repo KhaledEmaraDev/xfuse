@@ -61,8 +61,8 @@ impl AttrBtree {
     }
 }
 
-impl<R: Reader + BufRead + Seek> Attr<R> for AttrBtree {
-    fn get_total_size(&mut self, buf_reader: &mut R, super_block: &Sb) -> u32 {
+impl Attr for AttrBtree {
+    fn get_total_size<R: Reader + BufRead + Seek>(&mut self, buf_reader: &mut R, super_block: &Sb) -> u32 {
         if self.total_size == -1 {
             let mut total_size: u32 = 0;
 
@@ -99,7 +99,7 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrBtree {
         self.total_size.try_into().unwrap()
     }
 
-    fn list(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8> {
+    fn list<R: Reader + BufRead + Seek>(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8> {
         let mut list: Vec<u8> =
             Vec::with_capacity(self.get_total_size(buf_reader.by_ref(), super_block) as usize);
 
@@ -130,7 +130,7 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrBtree {
         list
     }
 
-    fn get(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, i32> {
+    fn get<R: Reader + BufRead + Seek>(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, i32> {
         let hash = hashname(name);
 
         let blk = self.map_block(buf_reader.by_ref(), 0)?;

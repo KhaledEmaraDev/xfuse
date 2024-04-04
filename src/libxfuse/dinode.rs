@@ -28,7 +28,7 @@
 use std::ffi::CString;
 use std::io::{BufRead, Seek, SeekFrom};
 
-use super::attr::Attr;
+use super::attr::Attributes;
 use super::attr_bptree::AttrBtree;
 use super::attr_shortform::AttrShortform;
 use super::bmbt_rec::BmbtRec;
@@ -81,7 +81,9 @@ pub struct Dinode {
     pub di_u: DiU,
     pub di_a: Option<DiA>,
     /// Cache of this inode's directory object, if any.
-    directory: Option<Directory>
+    directory: Option<Directory>,
+    /// Cache of this inode's attribute object, if any
+    attributes: Option<Attributes>
 }
 
 impl Dinode {
@@ -318,7 +320,8 @@ impl Dinode {
             di_core,
             di_u: di_u.unwrap(),
             di_a,
-            directory: None
+            directory: None,
+            attributes: None
         }
     }
 
@@ -390,28 +393,31 @@ impl Dinode {
     }
 
     pub fn get_attrs<R: Reader + BufRead + Seek>(
-        &self,
+        &mut self,
         buf_reader: &mut R,
         superblock: &Sb,
-    ) -> Option<Box<dyn Attr<R>>> {
-        match &self.di_a {
-            Some(DiA::Attrsf(attr)) => Some(Box::new(attr.clone())),
-            Some(DiA::Abmx(bmx)) => {
-                if self.di_core.di_anextents > 0 {
-                    Some(crate::libxfuse::attr::open(
-                        buf_reader.by_ref(),
-                        superblock,
-                        bmx.clone(),
-                    ))
-                } else {
-                    None
+    ) -> &mut Option<Attributes> {
+        if self.attributes.is_none() {
+            self.attributes = match &self.di_a {
+                Some(DiA::Attrsf(attr)) => Some(Attributes::Sf(attr.clone())),
+                Some(DiA::Abmx(bmx)) => {
+                    if self.di_core.di_anextents > 0 {
+                        Some(crate::libxfuse::attr::open(
+                            buf_reader.by_ref(),
+                            superblock,
+                            bmx.clone(),
+                        ))
+                    } else {
+                        None
+                    }
                 }
-            }
-            Some(DiA::Abmbt((bmdr, keys, pointers))) => Some(Box::new(AttrBtree {
-                btree: BtreeRoot::new(bmdr.clone(), keys.clone(), pointers.clone()),
-                total_size: -1,
-            })),
-            None => None,
+                Some(DiA::Abmbt((bmdr, keys, pointers))) => Some(Attributes::Btree(AttrBtree {
+                    btree: BtreeRoot::new(bmdr.clone(), keys.clone(), pointers.clone()),
+                    total_size: -1,
+                })),
+                None => None,
+            };
         }
+        &mut self.attributes
     }
 }

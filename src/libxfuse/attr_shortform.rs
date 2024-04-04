@@ -97,12 +97,12 @@ impl Decode for AttrShortform {
     }
 }
 
-impl<R: BufRead + Seek> Attr<R> for AttrShortform {
-    fn get_total_size(&mut self, _buf_reader: &mut R, _super_block: &Sb) -> u32 {
+impl Attr for AttrShortform {
+    fn get_total_size<R: BufRead + Reader + Seek>(&mut self, _buf_reader: &mut R, _super_block: &Sb) -> u32 {
         self.total_size
     }
 
-    fn list(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8> {
+    fn list<R: BufRead + Reader + Seek>(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8> {
         let mut list: Vec<u8> =
             Vec::with_capacity(self.get_total_size(buf_reader.by_ref(), super_block) as usize);
 
@@ -116,7 +116,9 @@ impl<R: BufRead + Seek> Attr<R> for AttrShortform {
         list
     }
 
-    fn get(&self, _buf_reader: &mut R, _super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, i32> {
+    fn get<R>(&self, _buf_reader: &mut R, _super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, i32>
+        where R: BufRead + Reader + Seek
+    {
         for entry in &self.list {
             let entry_name = entry.nameval[0..(entry.namelen as usize)].to_vec();
 
