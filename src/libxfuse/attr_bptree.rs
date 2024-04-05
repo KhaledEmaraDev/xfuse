@@ -130,7 +130,9 @@ impl Attr for AttrBtree {
         list
     }
 
-    fn get<R: Reader + BufRead + Seek>(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, i32> {
+    fn get<R>(&mut self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, i32>
+        where R: Reader + BufRead + Seek
+    {
         let hash = hashname(name);
 
         let blk = self.map_block(buf_reader.by_ref(), 0)?;

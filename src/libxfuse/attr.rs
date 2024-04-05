@@ -196,7 +196,7 @@ pub struct AttrLeafblock {
 }
 
 impl AttrLeafblock {
-    pub fn get_total_size(&mut self) -> u32 {
+    pub fn get_total_size(&self) -> u32 {
         let mut total: u32 = 0;
 
         for (entry, name) in std::iter::zip(self.entries.iter(), self.names.iter()) {
@@ -299,7 +299,7 @@ pub trait Attr {
 
     fn list<R: BufRead + Reader + Seek>(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8>;
 
-    fn get<R>(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, libc::c_int>
+    fn get<R>(&mut self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, libc::c_int>
         where R: BufRead + Reader + Seek;
 }
 
@@ -328,11 +328,7 @@ pub fn open<R: Reader + BufRead + Seek>(
             },
             XFS_DA3_NODE_MAGIC => {
                 let node: XfsDa3Intnode = utils::decode(&raw).unwrap().0;
-                Attributes::Node(AttrNode {
-                    bmx,
-                    node,
-                    total_size: -1
-                })
+                Attributes::Node(AttrNode::new(bmx, node))
             },
             magic => {
                 panic!("bad magic!  expected either {:#x} or {:#x} but found {:#x}",

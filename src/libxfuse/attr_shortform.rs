@@ -116,7 +116,7 @@ impl Attr for AttrShortform {
         list
     }
 
-    fn get<R>(&self, _buf_reader: &mut R, _super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, i32>
+    fn get<R>(&mut self, _buf_reader: &mut R, _super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, i32>
         where R: BufRead + Reader + Seek
     {
         for entry in &self.list {

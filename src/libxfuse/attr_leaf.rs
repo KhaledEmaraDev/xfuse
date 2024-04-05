@@ -79,7 +79,9 @@ impl Attr for AttrLeaf {
         list
     }
 
-    fn get<R: BufRead + Reader + Seek>(&self, buf_reader: &mut R, _super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, i32> {
+    fn get<R>(&mut self, buf_reader: &mut R, _super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, i32>
+        where R: BufRead + Reader + Seek
+    {
         let hash = hashname(name);
 
         self.leaf.get(
