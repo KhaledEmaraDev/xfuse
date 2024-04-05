@@ -26,6 +26,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 use std::{
+    cell::RefCell,
+    collections::{BTreeMap, btree_map::Entry},
     convert::TryInto,
     ffi::OsStr,
     io::{BufRead, Seek, SeekFrom},
@@ -45,19 +47,48 @@ use super::{
 #[derive(Debug)]
 pub struct AttrBtree {
     pub btree: BtreeRoot,
-
     pub total_size: i64,
+    /// A cache of leaf blocks, indexed by directory block number
+    leaves: RefCell<BTreeMap<XfsDablk, AttrLeafblock>>
 }
 
 impl AttrBtree {
+    pub fn new(btree: BtreeRoot) -> Self {
+        Self {
+            btree,
+            total_size: -1,
+            leaves: Default::default()
+        }
+    }
+
     // Attribute blocks always have the same size, so we don't need to return the extent length.
     // They also need to return a different errno.
-    fn map_block<R: bincode::de::read::Reader + BufRead + Seek>(
+    fn map_dblock<R: bincode::de::read::Reader + BufRead + Seek>(
         &self,
         buf_reader: &mut R,
         logical_block: XfsDablk,
     ) -> Result<XfsFsblock, i32> {
         self.btree.map_block(buf_reader, logical_block.into())?.0.ok_or(libc::ENOATTR)
+    }
+
+    /// Read the AttrLeafblock located at the given directory block number
+    fn read_leaf<'a, R>(&'a self, buf_reader: &mut R, sb: &Sb, dblock: XfsDablk)
+        -> Result<impl std::ops::Deref<Target=AttrLeafblock> + 'a, i32>
+        where R: Reader + BufRead + Seek
+    {
+        let mut cache_guard = self.leaves.borrow_mut();
+        let entry = cache_guard.entry(dblock);
+        if matches!(entry, Entry::Vacant(_)) {
+            let fsblock = self.map_dblock(buf_reader.by_ref(), dblock)?;
+            let leaf_offset = sb.fsb_to_offset(fsblock);
+            buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
+            let node: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
+            entry.or_insert(node);
+        }
+        // Annoyingly, there's no function to downgrade a RefMut into a Ref.
+        drop(cache_guard);
+        let cache_guard = self.leaves.borrow();
+        Ok(std::cell::Ref::map(cache_guard, |v| &v[&dblock]))
     }
 }
 
@@ -67,31 +98,20 @@ impl Attr for AttrBtree {
             let mut total_size: u32 = 0;
 
             // Read the first intermediate block of the btree
-            let intermediate_blk = self.map_block(buf_reader.by_ref(), 0)
+            let intermediate_blk = self.map_dblock(buf_reader.by_ref(), 0)
                 .unwrap();
             buf_reader.seek(SeekFrom::Start(super_block.fsb_to_offset(intermediate_blk))).unwrap();
 
             let node = XfsDa3Intnode::from(buf_reader.by_ref());
 
             // Now read the first leaf block of the btree
-            let dablk = node.first_block(buf_reader.by_ref(), super_block, |block, reader| {
-                self.map_block(reader.by_ref(), block).unwrap()
+            let mut dablk = node.first_block(buf_reader.by_ref(), super_block, |block, reader| {
+                self.map_dblock(reader.by_ref(), block).unwrap()
             });
-            let lfblk0 = self.map_block(buf_reader.by_ref(), dablk).unwrap();
-            let leaf_offset = super_block.fsb_to_offset(lfblk0);
-
-            buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-
-            let mut leaf: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
-            total_size += leaf.get_total_size();
-
-            while leaf.hdr.info.forw != 0 {
-                let lfblk = self.map_block(buf_reader.by_ref(), leaf.hdr.info.forw)
-                    .unwrap();
-                let lfofs = super_block.fsb_to_offset(lfblk);
-                buf_reader.seek(SeekFrom::Start(lfofs)).unwrap();
-                leaf = decode_from(buf_reader.by_ref()).unwrap();
+            while dablk != 0 {
+                let leaf = self.read_leaf(buf_reader.by_ref(), super_block, dablk).unwrap();
                 total_size += leaf.get_total_size();
+                dablk = leaf.hdr.info.forw;
             }
 
             self.total_size = i64::from(total_size);
@@ -104,29 +124,18 @@ impl Attr for AttrBtree {
         let mut list: Vec<u8> =
             Vec::with_capacity(self.get_total_size(buf_reader.by_ref(), super_block) as usize);
 
-        let blk = self.map_block(buf_reader.by_ref(), 0).unwrap();
+        let blk = self.map_dblock(buf_reader.by_ref(), 0).unwrap();
         buf_reader.seek(SeekFrom::Start(super_block.fsb_to_offset(blk))).unwrap();
 
         let node = XfsDa3Intnode::from(buf_reader.by_ref());
 
-        let dablk = node.first_block(buf_reader.by_ref(), super_block, |block, reader| {
-            self.map_block(reader.by_ref(), block).unwrap()
+        let mut dablk = node.first_block(buf_reader.by_ref(), super_block, |block, reader| {
+            self.map_dblock(reader.by_ref(), block).unwrap()
         });
-        let blk = self.map_block(buf_reader.by_ref(), dablk).unwrap();
-        let leaf_offset = super_block.fsb_to_offset(blk);
-
-        buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-
-        let mut leaf: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
-        leaf.list(&mut list);
-
-        while leaf.hdr.info.forw != 0 {
-            let lfblk = self.map_block(buf_reader.by_ref(), leaf.hdr.info.forw)
-                .unwrap();
-            let lfofs = super_block.fsb_to_offset(lfblk);
-            buf_reader.seek(SeekFrom::Start(lfofs)).unwrap();
-            leaf = decode_from(buf_reader.by_ref()).unwrap();
-            leaf.list(&mut list);
+        while dablk != 0 {
+            let leaf = self.read_leaf(buf_reader.by_ref(), super_block, dablk).unwrap();
+            (*leaf).list(&mut list);
+            dablk = leaf.hdr.info.forw;
         }
 
         list
@@ -137,25 +146,20 @@ impl Attr for AttrBtree {
     {
         let hash = hashname(name);
 
-        let blk = self.map_block(buf_reader.by_ref(), 0)?;
+        let blk = self.map_dblock(buf_reader.by_ref(), 0)?;
         buf_reader.seek(SeekFrom::Start(super_block.fsb_to_offset(blk))).unwrap();
 
         let node = XfsDa3Intnode::from(buf_reader.by_ref());
 
         let dablk = node.lookup(buf_reader.by_ref(), super_block, hash, |block, reader| {
-            self.map_block(reader.by_ref(), block).unwrap()
+            self.map_dblock(reader.by_ref(), block).unwrap()
         }).map_err(|e| if e == libc::ENOENT {libc::ENOATTR} else {e})?;
-        let fsblock = self.map_block(buf_reader.by_ref(), dablk)?;
-        let leaf_offset = super_block.fsb_to_offset(fsblock);
-
-        buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-
-        let leaf: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
+        let leaf = self.read_leaf(buf_reader.by_ref(), super_block, dablk)?;
 
         return leaf.get(
             buf_reader.by_ref(),
             hash,
-            |block, reader| self.map_block(reader.by_ref(), block).unwrap(),
+            |block, reader| self.map_dblock(reader.by_ref(), block).unwrap(),
         );
     }
 }

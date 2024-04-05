@@ -411,10 +411,10 @@ impl Dinode {
                         None
                     }
                 }
-                Some(DiA::Abmbt((bmdr, keys, pointers))) => Some(Attributes::Btree(AttrBtree {
-                    btree: BtreeRoot::new(bmdr.clone(), keys.clone(), pointers.clone()),
-                    total_size: -1,
-                })),
+                Some(DiA::Abmbt((bmdr, keys, pointers))) => {
+                    let btree_root = BtreeRoot::new(bmdr.clone(), keys.clone(), pointers.clone());
+                    Some(Attributes::Btree(AttrBtree::new(btree_root)))
+                },
                 None => None,
             };
         }
