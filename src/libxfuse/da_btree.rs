@@ -207,14 +207,13 @@ impl XfsDa3Intnode {
         }
     }
 
-    pub fn first_block<R: BufRead + Reader + Seek, F: Fn(XfsDablk, &mut R) -> XfsFsblock>(
-        &self,
-        buf_reader: &mut R,
-        super_block: &Sb,
-        map_da_block_to_fs_block: F,
-    ) -> XfsFsblock {
+    pub fn first_block<R, F>(&self, buf_reader: &mut R, super_block: &Sb, map_da_block_to_fs_block: F,
+        ) -> XfsDablk
+        where R: BufRead + Reader + Seek,
+              F: Fn(XfsDablk, &mut R) -> XfsFsblock
+    {
         if self.hdr.level == 1 {
-            map_da_block_to_fs_block(self.btree.first().unwrap().before, buf_reader.by_ref())
+            self.btree.first().unwrap().before
         } else {
             let blk =
                 map_da_block_to_fs_block(self.btree.first().unwrap().before, buf_reader.by_ref());

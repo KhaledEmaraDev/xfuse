@@ -98,11 +98,12 @@ impl Attr for AttrNode {
         if self.total_size == -1 {
             let mut total_size: u32 = 0;
 
-            let blk = self
+            let dablk = self
                 .node
                 .first_block(buf_reader.by_ref(), super_block, |block, _| {
                     self.map_dblock(block)
                 });
+            let blk = self.map_dblock(dablk);
             let leaf_offset = super_block.fsb_to_offset(blk);
 
             buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
@@ -128,11 +129,12 @@ impl Attr for AttrNode {
         let mut list: Vec<u8> =
             Vec::with_capacity(self.get_total_size(buf_reader.by_ref(), super_block) as usize);
 
-        let blk = self
+        let dablk = self
             .node
             .first_block(buf_reader.by_ref(), super_block, |block, _| {
                 self.map_dblock(block)
             });
+        let blk = self.map_dblock(dablk);
         let leaf_offset = super_block.fsb_to_offset(blk);
 
         buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();

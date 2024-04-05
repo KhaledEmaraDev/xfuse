@@ -74,9 +74,10 @@ impl Attr for AttrBtree {
             let node = XfsDa3Intnode::from(buf_reader.by_ref());
 
             // Now read the first leaf block of the btree
-            let lfblk0 = node.first_block(buf_reader.by_ref(), super_block, |block, reader| {
+            let dablk = node.first_block(buf_reader.by_ref(), super_block, |block, reader| {
                 self.map_block(reader.by_ref(), block).unwrap()
             });
+            let lfblk0 = self.map_block(buf_reader.by_ref(), dablk).unwrap();
             let leaf_offset = super_block.fsb_to_offset(lfblk0);
 
             buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
@@ -108,9 +109,10 @@ impl Attr for AttrBtree {
 
         let node = XfsDa3Intnode::from(buf_reader.by_ref());
 
-        let blk = node.first_block(buf_reader.by_ref(), super_block, |block, reader| {
+        let dablk = node.first_block(buf_reader.by_ref(), super_block, |block, reader| {
             self.map_block(reader.by_ref(), block).unwrap()
         });
+        let blk = self.map_block(buf_reader.by_ref(), dablk).unwrap();
         let leaf_offset = super_block.fsb_to_offset(blk);
 
         buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
