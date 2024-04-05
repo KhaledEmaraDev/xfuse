@@ -206,7 +206,7 @@ impl AttrLeafblock {
         total
     }
 
-    pub fn list(&mut self, list: &mut Vec<u8>) {
+    pub fn list(&self, list: &mut Vec<u8>) {
         for (entry, name_entry) in std::iter::zip(self.entries.iter(), self.names.iter()) {
             list.extend_from_slice(get_namespace_from_flags(entry.flags));
             list.extend_from_slice(name_entry.name());

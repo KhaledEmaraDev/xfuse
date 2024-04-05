@@ -98,25 +98,15 @@ impl Attr for AttrNode {
         if self.total_size == -1 {
             let mut total_size: u32 = 0;
 
-            let dablk = self
+            let mut dablk = self
                 .node
                 .first_block(buf_reader.by_ref(), super_block, |block, _| {
                     self.map_dblock(block)
                 });
-            let blk = self.map_dblock(dablk);
-            let leaf_offset = super_block.fsb_to_offset(blk);
-
-            buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-
-            let mut node: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
-            total_size += node.get_total_size();
-
-            while node.hdr.info.forw != 0 {
-                let lfblk = self.map_dblock(node.hdr.info.forw);
-                let lfofs = super_block.fsb_to_offset(lfblk);
-                buf_reader.seek(SeekFrom::Start(lfofs)).unwrap();
-                node = decode_from(buf_reader.by_ref()).unwrap();
-                total_size += node.get_total_size();
+            while dablk != 0 {
+                let leaf = self.read_leaf(buf_reader.by_ref(), super_block, dablk).unwrap();
+                total_size += leaf.get_total_size();
+                dablk = leaf.hdr.info.forw;
             }
 
             self.total_size = i64::from(total_size);
@@ -129,25 +119,15 @@ impl Attr for AttrNode {
         let mut list: Vec<u8> =
             Vec::with_capacity(self.get_total_size(buf_reader.by_ref(), super_block) as usize);
 
-        let dablk = self
+        let mut dablk = self
             .node
             .first_block(buf_reader.by_ref(), super_block, |block, _| {
                 self.map_dblock(block)
             });
-        let blk = self.map_dblock(dablk);
-        let leaf_offset = super_block.fsb_to_offset(blk);
-
-        buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-
-        let mut leaf: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
-        leaf.list(&mut list);
-
-        while leaf.hdr.info.forw != 0 {
-            let lfblk = self.map_dblock(leaf.hdr.info.forw);
-            let lfofs = super_block.fsb_to_offset(lfblk);
-            buf_reader.seek(SeekFrom::Start(lfofs)).unwrap();
-            leaf = decode_from(buf_reader.by_ref()).unwrap();
-            leaf.list(&mut list);
+        while dablk != 0 {
+            let leaf = self.read_leaf(buf_reader.by_ref(), super_block, dablk).unwrap();
+            (*leaf).list(&mut list);
+            dablk = leaf.hdr.info.forw;
         }
 
         list
@@ -161,7 +141,7 @@ impl Attr for AttrNode {
         let dablk = self.node.lookup(buf_reader.by_ref(), super_block, hash, |block, _| {
             self.map_dblock(block)
         }).map_err(|e| if e == libc::ENOENT {libc::ENOATTR} else {e})?;
-        let leaf = self.read_leaf(buf_reader.by_ref(), &super_block, dablk)?;
+        let leaf = self.read_leaf(buf_reader.by_ref(), super_block, dablk)?;
 
         leaf.get(
             buf_reader.by_ref(),
