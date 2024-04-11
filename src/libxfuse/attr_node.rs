@@ -69,7 +69,7 @@ impl AttrNode {
 
     /// Read the AttrLeafblock located at the given directory block number
     fn read_leaf<'a, R>(&'a self, buf_reader: &mut R, sb: &Sb, dblock: XfsDablk)
-        -> Result<impl std::ops::Deref<Target=AttrLeafblock> + 'a, i32>
+        -> Result<impl std::ops::DerefMut<Target=AttrLeafblock> + 'a, i32>
         where R: Reader + BufRead + Seek
     {
         let mut cache_guard = self.leaves.borrow_mut();
@@ -81,10 +81,7 @@ impl AttrNode {
             let node: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
             entry.or_insert(node);
         }
-        // Annoyingly, there's no function to downgrade a RefMut into a Ref.
-        drop(cache_guard);
-        let cache_guard = self.leaves.borrow();
-        Ok(std::cell::Ref::map(cache_guard, |v| &v[&dblock]))
+        Ok(std::cell::RefMut::map(cache_guard, |v| v.get_mut(&dblock).unwrap()))
     }
 }
 
@@ -136,12 +133,12 @@ impl Attr for AttrNode {
         let dablk = self.node.lookup(buf_reader.by_ref(), super_block, hash, |block, _| {
             self.map_dblock(block)
         }).map_err(|e| if e == libc::ENOENT {libc::ENOATTR} else {e})?;
-        let leaf = self.read_leaf(buf_reader.by_ref(), super_block, dablk)?;
+        let mut leaf = self.read_leaf(buf_reader.by_ref(), super_block, dablk)?;
 
         leaf.get(
             buf_reader.by_ref(),
             hash,
             |block, _| self.map_dblock(block),
-        )
+        ).map(Vec::from)
     }
 }

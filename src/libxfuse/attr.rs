@@ -152,35 +152,19 @@ impl AttrLeafName {
     }
 
     fn value<F, R>(
-        &self,
+        &mut self,
         buf_reader: &mut R,
-        map_logical_block_to_fs_block: F,
-    ) -> Vec<u8>
+        map_dblock: F,
+    ) -> &[u8]
         where R: BufRead + Reader + Seek,
               F: Fn(XfsDablk, &mut R) -> XfsFsblock
     {
         match self {
             AttrLeafName::Local(local) => {
-                local.nameval[local.namelen as usize..].to_vec()
+                &local.nameval[local.namelen as usize..]
             },
             AttrLeafName::Remote(remote) => {
-                let sb = SUPERBLOCK.get().unwrap();
-                let mut res: Vec<u8> = Vec::with_capacity(remote.valuelen as usize);
-                let mut valueblk = remote.valueblk;
-                let mut valuelen: i64 = remote.valuelen.into();
-
-                while valuelen > 0 {
-                    let blk_num =
-                        map_logical_block_to_fs_block(valueblk, buf_reader.by_ref());
-                    buf_reader.seek(SeekFrom::Start(sb.fsb_to_offset(blk_num))).unwrap();
-                    let hdr: AttrRmtHdr = utils::decode_from(buf_reader.by_ref()).unwrap();
-                    let oldlen = res.len();
-                    res.resize(oldlen + hdr.rm_bytes as usize, 0);
-                    buf_reader.read_exact(&mut res[oldlen..]).unwrap();
-                    valuelen -= i64::from(hdr.rm_bytes);
-                    valueblk += 1;
-                }
-                res
+                remote.value(buf_reader.by_ref(), map_dblock)
             }
         }
     }
@@ -215,11 +199,11 @@ impl AttrLeafblock {
     }
 
     pub fn get<R: BufRead + Reader + Seek, F: Fn(XfsDablk, &mut R) -> XfsFsblock>(
-        &self,
+        &mut self,
         buf_reader: &mut R,
         hash: u32,
         map_logical_block_to_fs_block: F,
-    ) -> Result<Vec<u8>, i32> {
+    ) -> Result<&[u8], i32> {
         match self.entries.binary_search_by_key(&hash, |entry| entry.hashval) {
             Ok(i) => Ok(self.names[i].value(buf_reader, map_logical_block_to_fs_block)),
             Err(_) => Err(libc::ENOATTR)
@@ -267,6 +251,38 @@ pub struct AttrLeafNameRemote {
     pub valuelen: u32,
     pub namelen: u8,
     pub name: Vec<u8>,
+    pub value: Vec<u8>,
+}
+
+impl AttrLeafNameRemote {
+    fn value<R, F>(
+        &mut self,
+        buf_reader: &mut R,
+        map_dblock: F,
+    ) -> &[u8]
+        where R: BufRead + Reader + Seek,
+              F: Fn(XfsDablk, &mut R) -> XfsFsblock
+    {
+        if self.value.len() < self.valuelen as usize {
+            let sb = SUPERBLOCK.get().unwrap();
+            self.value.reserve(self.valuelen as usize);
+            let mut valueblk = self.valueblk;
+            let mut valuelen: i64 = self.valuelen.into();
+
+            while valuelen > 0 {
+                let blk_num =
+                    map_dblock(valueblk, buf_reader.by_ref());
+                buf_reader.seek(SeekFrom::Start(sb.fsb_to_offset(blk_num))).unwrap();
+                let hdr: AttrRmtHdr = utils::decode_from(buf_reader.by_ref()).unwrap();
+                let oldlen = self.value.len();
+                self.value.resize(oldlen + hdr.rm_bytes as usize, 0);
+                buf_reader.read_exact(&mut self.value[oldlen..]).unwrap();
+                valuelen -= i64::from(hdr.rm_bytes);
+                valueblk += 1;
+            }
+        }
+        &self.value[..]
+    }
 }
 
 impl Decode for AttrLeafNameRemote {
@@ -276,8 +292,9 @@ impl Decode for AttrLeafNameRemote {
         let namelen: u8 = Decode::decode(decoder)?;
         let mut name = vec![0u8; usize::from(namelen)];
         decoder.reader().read(&mut name[..])?;
+        let value = Default::default();
 
-        Ok(Self{ valueblk, valuelen, namelen, name})
+        Ok(Self{ valueblk, valuelen, namelen, name, value})
     }
 }
 
