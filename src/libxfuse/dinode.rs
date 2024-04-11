@@ -413,7 +413,7 @@ impl Dinode {
                 }
                 Some(DiA::Abmbt((bmdr, keys, pointers))) => {
                     let btree_root = BtreeRoot::new(bmdr.clone(), keys.clone(), pointers.clone());
-                    Some(Attributes::Btree(AttrBtree::new(btree_root)))
+                    Some(Attributes::Btree(AttrBtree::new(buf_reader.by_ref(), superblock, btree_root)))
                 },
                 None => None,
             };

@@ -46,17 +46,26 @@ use super::{
 
 #[derive(Debug)]
 pub struct AttrBtree {
-    pub btree: BtreeRoot,
-    pub total_size: i64,
+    btree: BtreeRoot,
+    total_size: i64,
+    node: XfsDa3Intnode,
     /// A cache of leaf blocks, indexed by directory block number
     leaves: RefCell<BTreeMap<XfsDablk, AttrLeafblock>>
 }
 
 impl AttrBtree {
-    pub fn new(btree: BtreeRoot) -> Self {
+    pub fn new<R>(buf_reader: &mut R, sb: &Sb, btree: BtreeRoot) -> Self
+        where R: bincode::de::read::Reader + BufRead + Seek
+    {
+        let fsblk = btree.map_block(buf_reader.by_ref(), 0).unwrap().0.unwrap();
+        buf_reader.seek(SeekFrom::Start(sb.fsb_to_offset(fsblk))).unwrap();
+
+        let node = XfsDa3Intnode::from(buf_reader.by_ref());
+
         Self {
             btree,
             total_size: -1,
+            node,
             leaves: Default::default()
         }
     }
@@ -82,8 +91,8 @@ impl AttrBtree {
             let fsblock = self.map_dblock(buf_reader.by_ref(), dblock)?;
             let leaf_offset = sb.fsb_to_offset(fsblock);
             buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-            let node: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
-            entry.or_insert(node);
+            let leaf: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
+            entry.or_insert(leaf);
         }
         // Annoyingly, there's no function to downgrade a RefMut into a Ref.
         drop(cache_guard);
@@ -97,15 +106,8 @@ impl Attr for AttrBtree {
         if self.total_size == -1 {
             let mut total_size: u32 = 0;
 
-            // Read the first intermediate block of the btree
-            let intermediate_blk = self.map_dblock(buf_reader.by_ref(), 0)
-                .unwrap();
-            buf_reader.seek(SeekFrom::Start(super_block.fsb_to_offset(intermediate_blk))).unwrap();
-
-            let node = XfsDa3Intnode::from(buf_reader.by_ref());
-
             // Now read the first leaf block of the btree
-            let mut dablk = node.first_block(buf_reader.by_ref(), super_block, |block, reader| {
+            let mut dablk = self.node.first_block(buf_reader.by_ref(), super_block, |block, reader| {
                 self.map_dblock(reader.by_ref(), block).unwrap()
             });
             while dablk != 0 {
@@ -124,12 +126,7 @@ impl Attr for AttrBtree {
         let mut list: Vec<u8> =
             Vec::with_capacity(self.get_total_size(buf_reader.by_ref(), super_block) as usize);
 
-        let blk = self.map_dblock(buf_reader.by_ref(), 0).unwrap();
-        buf_reader.seek(SeekFrom::Start(super_block.fsb_to_offset(blk))).unwrap();
-
-        let node = XfsDa3Intnode::from(buf_reader.by_ref());
-
-        let mut dablk = node.first_block(buf_reader.by_ref(), super_block, |block, reader| {
+        let mut dablk = self.node.first_block(buf_reader.by_ref(), super_block, |block, reader| {
             self.map_dblock(reader.by_ref(), block).unwrap()
         });
         while dablk != 0 {
@@ -146,12 +143,7 @@ impl Attr for AttrBtree {
     {
         let hash = hashname(name);
 
-        let blk = self.map_dblock(buf_reader.by_ref(), 0)?;
-        buf_reader.seek(SeekFrom::Start(super_block.fsb_to_offset(blk))).unwrap();
-
-        let node = XfsDa3Intnode::from(buf_reader.by_ref());
-
-        let dablk = node.lookup(buf_reader.by_ref(), super_block, hash, |block, reader| {
+        let dablk = self.node.lookup(buf_reader.by_ref(), super_block, hash, |block, reader| {
             self.map_dblock(reader.by_ref(), block).unwrap()
         }).map_err(|e| if e == libc::ENOENT {libc::ENOATTR} else {e})?;
         let leaf = self.read_leaf(buf_reader.by_ref(), super_block, dablk)?;
