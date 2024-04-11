@@ -50,19 +50,18 @@ pub struct AttrLeaf {
 }
 
 impl AttrLeaf {
-    fn map_logical_block_to_actual_block(&self, block: XfsDablk) -> XfsFsblock {
-        for entry in self.bmx.iter().rev() {
-            if XfsFileoff::from(block) >= entry.br_startoff {
-                return entry.br_startblock + (XfsFileoff::from(block) - entry.br_startoff);
-            }
-        }
-
-        panic!("Couldn't find logical block!");
+    fn map_dblock(&self, dblock: XfsDablk) -> XfsFsblock {
+        let dblock = XfsFileoff::from(dblock);
+        let i = self.bmx.partition_point(|rec| rec.br_startoff <= dblock);
+        let entry = &self.bmx[i - 1];
+        assert!(i > 0 && entry.br_startoff <= dblock && entry.br_startoff + entry.br_blockcount > dblock,
+            "dblock not found");
+        entry.br_startblock + (XfsFileoff::from(dblock) - entry.br_startoff)
     }
 }
 
-impl<R: BufRead + Reader + Seek> Attr<R> for AttrLeaf {
-    fn get_total_size(&mut self, _buf_reader: &mut R, _super_block: &Sb) -> u32 {
+impl Attr for AttrLeaf {
+    fn get_total_size<R: BufRead + Reader + Seek>(&mut self, _buf_reader: &mut R, _super_block: &Sb) -> u32 {
         if self.total_size != -1 {
             self.total_size.try_into().unwrap()
         } else {
@@ -71,7 +70,7 @@ impl<R: BufRead + Reader + Seek> Attr<R> for AttrLeaf {
         }
     }
 
-    fn list(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8> {
+    fn list<R: BufRead + Reader + Seek>(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8> {
         let mut list: Vec<u8> =
             Vec::with_capacity(self.get_total_size(buf_reader.by_ref(), super_block) as usize);
 
@@ -80,13 +79,15 @@ impl<R: BufRead + Reader + Seek> Attr<R> for AttrLeaf {
         list
     }
 
-    fn get(&self, buf_reader: &mut R, _super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, i32> {
+    fn get<R>(&mut self, buf_reader: &mut R, _super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, i32>
+        where R: BufRead + Reader + Seek
+    {
         let hash = hashname(name);
 
         self.leaf.get(
             buf_reader.by_ref(),
             hash,
-            |block, _| self.map_logical_block_to_actual_block(block),
+            |block, _| self.map_dblock(block),
         )
     }
 }
@@ -138,6 +139,6 @@ mod tests {
             total_size: 0,
         };
 
-        assert_eq!(attr.map_logical_block_to_actual_block(6), 41);
+        assert_eq!(attr.map_dblock(6), 41);
     }
 }

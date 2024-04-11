@@ -26,6 +26,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 use std::{
+    cell::RefCell,
+    collections::{BTreeMap, btree_map::Entry},
     convert::TryInto,
     ffi::OsStr,
     io::{BufRead, Seek, SeekFrom},
@@ -46,120 +48,65 @@ use super::{
 pub struct AttrNode {
     pub bmx: Vec<BmbtRec>,
     pub node: XfsDa3Intnode,
-
     pub total_size: i64,
+    /// A cache of leaf blocks, indexed by directory block number
+    leaves: RefCell<BTreeMap<XfsDablk, AttrLeafblock>>
 }
 
 impl AttrNode {
-    fn map_logical_block_to_fs_block(&self, block: XfsDablk) -> XfsFsblock {
-        for entry in self.bmx.iter().rev() {
-            if XfsFileoff::from(block) >= entry.br_startoff {
-                return entry.br_startblock + (XfsFileoff::from(block) - entry.br_startoff);
-            }
+    pub fn new(bmx: Vec<BmbtRec>, node: XfsDa3Intnode) -> Self {
+        Self {
+            bmx,
+            node,
+            total_size: -1,
+            leaves: Default::default()
         }
-
-        panic!("Couldn't find logical block!");
     }
 
-    // fn traverse_level_for_size<R: BufRead + Seek>(
-    //     &mut self,
-    //     buf_reader: &mut R,
-    //     super_block: &Sb,
-    //     hdr: XfsDa3NodeHdr,
-    // ) -> u32 {
-    //     let mut size: u32 = 0;
+    fn map_dblock(&self, dblock: XfsDablk) -> XfsFsblock {
+        let dblock = XfsFileoff::from(dblock);
+        let i = self.bmx.partition_point(|rec| rec.br_startoff <= dblock);
+        let entry = &self.bmx[i - 1];
+        assert!(i > 0 && entry.br_startoff <= dblock && entry.br_startoff + entry.br_blockcount > dblock,
+            "dblock not found");
+        entry.br_startblock + (XfsFileoff::from(dblock) - entry.br_startoff)
+    }
 
-    //     let mut btree = Vec::<XfsDa3NodeEntry>::with_capacity(hdr.count as usize);
-    //     for _i in 0..hdr.count {
-    //         btree.push(XfsDa3NodeEntry::from(buf_reader.by_ref()))
-    //     }
-
-    //     if hdr.level == 1 {
-    //         for entry in btree.iter() {
-    //             let blk = self.map_logical_block_to_fs_block(u64::from(entry.before));
-    //             let leaf_offset = blk * u64::from(super_block.sb_blocksize);
-    //             buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-
-    //             let mut leaf = AttrLeafblock::from(buf_reader.by_ref());
-
-    //             size += leaf.get_total_size(buf_reader.by_ref(), leaf_offset);
-    //         }
-    //     } else {
-    //         for entry in btree.iter() {
-    //             let blk = self.map_logical_block_to_fs_block(u64::from(entry.before));
-    //             buf_reader
-    //                 .seek(SeekFrom::Start(blk * u64::from(super_block.sb_blocksize)))
-    //                 .unwrap();
-
-    //             let hdr = XfsDa3NodeHdr::from(buf_reader.by_ref());
-
-    //             size += self.traverse_level_for_size(buf_reader.by_ref(), super_block, hdr);
-    //         }
-    //     }
-
-    //     size
-    // }
-
-    // fn traverse_level_for_names<R: BufRead + Seek>(
-    //     &mut self,
-    //     buf_reader: &mut R,
-    //     super_block: &Sb,
-    //     hdr: XfsDa3NodeHdr,
-    //     list: &mut Vec<u8>,
-    // ) {
-    //     let mut btree = Vec::<XfsDa3NodeEntry>::with_capacity(hdr.count as usize);
-    //     for _i in 0..hdr.count {
-    //         btree.push(XfsDa3NodeEntry::from(buf_reader.by_ref()))
-    //     }
-
-    //     if hdr.level == 1 {
-    //         for entry in btree.iter() {
-    //             let blk = self.map_logical_block_to_fs_block(u64::from(entry.before));
-    //             let leaf_offset = blk * u64::from(super_block.sb_blocksize);
-    //             buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-
-    //             let mut leaf = AttrLeafblock::from(buf_reader.by_ref());
-
-    //             leaf.list(buf_reader.by_ref(), list, leaf_offset);
-    //         }
-    //     } else {
-    //         for entry in btree.iter() {
-    //             let blk = self.map_logical_block_to_fs_block(u64::from(entry.before));
-    //             buf_reader
-    //                 .seek(SeekFrom::Start(blk * u64::from(super_block.sb_blocksize)))
-    //                 .unwrap();
-
-    //             let hdr = XfsDa3NodeHdr::from(buf_reader.by_ref());
-
-    //             self.traverse_level_for_names(buf_reader.by_ref(), super_block, hdr, list);
-    //         }
-    //     }
-    // }
+    /// Read the AttrLeafblock located at the given directory block number
+    fn read_leaf<'a, R>(&'a self, buf_reader: &mut R, sb: &Sb, dblock: XfsDablk)
+        -> Result<impl std::ops::Deref<Target=AttrLeafblock> + 'a, i32>
+        where R: Reader + BufRead + Seek
+    {
+        let mut cache_guard = self.leaves.borrow_mut();
+        let entry = cache_guard.entry(dblock);
+        if matches!(entry, Entry::Vacant(_)) {
+            let fsblock = self.map_dblock(dblock);
+            let leaf_offset = sb.fsb_to_offset(fsblock);
+            buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
+            let node: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
+            entry.or_insert(node);
+        }
+        // Annoyingly, there's no function to downgrade a RefMut into a Ref.
+        drop(cache_guard);
+        let cache_guard = self.leaves.borrow();
+        Ok(std::cell::Ref::map(cache_guard, |v| &v[&dblock]))
+    }
 }
 
-impl<R: Reader + BufRead + Seek> Attr<R> for AttrNode {
-    fn get_total_size(&mut self, buf_reader: &mut R, super_block: &Sb) -> u32 {
+impl Attr for AttrNode {
+    fn get_total_size<R: Reader + BufRead + Seek>(&mut self, buf_reader: &mut R, super_block: &Sb) -> u32 {
         if self.total_size == -1 {
             let mut total_size: u32 = 0;
 
-            let blk = self
+            let mut dablk = self
                 .node
                 .first_block(buf_reader.by_ref(), super_block, |block, _| {
-                    self.map_logical_block_to_fs_block(block)
+                    self.map_dblock(block)
                 });
-            let leaf_offset = super_block.fsb_to_offset(blk);
-
-            buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-
-            let mut node: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
-            total_size += node.get_total_size();
-
-            while node.hdr.info.forw != 0 {
-                let lfblk = self.map_logical_block_to_fs_block(node.hdr.info.forw);
-                let lfofs = super_block.fsb_to_offset(lfblk);
-                buf_reader.seek(SeekFrom::Start(lfofs)).unwrap();
-                node = decode_from(buf_reader.by_ref()).unwrap();
-                total_size += node.get_total_size();
+            while dablk != 0 {
+                let leaf = self.read_leaf(buf_reader.by_ref(), super_block, dablk).unwrap();
+                total_size += leaf.get_total_size();
+                dablk = leaf.hdr.info.forw;
             }
 
             self.total_size = i64::from(total_size);
@@ -168,49 +115,38 @@ impl<R: Reader + BufRead + Seek> Attr<R> for AttrNode {
         self.total_size.try_into().unwrap()
     }
 
-    fn list(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8> {
+    fn list<R: Reader + BufRead + Seek>(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8> {
         let mut list: Vec<u8> =
             Vec::with_capacity(self.get_total_size(buf_reader.by_ref(), super_block) as usize);
 
-        let blk = self
+        let mut dablk = self
             .node
             .first_block(buf_reader.by_ref(), super_block, |block, _| {
-                self.map_logical_block_to_fs_block(block)
+                self.map_dblock(block)
             });
-        let leaf_offset = super_block.fsb_to_offset(blk);
-
-        buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-
-        let mut leaf: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
-        leaf.list(&mut list);
-
-        while leaf.hdr.info.forw != 0 {
-            let lfblk = self.map_logical_block_to_fs_block(leaf.hdr.info.forw);
-            let lfofs = super_block.fsb_to_offset(lfblk);
-            buf_reader.seek(SeekFrom::Start(lfofs)).unwrap();
-            leaf = decode_from(buf_reader.by_ref()).unwrap();
-            leaf.list(&mut list);
+        while dablk != 0 {
+            let leaf = self.read_leaf(buf_reader.by_ref(), super_block, dablk).unwrap();
+            (*leaf).list(&mut list);
+            dablk = leaf.hdr.info.forw;
         }
 
         list
     }
 
-    fn get(&self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, i32> {
+    fn get<R>(&mut self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, i32>
+        where R: Reader + BufRead + Seek
+    {
         let hash = hashname(name);
 
         let dablk = self.node.lookup(buf_reader.by_ref(), super_block, hash, |block, _| {
-            self.map_logical_block_to_fs_block(block)
+            self.map_dblock(block)
         }).map_err(|e| if e == libc::ENOENT {libc::ENOATTR} else {e})?;
-        let fsblock = self.map_logical_block_to_fs_block(dablk);
-        let leaf_offset = super_block.fsb_to_offset(fsblock);
-
-        buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-        let leaf: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
+        let leaf = self.read_leaf(buf_reader.by_ref(), super_block, dablk)?;
 
         leaf.get(
             buf_reader.by_ref(),
             hash,
-            |block, _| self.map_logical_block_to_fs_block(block),
+            |block, _| self.map_dblock(block),
         )
     }
 }

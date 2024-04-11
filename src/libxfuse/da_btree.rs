@@ -26,6 +26,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 use std::{
+    cell::{Ref, RefCell},
+    collections::{BTreeMap, btree_map::Entry},
     ffi::OsStr,
     io::{BufRead, Seek, SeekFrom},
     os::unix::ffi::OsStrExt
@@ -157,6 +159,7 @@ impl XfsDa3NodeEntry {
 pub struct XfsDa3Intnode {
     pub hdr: XfsDa3NodeHdr,
     pub btree: Vec<XfsDa3NodeEntry>,
+    children: RefCell<BTreeMap<XfsDablk, Self>>
 }
 
 impl XfsDa3Intnode {
@@ -169,8 +172,9 @@ impl XfsDa3Intnode {
         for _i in 0..hdr.count {
             btree.push(XfsDa3NodeEntry::from(buf_reader.by_ref()))
         }
+        let children = Default::default();
 
-        XfsDa3Intnode { hdr, btree }
+        XfsDa3Intnode { hdr, btree, children }
     }
 
     pub fn lookup<R: BufRead + Reader + Seek, F: Fn(XfsDablk, &mut R) -> XfsFsblock>(
@@ -178,7 +182,7 @@ impl XfsDa3Intnode {
         buf_reader: &mut R,
         super_block: &Sb,
         hash: u32,
-        map_da_block_to_fs_block: F,
+        map_dblock: F,
     ) -> Result<XfsDablk, i32> {
         let pidx = self.btree.partition_point(|k| k.hashval < hash);
         if pidx >= self.btree.len() {
@@ -189,45 +193,60 @@ impl XfsDa3Intnode {
         if self.hdr.level == 1 {
             Ok(before)
         } else {
-            let fsblock = map_da_block_to_fs_block(before, buf_reader.by_ref());
-
             assert!(self.hdr.level > 1);
-            let offset = super_block.fsb_to_offset(fsblock);
-            buf_reader
-                .seek(SeekFrom::Start(offset))
-                .unwrap();
 
-            let node = XfsDa3Intnode::from(buf_reader.by_ref());
+            let node = self.read_child(buf_reader.by_ref(), super_block, before,
+                &map_dblock)?;
             node.lookup(
                 buf_reader.by_ref(),
                 super_block,
                 hash,
-                map_da_block_to_fs_block,
+                map_dblock,
             )
         }
     }
 
-    pub fn first_block<R: BufRead + Reader + Seek, F: Fn(XfsDablk, &mut R) -> XfsFsblock>(
-        &self,
-        buf_reader: &mut R,
-        super_block: &Sb,
-        map_da_block_to_fs_block: F,
-    ) -> XfsFsblock {
+    pub fn first_block<R, F>(&self, buf_reader: &mut R, super_block: &Sb, map_dblock: F,
+        ) -> XfsDablk
+        where R: BufRead + Reader + Seek,
+              F: Fn(XfsDablk, &mut R) -> XfsFsblock
+    {
         if self.hdr.level == 1 {
-            map_da_block_to_fs_block(self.btree.first().unwrap().before, buf_reader.by_ref())
+            self.btree.first().unwrap().before
         } else {
-            let blk =
-                map_da_block_to_fs_block(self.btree.first().unwrap().before, buf_reader.by_ref());
-            let offset = super_block.fsb_to_offset(blk);
-            buf_reader
-                .seek(SeekFrom::Start(offset))
-                .unwrap();
-
-            let node = XfsDa3Intnode::from(buf_reader.by_ref());
-            node.first_block(buf_reader.by_ref(), super_block, map_da_block_to_fs_block)
+            let before = self.btree.first().unwrap().before;
+            let node = self.read_child(buf_reader.by_ref(), super_block, before,
+                &map_dblock).unwrap();
+            node.first_block(buf_reader.by_ref(), super_block, map_dblock)
         }
     }
+
+    fn read_child<'a, R, F>(
+        &'a self,
+        buf_reader: &mut R,
+        super_block: &Sb,
+        dblock: XfsDablk,
+        map_dblock: &F
+        ) -> Result<impl std::ops::Deref<Target=Self> + 'a, i32>
+        where R: BufRead + Reader + Seek,
+              F: Fn(XfsDablk, &mut R) -> XfsFsblock
+    {
+        let mut cache_guard = self.children.borrow_mut();
+        let entry = cache_guard.entry(dblock);
+        if matches!(entry, Entry::Vacant(_)) {
+            let fsblock = map_dblock(dblock, buf_reader.by_ref());
+            let offset = super_block.fsb_to_offset(fsblock);
+            buf_reader.seek(SeekFrom::Start(offset)).unwrap();
+            let node = XfsDa3Intnode::from(buf_reader.by_ref());
+            entry.or_insert(node);
+        }
+        // Annoyingly, there's no function to downgrade a RefMut into a Ref.
+        drop(cache_guard);
+        let cache_guard = self.children.borrow();
+        Ok(Ref::map(cache_guard, |v| &v[&dblock]))
+    }
 }
+
 
 impl Decode for XfsDa3Intnode {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
@@ -236,10 +255,12 @@ impl Decode for XfsDa3Intnode {
         for _i in 0..hdr.count {
             btree.push(Decode::decode(decoder)?);
         }
+        let children = Default::default();
 
         Ok(XfsDa3Intnode {
             hdr,
-            btree
+            btree,
+            children
         })
     }
 }

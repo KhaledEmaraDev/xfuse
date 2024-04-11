@@ -34,6 +34,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::sync::OnceLock;
 use std::time::Duration;
 
+use super::attr::Attr;
 use super::definitions::XfsIno;
 use super::dinode::Dinode;
 use super::dir3::Dir3;
@@ -347,7 +348,7 @@ impl Filesystem for Volume {
         let oi = &mut self.open_files.get_mut(&ino).expect("listxattr before lookup");
         let mut buf_reader = BufReader::with_capacity(self.sb.sb_blocksize as usize, &self.device);
         match oi.dinode.get_attrs(buf_reader.by_ref(), &self.sb) {
-            Some(mut attrs) => {
+            Some(ref mut attrs) => {
                 let attrs_size = attrs.get_total_size(buf_reader.by_ref(), &self.sb);
 
                 if size == 0 {
