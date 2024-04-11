@@ -34,20 +34,20 @@ use std::{
 
 use bincode::de::read::Reader;
 
-use super::bmbt_rec::BmbtRec;
+use super::bmbt_rec::Bmx;
 use super::definitions::*;
 use super::dir3::{Dir3, NodeLikeDir, XfsDir2Dataptr};
 use super::sb::Sb;
 
 #[derive(Debug)]
 pub struct Dir2Node {
-    pub bmx: Vec<BmbtRec>,
+    pub bmx: Bmx,
     /// A cache of directory blocks, indexed by directory block number
     blocks: RefCell<BTreeMap<XfsDablk, Vec<u8>>>
 }
 
 impl Dir2Node {
-    pub fn from(bmx: Vec<BmbtRec>) -> Dir2Node {
+    pub fn from(bmx: Bmx) -> Dir2Node {
         let blocks = Default::default();
         Dir2Node {
             bmx,
@@ -103,14 +103,7 @@ impl NodeLikeDir for Dir2Node {
         _buf_reader: &mut R,
         dblock: XfsDablk,
     ) -> Result<XfsFsblock, i32> {
-        let dblock = XfsFileoff::from(dblock);
-        let i = self.bmx.partition_point(|rec| rec.br_startoff <= dblock);
-        let rec = &self.bmx[i - 1];
-        if i == 0 || rec.br_startoff > dblock || rec.br_startoff + rec.br_blockcount <= dblock {
-            Err(libc::ENOENT)
-        } else {
-            Ok(rec.br_startblock + dblock - rec.br_startoff)
-        }
+        self.bmx.map_dblock(dblock).ok_or(libc::ENOENT)
     }
 
 }

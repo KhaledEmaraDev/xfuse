@@ -35,7 +35,7 @@ use bincode::{de::read::Reader, Decode};
 
 use tracing::warn;
 
-use super::bmbt_rec::BmbtRec;
+use super::bmbt_rec::{BmbtRec, Bmx};
 use super::definitions::*;
 use super::dir3::{Dir2LeafEntry, Dir3, Dir3LeafHdr, XfsDir2Dataptr};
 use super::sb::Sb;
@@ -79,7 +79,7 @@ impl Dir2LeafDisk {
 
 #[derive(Debug)]
 pub struct Dir2Leaf {
-    bmx: Vec<BmbtRec>,
+    bmx: Bmx,
     leaf: Dir2LeafDisk,
     /// A cache of directory blocks, indexed by directory block number divided by dlksize
     blocks: RefCell<Vec<Option<Vec<u8>>>>,
@@ -89,9 +89,9 @@ impl Dir2Leaf {
     pub fn from<T: bincode::de::read::Reader + BufRead + Seek>(
         buf_reader: &mut T,
         superblock: &Sb,
-        bmx: &[BmbtRec],
+        bmbtv: &[BmbtRec],
     ) -> Dir2Leaf {
-        let leaf_extent = bmx.last().unwrap();
+        let leaf_extent = bmbtv.last().unwrap();
         if leaf_extent.br_startblock != superblock.get_dir3_leaf_offset().into() {
             warn!("Leaf directory contains unexpected bmx entry {:?}", &leaf_extent);
         }
@@ -104,22 +104,14 @@ impl Dir2Leaf {
         let blocks = RefCell::new(Vec::new());
 
         Dir2Leaf {
-            bmx: bmx.to_vec(),
+            bmx: Bmx::new(bmbtv.to_vec()),
             leaf,
             blocks
         }
     }
 
     fn map_dblock(&self, dblock: XfsDablk) -> Result<XfsFsblock, i32> {
-        let dblock = u64::from(dblock);
-
-        let i = self.bmx.partition_point(|rec| rec.br_startoff <= dblock);
-        let rec = &self.bmx[i - 1];
-        if i == 0 || rec.br_startoff > dblock || rec.br_startoff + rec.br_blockcount <= dblock {
-            Err(libc::ENOENT)
-        } else {
-            Ok(rec.br_startblock + dblock - rec.br_startoff)
-        }
+        self.bmx.map_dblock(dblock).ok_or(libc::ENOENT)
     }
 
     fn read_fsblock<R>(&self, mut buf_reader: R, sb: &Sb, fsblock: XfsFsblock)
