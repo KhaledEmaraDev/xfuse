@@ -37,16 +37,16 @@ use bincode::de::read::Reader;
 
 use super::{
     attr::{Attr, AttrLeafblock},
-    bmbt_rec::BmbtRec,
+    bmbt_rec::Bmx,
     da_btree::{hashname, XfsDa3Intnode},
-    definitions::{XfsDablk, XfsFsblock, XfsFileoff},
+    definitions::{XfsDablk, XfsFsblock},
     sb::Sb,
     utils::decode_from
 };
 
 #[derive(Debug)]
 pub struct AttrNode {
-    pub bmx: Vec<BmbtRec>,
+    pub bmx: Bmx,
     pub node: XfsDa3Intnode,
     pub total_size: i64,
     /// A cache of leaf blocks, indexed by directory block number
@@ -54,7 +54,7 @@ pub struct AttrNode {
 }
 
 impl AttrNode {
-    pub fn new(bmx: Vec<BmbtRec>, node: XfsDa3Intnode) -> Self {
+    pub fn new(bmx: Bmx, node: XfsDa3Intnode) -> Self {
         Self {
             bmx,
             node,
@@ -64,12 +64,7 @@ impl AttrNode {
     }
 
     fn map_dblock(&self, dblock: XfsDablk) -> XfsFsblock {
-        let dblock = XfsFileoff::from(dblock);
-        let i = self.bmx.partition_point(|rec| rec.br_startoff <= dblock);
-        let entry = &self.bmx[i - 1];
-        assert!(i > 0 && entry.br_startoff <= dblock && entry.br_startoff + entry.br_blockcount > dblock,
-            "dblock not found");
-        entry.br_startblock + (XfsFileoff::from(dblock) - entry.br_startoff)
+        self.bmx.map_dblock(dblock).expect("holes are not allowed in attr forks")
     }
 
     /// Read the AttrLeafblock located at the given directory block number

@@ -40,7 +40,7 @@ use bincode::{
 use super::{
     attr_leaf::AttrLeaf,
     attr_node::AttrNode,
-    bmbt_rec::BmbtRec,
+    bmbt_rec::Bmx,
     da_btree::{XfsDa3Blkinfo, XfsDa3Intnode},
     definitions::{XFS_ATTR3_LEAF_MAGIC, XFS_DA3_NODE_MAGIC, XfsDablk, XfsFsblock},
     sb::Sb,
@@ -307,7 +307,7 @@ pub trait Attr {
 pub fn open<R: Reader + BufRead + Seek>(
         buf_reader: &mut R,
         superblock: &Sb,
-        bmx: Vec<BmbtRec>,
+        bmx: Bmx,
     ) -> Attributes
 {
     if let Some(rec) = bmx.first() {

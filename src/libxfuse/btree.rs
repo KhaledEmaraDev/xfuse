@@ -40,7 +40,7 @@ use num_traits::{PrimInt, Unsigned};
 use super::utils::Uuid;
 
 use super::{
-    bmbt_rec::BmbtRec,
+    bmbt_rec::{Bmx, BmbtRec},
     definitions::{XfsFileoff, XfsFsblock},
     utils::{decode, decode_from},
     volume::SUPERBLOCK
@@ -286,7 +286,7 @@ impl Decode for BtreeIntermediate {
 #[derive(Debug)]
 struct BtreeLeaf {
     hdr: XfsBmbtLblock,
-    recs: Vec<BmbtRec>,
+    bmx: Bmx,
 }
 
 impl BtreeLeaf {
@@ -294,26 +294,7 @@ impl BtreeLeaf {
     /// Return its starting position as an FSblock, and its length in file system block units.
     /// If a hole's length extends to EoF, return None for length.
     pub fn get_extent(&self, dblock: XfsFileoff) -> (Option<XfsFsblock>, Option<u64>) {
-        match self.recs.partition_point(|entry| entry.br_startoff <= dblock) {
-            0 => {
-                // A hole at the beginning of the file
-                let len = self.recs.first()
-                    .map(|b| b.br_startoff - dblock);
-                (None, len)
-            },
-            i => {
-                let entry = &self.recs[i - 1];
-                let skip = dblock - entry.br_startoff;
-                if entry.br_startoff + entry.br_blockcount > dblock {
-                    (Some(entry.br_startblock + skip), Some(entry.br_blockcount - skip))
-                } else {
-                    // It's a hole
-                    let len = self.recs.get(i)
-                        .map(|e| e.br_startoff - entry.br_startoff - skip);
-                    (None, len)
-                }
-            }
-        }
+        self.bmx.get_extent(dblock)
     }
 }
 
@@ -322,13 +303,13 @@ impl Decode for BtreeLeaf {
         let hdr: XfsBmbtLblock = Decode::decode(decoder)?;
         assert_eq!(hdr.bb_level, 0);
 
-        let recs = (0..hdr.bb_numrecs).map(|_| {
+        let bmx = Bmx::new((0..hdr.bb_numrecs).map(|_| {
             Decode::decode(decoder).unwrap()
-        }).collect::<Vec<BmbtRec>>();
+        }).collect::<Vec<BmbtRec>>());
 
         Ok(Self {
             hdr,
-            recs
+            bmx
         })
     }
 }

@@ -35,29 +35,17 @@ use bincode::de::read::Reader;
 
 use super::{
     attr::{Attr, AttrLeafblock},
-    bmbt_rec::BmbtRec,
+    bmbt_rec::Bmx,
     da_btree::hashname,
-    definitions::{XfsDablk, XfsFileoff, XfsFsblock},
     sb::Sb,
 };
 
 
 #[derive(Debug)]
 pub struct AttrLeaf {
-    pub bmx: Vec<BmbtRec>,
+    pub bmx: Bmx,
     pub leaf: AttrLeafblock,
     pub total_size: i64,
-}
-
-impl AttrLeaf {
-    fn map_dblock(&self, dblock: XfsDablk) -> XfsFsblock {
-        let dblock = XfsFileoff::from(dblock);
-        let i = self.bmx.partition_point(|rec| rec.br_startoff <= dblock);
-        let entry = &self.bmx[i - 1];
-        assert!(i > 0 && entry.br_startoff <= dblock && entry.br_startoff + entry.br_blockcount > dblock,
-            "dblock not found");
-        entry.br_startblock + (XfsFileoff::from(dblock) - entry.br_startoff)
-    }
 }
 
 impl Attr for AttrLeaf {
@@ -87,58 +75,8 @@ impl Attr for AttrLeaf {
         self.leaf.get(
             buf_reader.by_ref(),
             hash,
-            |block, _| self.map_dblock(block),
+            |block, _| self.bmx.map_dblock(block).expect("holes are not allowed in attr forks"),
         )
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::libxfuse::{
-        attr::{AttrLeafHdr, AttrLeafblock},
-        attr_leaf::AttrLeaf,
-        bmbt_rec::BmbtRec,
-        da_btree::XfsDa3Blkinfo,
-    };
-
-    #[test]
-    fn attr_leaf_block_mapping() {
-        let bmx: Vec<BmbtRec> = vec![
-            BmbtRec {
-                br_startoff: 0,
-                br_startblock: 20,
-                br_blockcount: 2,
-            },
-            BmbtRec {
-                br_startoff: 2,
-                br_startblock: 30,
-                br_blockcount: 3,
-            },
-            BmbtRec {
-                br_startoff: 5,
-                br_startblock: 40,
-                br_blockcount: 2,
-            },
-        ];
-
-        let leaf = AttrLeafblock {
-            hdr: AttrLeafHdr {
-                info: XfsDa3Blkinfo {
-                    forw: 0,
-                    magic: 0,
-                },
-                count: 0,
-            },
-            entries: vec![],
-            names: vec![],
-        };
-
-        let attr = AttrLeaf {
-            bmx,
-            leaf,
-            total_size: 0,
-        };
-
-        assert_eq!(attr.map_dblock(6), 41);
-    }
-}

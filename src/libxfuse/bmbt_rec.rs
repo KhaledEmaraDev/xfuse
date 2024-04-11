@@ -67,3 +67,83 @@ impl Decode for BmbtRec {
         })
     }
 }
+
+/// An ordered list of [`BmbtRec`].
+#[derive(Debug, Clone)]
+pub struct Bmx(pub Vec<BmbtRec>);
+
+impl Bmx {
+    pub fn new(bmx: Vec<BmbtRec>) -> Self {
+        Self(bmx)
+    }
+
+    /// Return the extent, if any, that contains the given block within the file.
+    /// Return its starting position as an FSblock, and its length in file system block units.
+    /// If a hole's length extends to EoF, return None for length.
+    pub fn get_extent(&self, dblock: XfsFileoff) -> (Option<XfsFsblock>, Option<u64>) {
+        match self.0.partition_point(|entry| entry.br_startoff <= dblock) {
+            0 => {
+                // A hole at the beginning of the file
+                let len = self.0.first()
+                    .map(|b| b.br_startoff - dblock);
+                (None, len)
+            },
+            i => {
+                let entry = &self.0[i - 1];
+                let skip = dblock - entry.br_startoff;
+                if entry.br_startoff + entry.br_blockcount > dblock {
+                    (Some(entry.br_startblock + skip), Some(entry.br_blockcount - skip))
+                } else {
+                    // It's a hole
+                    let len = self.0.get(i)
+                        .map(|e| e.br_startoff - entry.br_startoff - skip);
+                    (None, len)
+                }
+            }
+        }
+    }
+
+    pub fn first(&self) -> Option<&BmbtRec> {
+        self.0.first()
+    }
+
+    pub fn map_dblock(&self, dblock: XfsDablk) -> Option<XfsFsblock> {
+        let dblock = XfsFileoff::from(dblock);
+        let i = self.0.partition_point(|rec| rec.br_startoff <= dblock);
+        let rec = &self.0[i - 1];
+        if i == 0 || rec.br_startoff > dblock || rec.br_startoff + rec.br_blockcount <= dblock {
+            None
+        } else {
+            Some(rec.br_startblock + dblock - rec.br_startoff)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn map_dblock() {
+        let bmx = Bmx::new(vec![
+            BmbtRec {
+                br_startoff: 0,
+                br_startblock: 20,
+                br_blockcount: 2,
+            },
+            BmbtRec {
+                br_startoff: 2,
+                br_startblock: 30,
+                br_blockcount: 3,
+            },
+            BmbtRec {
+                br_startoff: 5,
+                br_startblock: 40,
+                br_blockcount: 2,
+            },
+        ]);
+
+        assert_eq!(bmx.map_dblock(6), Some(41));
+    }
+}
+

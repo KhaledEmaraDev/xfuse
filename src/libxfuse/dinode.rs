@@ -31,7 +31,7 @@ use std::io::{BufRead, Seek, SeekFrom};
 use super::attr::Attributes;
 use super::attr_bptree::AttrBtree;
 use super::attr_shortform::AttrShortform;
-use super::bmbt_rec::BmbtRec;
+use super::bmbt_rec::{Bmx, BmbtRec};
 use super::btree::{BmbtKey, BmdrBlock, BtreeRoot, XfsBmbtPtr};
 use super::definitions::*;
 use super::dinode_core::{DinodeCore, XfsDinodeFmt};
@@ -333,18 +333,18 @@ impl Dinode {
         if self.directory.is_none() {
             let directory = match &self.di_u {
                 DiU::Dir2Sf(dir) => Directory::Sf(dir.clone()),
-                DiU::Bmx(bmx) => {
+                DiU::Bmx(bmbtv) => {
                     let leaf_start = superblock.get_dir3_leaf_offset().into();
-                    if bmx.len() == 1 {
+                    if bmbtv.len() == 1 {
                         Directory::Block(Dir2Block::from(
                             buf_reader.by_ref(),
                             superblock,
-                            bmx[0].br_startblock,
+                            bmbtv[0].br_startblock,
                         ))
-                    } else if bmx.iter().filter(|e| e.br_startoff >= leaf_start).count() > 1 {
-                        Directory::Node(Dir2Node::from(bmx.clone()))
+                    } else if bmbtv.iter().filter(|e| e.br_startoff >= leaf_start).count() > 1 {
+                        Directory::Node(Dir2Node::from(Bmx::new(bmbtv.clone())))
                     } else {
-                        Directory::Leaf(Dir2Leaf::from(buf_reader.by_ref(), superblock, bmx))
+                        Directory::Leaf(Dir2Leaf::from(buf_reader.by_ref(), superblock, bmbtv))
                     }
                 }
                 DiU::Bmbt((bmbt, keys, pointers)) => Directory::Btree(Dir2Btree::from(
@@ -367,7 +367,7 @@ impl Dinode {
     ) -> Box<dyn File<R>> {
         match &self.di_u {
             DiU::Bmx(bmx) => Box::new(FileExtentList {
-                bmx: bmx.clone(),
+                bmx: Bmx::new(bmx.clone()),
                 size: self.di_core.di_size,
             }),
             DiU::Bmbt((bmdr, keys, pointers)) => Box::new(FileBtree {
@@ -400,12 +400,12 @@ impl Dinode {
         if self.attributes.is_none() {
             self.attributes = match &self.di_a {
                 Some(DiA::Attrsf(attr)) => Some(Attributes::Sf(attr.clone())),
-                Some(DiA::Abmx(bmx)) => {
+                Some(DiA::Abmx(bmbtv)) => {
                     if self.di_core.di_anextents > 0 {
                         Some(crate::libxfuse::attr::open(
                             buf_reader.by_ref(),
                             superblock,
-                            bmx.clone(),
+                            Bmx::new(bmbtv.clone()),
                         ))
                     } else {
                         None
