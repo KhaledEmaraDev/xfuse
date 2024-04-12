@@ -174,6 +174,13 @@ mkfs_4096() {
 	write_fragmented_file ${MNTDIR}/files/hole_at_end.txt 4096 4
 	truncate -s 20480 ${MNTDIR}/files/hole_at_end.txt 
 
+	# Create a pair of reflinked files
+	write_sequential_file ${MNTDIR}/files/reflink_a.txt 16384
+	cp --reflink=always ${MNTDIR}/files/reflink_a.txt ${MNTDIR}/files/reflink_b.txt
+	cp --reflink=always ${MNTDIR}/files/reflink_a.txt ${MNTDIR}/files/reflink_partial.txt
+	dd if=${MNTDIR}/files/four_extents.txt bs=4096 count=1 conv=notrunc of=${MNTDIR}/files/reflink_partial.txt
+	dd if=${MNTDIR}/files/four_extents.txt bs=4096 count=2 iseek=2 oseek=2 conv=notrunc of=${MNTDIR}/files/reflink_partial.txt
+	
 	# Create a directory containing files of every possible name length
 	mkdir ${MNTDIR}/all_name_lengths
 	for i in `seq 1 255`; do
