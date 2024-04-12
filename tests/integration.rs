@@ -877,6 +877,25 @@ mod open {
             .open(&path)
             .unwrap();
     }
+
+    /// Try to open two reflinked files at the same time
+    #[named]
+    #[rstest]
+    fn reflinks(harness4k: Harness) {
+        require_fusefs!();
+
+        let path_a = harness4k.d.path().join("files").join("reflink_a.txt");
+        let path_b = harness4k.d.path().join("files").join("reflink_b.txt");
+
+        let fa = fs::File::open(&path_a).unwrap();
+        let fb = fs::File::open(path_b).unwrap();
+
+        drop(fa);
+        drop(fb);
+
+        // Ensure that daemon didn't crash
+        access(&path_a, AccessFlags::F_OK).unwrap();
+    }
 }
 
 mod pathconf {
@@ -910,6 +929,9 @@ mod read {
     #[case::wide_two_height_btree2(harness1k, "btree3.txt", 2097152)]
     #[case::wide_two_height_btree2(harness1k, "btree3.3.txt", 8388608)]
     #[case::btree_with_xattr(harness1k, "btree2_with_xattrs.txt", 65536)]
+    #[case::reflink_a(harness4k, "reflink_a.txt", 16384)]
+    #[case::reflink_b(harness4k, "reflink_b.txt", 16384)]
+    #[case::reflink_partial(harness4k, "reflink_partial.txt", 16384)]
     fn all_files(h: fn() -> Harness, d: &str) {}
 
     /// Attempting to read across eof should return the correct amount of data
@@ -1297,7 +1319,7 @@ fn statfs(harness4k: Harness) {
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
     // here.
-    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 746);
+    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 749);
 
     // There are legitimate questions about what the correct value for
     // optimal_transfer_size
@@ -1322,7 +1344,7 @@ fn statvfs(harness4k: Harness) {
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
     // here.
-    assert_eq!(svfs.files() - svfs.files_free(), 746);
+    assert_eq!(svfs.files() - svfs.files_free(), 749);
     assert_eq!(svfs.files_free(), svfs.files_available());
 
     // Linux's calculation for blocks available and free is complicated and the
