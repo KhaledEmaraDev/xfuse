@@ -72,11 +72,12 @@ impl Attr for AttrLeaf {
     {
         let hash = hashname(name);
 
+        let bmx = &self.bmx;
         self.leaf.get(
             buf_reader.by_ref(),
             hash,
-            |block, _| self.bmx.map_dblock(block).expect("holes are not allowed in attr forks"),
-        )
+            |block, _| bmx.map_dblock(block).expect("holes are not allowed in attr forks"),
+        ).map(Vec::from)
     }
 }
 
