@@ -7,6 +7,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Improved performance ny caching various metadata.
+  ([#107](https://github.com/KhaledEmaraDev/xfuse/issues/107))
+
 - Added support for `FUSE_LSEEK` to efficiently copy sparse files.
   ([#133](https://github.com/KhaledEmaraDev/xfuse/pull/133))
 
