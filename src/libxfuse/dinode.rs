@@ -54,8 +54,6 @@ use bincode::{
 };
 use libc::{mode_t, S_IFDIR, S_IFLNK, S_IFMT, S_IFREG, S_IFSOCK, S_IFIFO, S_IFCHR, S_IFBLK};
 
-pub const LITERAL_AREA_OFFSET: usize = 0xb0;
-
 #[derive(Debug)]
 pub enum DiU {
     Blk,
@@ -107,7 +105,7 @@ impl Dinode {
             + (blk_ino << superblock.sb_inodelog);
 
         buf_reader.seek(SeekFrom::Start(off)).unwrap();
-        let mut raw = vec![0u8; superblock.sb_inodesize.into()];
+        let mut raw = vec![0u8; superblock.inode_size()];
         buf_reader.read_exact(&mut raw).unwrap();
         let config = bincode::config::standard()
             .with_big_endian()
@@ -116,7 +114,6 @@ impl Dinode {
         let mut decoder = bincode::de::DecoderImpl::new(reader, config);
 
         let di_core = DinodeCore::decode(&mut decoder).unwrap();
-        di_core.sanity();
 
         let di_u: Option<DiU>;
         match (di_core.di_mode as mode_t) & S_IFMT {
@@ -136,7 +133,7 @@ impl Dinode {
                         keys.push(BmbtKey::decode(&mut decoder).unwrap())
                     }
 
-                    let gap = di_core.btree_ptr_gap(usize::from(superblock.sb_inodesize), bmbt.bb_numrecs);
+                    let gap = di_core.dfork_btree_ptr_gap(superblock.inode_size(), bmbt.bb_numrecs);
                     decoder.reader().consume(gap as usize);
 
                     let mut pointers = Vec::<XfsBmbtPtr>::new();
@@ -172,7 +169,7 @@ impl Dinode {
                         keys.push(BmbtKey::decode(&mut decoder).unwrap());
                     }
 
-                    let gap = di_core.btree_ptr_gap(usize::from(superblock.sb_inodesize), bmbt.bb_numrecs);
+                    let gap = di_core.dfork_btree_ptr_gap(superblock.inode_size(), bmbt.bb_numrecs);
                     decoder.reader().consume(gap as usize);
 
                     let mut pointers = Vec::<XfsBmbtPtr>::new();
@@ -216,18 +213,18 @@ impl Dinode {
             S_IFSOCK => {
                 di_u = Some(DiU::Socket)
             },
-            _ => panic!("Inode type not yet supported."),
+            x => panic!("Inode type ({:#o}) not yet supported.", x),
         }
-
-        let attr_fork_ofs = LITERAL_AREA_OFFSET + di_core.di_forkoff as usize * 8;
-        let config = bincode::config::standard()
-            .with_big_endian()
-            .with_fixed_int_encoding();
-        let reader = bincode::de::read::SliceReader::new(&raw[attr_fork_ofs..]);
-        let mut decoder = bincode::de::DecoderImpl::new(reader, config);
 
         let di_a: Option<DiA>;
         if di_core.di_forkoff != 0 {
+            let attr_fork_ofs = di_core.literal_area_offset() + di_core.di_forkoff as usize * 8;
+            let config = bincode::config::standard()
+                .with_big_endian()
+                .with_fixed_int_encoding();
+            let reader = bincode::de::read::SliceReader::new(&raw[attr_fork_ofs..]);
+            let mut decoder = bincode::de::DecoderImpl::new(reader, config);
+
             match di_core.di_aformat {
                 XfsDinodeFmt::Local => {
                     let attr_shortform = AttrShortform::decode(&mut decoder).unwrap();
@@ -248,16 +245,7 @@ impl Dinode {
                         keys.push(BmbtKey::decode(&mut decoder).unwrap());
                     }
 
-                    // The XFS Algorithms and Data Structures document, section 15.4, isn't really
-                    // specific about where the pointers are located.  They appear to be halfway
-                    // between the start of the attribute fork and the end of the inode, minus 4
-                    // bytes.
-                    let ptr_ofs = (superblock.sb_inodesize as usize - attr_fork_ofs) / 2
-                        + attr_fork_ofs
-                        /* XXX Where does the -4 come from? */ - 4;
-                    let gap = ptr_ofs - attr_fork_ofs -
-                        BmdrBlock::SIZE -
-                        usize::from(bmbt.bb_numrecs) * BmbtKey::SIZE;
+                    let gap = di_core.afork_btree_ptr_gap(superblock.inode_size(), bmbt.bb_numrecs);
                     decoder.reader().consume(gap as usize);
                     let mut pointers = Vec::<XfsBmbtPtr>::new();
                     for _i in 0..bmbt.bb_numrecs {
@@ -294,7 +282,7 @@ impl Dinode {
                 DiU::Bmx(bmbtv) => {
                     let leaf_start = superblock.get_dir3_leaf_offset().into();
                     if bmbtv.len() == 1 {
-                        Directory::Block(Dir2Block::from(
+                        Directory::Block(Dir2Block::new(
                             buf_reader.by_ref(),
                             superblock,
                             bmbtv[0].br_startblock,

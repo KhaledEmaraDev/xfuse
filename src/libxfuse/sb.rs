@@ -30,6 +30,7 @@ use std::io::{prelude::*, SeekFrom};
 use super::definitions::*;
 use super::utils::Uuid;
 
+use bitflags::bitflags;
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use crc::{Crc, CRC_32_ISCSI};
 
@@ -76,6 +77,29 @@ mod constants {
     pub const XFS_SB_FEAT_INCOMPAT_NREXT64: u32 = 0x00000020;
 }
 
+bitflags! {
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct SbFeatures2: u32 {
+        const LazySbCount = constants::XFS_SB_VERSION2_LAZYSBCOUNTBIT;
+        const Attr2 = constants::XFS_SB_VERSION2_ATTR2BIT;
+        const Parent = constants::XFS_SB_VERSION2_PARENTBIT;
+        const ProjId32 = constants::XFS_SB_VERSION2_PROJID32BIT;
+        const Crc = constants::XFS_SB_VERSION2_CRCBIT;
+        const Ftype = constants::XFS_SB_VERSION2_FTYPE;
+        const _ = !0;
+    }
+}
+
+impl SbFeatures2 {
+    pub const fn attr2(&self) -> bool {
+        self.contains(SbFeatures2::Attr2)
+    }
+    pub const fn crc(&self) -> bool {
+        self.contains(SbFeatures2::Crc)
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Sb {
     // sb_magicnum: u32,
@@ -95,7 +119,7 @@ pub struct Sb {
     pub sb_logblocks: XfsExtlen,
     // sb_versionnum: u16,
     // sb_sectsize: u16,
-    pub sb_inodesize: u16,
+    sb_inodesize: u16,
     // sb_inopblock: u16,
     // sb_fname: [u8; 12],
     pub sb_blocklog: u8,
@@ -186,7 +210,7 @@ impl Sb {
         let _sb_logsectlog = buf_reader.read_u8().unwrap();
         let _sb_logsectsize = buf_reader.read_u16::<BigEndian>().unwrap();
         let _sb_logsunit = buf_reader.read_u32::<BigEndian>().unwrap();
-        let sb_features2 = buf_reader.read_u32::<BigEndian>().unwrap();
+        let sb_features2 = SbFeatures2::from_bits(buf_reader.read_u32::<BigEndian>().unwrap()).unwrap();
         let _sb_bad_features2 = buf_reader.read_u32::<BigEndian>().unwrap();
 
         /* Version 5 superblock features */
@@ -211,15 +235,18 @@ impl Sb {
         buf_reader.read_exact(&mut buf_acrc).unwrap();
         digest.update(&buf_acrc);
 
-        if digest.finalize() != sb_crc {
-            panic!("Crc check failed!");
-        }
 
-        if sb_versionnum & 0xF != 5 {
+        if ![4,5].contains(&(sb_versionnum & 0xF)) {
             panic!("Unsupported filesystem version number {}", sb_versionnum & 0xF);
         }
-        if sb_features2 & constants::XFS_SB_VERSION2_ATTR2BIT == 0 {
+        if !sb_features2.attr2() {
             panic!("Version 1 extended attributes are not supported");
+        }
+        if sb_versionnum & 0xF == 5 && !sb_features2.crc() {
+            panic!("Version 5 file systems must set the CRC bit in sb_features2");
+        }
+        if sb_features2.crc() && digest.finalize() != sb_crc {
+            panic!("Crc check failed!");
         }
 
         Sb {
@@ -245,6 +272,11 @@ impl Sb {
     #[inline]
     pub fn get_dir3_leaf_offset(&self) -> XfsDablk {
         1 << (35 - self.sb_blocklog)
+    }
+
+    /// Get the size of an inode in bytes
+    pub fn inode_size(&self) -> usize {
+        self.sb_inodesize.into()
     }
 
     /// Given a file system block number, calculate its disk address in units of 512B blocks

@@ -1212,6 +1212,7 @@ version = "0.3.0"
 dependencies = [
  "assert_cmd",
  "bincode",
+ "bitflags 2.4.0",
  "byteorder",
  "clap",
  "crc",

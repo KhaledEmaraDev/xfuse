@@ -104,7 +104,7 @@ impl Volume {
             .and_modify(|e| e.count +=1 )
             .or_insert_with(|| {
                 let dinode = Dinode::from(
-                    BufReader::with_capacity(sb.sb_inodesize.into(), f).by_ref(),
+                    BufReader::with_capacity(sb.inode_size(), f).by_ref(),
                     sb,
                     if ino == FUSE_ROOT_ID {
                         sb.sb_rootino
@@ -294,6 +294,7 @@ impl Filesystem for Volume {
                     }
                     off = offset;
                 }
+                // TODO: don't ignore errors other than ENOENT
                 Err(_) => {
                     reply.ok();
                     return;

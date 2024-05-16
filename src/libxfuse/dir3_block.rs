@@ -32,7 +32,7 @@ use std::{
 };
 
 use super::definitions::*;
-use super::dir3::{Dir2LeafEntry, Dir3, Dir3DataHdr, XfsDir2Dataptr};
+use super::dir3::{Dir2LeafEntry, Dir3, Dir2DataHdr, Dir3DataHdr, XfsDir2Dataptr};
 use super::sb::Sb;
 use super::utils::decode;
 
@@ -57,13 +57,25 @@ pub struct Dir2BlockDisk {
 }
 
 impl Dir2BlockDisk {
-    pub fn from<T: BufRead + Seek>(buf_reader: &mut T, offset: u64, size: u32) -> Dir2BlockDisk {
+    pub fn new<T>(buf_reader: &mut T, offset: u64, size: u32) -> Dir2BlockDisk
+        where T: BufRead + Seek
+    {
         buf_reader.seek(SeekFrom::Start(offset)).unwrap();
         let mut raw = vec![0u8; size as usize];
         buf_reader.read_exact(&mut raw).unwrap();
 
-        let hdr: Dir3DataHdr = decode(&raw[..]).unwrap().0;
-        assert_eq!(hdr.hdr.magic, XFS_DIR3_BLOCK_MAGIC);
+        let magic: u32 = decode(&raw[..]).unwrap().0;
+        match magic {
+            XFS_DIR2_BLOCK_MAGIC => {
+                let hdr: Dir2DataHdr = decode(&raw[..]).unwrap().0;
+                assert_eq!(hdr.magic, XFS_DIR2_BLOCK_MAGIC);
+            },
+            XFS_DIR3_BLOCK_MAGIC => {
+                let hdr: Dir3DataHdr = decode(&raw[..]).unwrap().0;
+                assert_eq!(hdr.hdr.magic, XFS_DIR3_BLOCK_MAGIC);
+            },
+            _ => panic!("Unknown magic number for block directory {:#x}", magic)
+        }
 
         let tail_offset = (size as usize) - Dir2BlockTail::SIZE;
         let tail: Dir2BlockTail = decode(&raw[tail_offset..]).unwrap().0;
@@ -94,7 +106,7 @@ pub struct Dir2Block {
 }
 
 impl Dir2Block {
-    pub fn from<T: BufRead + Seek>(
+    pub fn new<T: BufRead + Seek>(
         buf_reader: &mut T,
         superblock: &Sb,
         start_block: u64,
@@ -102,7 +114,7 @@ impl Dir2Block {
         let offset = superblock.fsb_to_offset(start_block);
         let dir_blk_size = superblock.sb_blocksize << superblock.sb_dirblklog;
 
-        let dir_disk = Dir2BlockDisk::from(buf_reader.by_ref(), offset, dir_blk_size);
+        let dir_disk = Dir2BlockDisk::new(buf_reader.by_ref(), offset, dir_blk_size);
 
         let data_len = dir_disk.get_data_len(dir_blk_size);
         assert!(data_len as usize <= dir_disk.raw.len());

@@ -331,6 +331,76 @@ mkfs_preallocated() {
 	zstd -f resources/xfs_preallocated.img
 }
 
+mkfs_v4() {
+	# Create a 3rd image with an older format.  Such an image was seen in
+	# the wild on a RHEL system.
+	# Use block size 512 to test large directories without using as much
+	# disk space, even though in the wild we've only seen V4 file systems
+	# with 4k block size.
+	rm resources/xfsv4.img
+	truncate -s 64m resources/xfsv4.img
+	mkfs.xfs --unsupported -b size=512 -n size=4096 -m crc=0 -f resources/xfsv4.img
+	MNTDIR=`mktemp -d`
+	mount -t xfs resources/xfsv4.img $MNTDIR
+
+	# Create directories with various internal storage formats
+	#
+	# With 512B blocks and 4k directories
+	# nfiles	namelen	format	bmbt.level	keys_in_inode
+	# 2		11	sf
+	# 4		11	sf
+	# 8		11	block
+	# 16		11	block
+	# 32		11	block
+	# 64		11	block
+	# 128		11	leaf
+	# 256		11	leaf
+	# 512		11	node			3 data 3 leaf
+	# 1024		11	btree
+	# 2		255	block
+	# 4		255	block
+	# 8		255	blck
+	# 16		255	block
+	# 32		255	block
+	# 64		255	block
+	# 128		255	block
+	# 256		255	block
+	# 512		255	btree	1		1
+	# 1024		255	btree	1		1
+	# 2048		255	btree	1		2
+	# 4096		255	btree	1		4
+	# 8192		255	btree	1		7
+	# 16384		255	btree	2		1
+	# 32768		255	btree	2		1
+	mkfiles ${MNTDIR}/sf 2
+	mkfiles2 ${MNTDIR}/block 4
+	mkfiles ${MNTDIR}/leaf 128
+	mkfiles ${MNTDIR}/node 512
+	mkfiles2 ${MNTDIR}/btree2.2 2048
+	mkfiles2 ${MNTDIR}/btree3 16384
+
+	mkdir ${MNTDIR}/files
+	echo "Hello, World!" > ${MNTDIR}/files/hello.txt
+	touch -t  198209220102.03 ${MNTDIR}/files/hello.txt # Set mtime to my birthday
+	touch -at 201203230405.06 ${MNTDIR}/files/hello.txt # Set atime to my kid's birthday
+	ln ${MNTDIR}/files/hello.txt ${MNTDIR}/files/hello2.txt
+	chown 1234:5678 ${MNTDIR}/files/hello.txt
+	chmod 01234 ${MNTDIR}/files/hello.txt
+	write_sequential_file ${MNTDIR}/files/large_extent.txt 1048576
+	write_fragmented_file ${MNTDIR}/files/btree2.2.txt 512 64
+	write_fragmented_file ${MNTDIR}/files/btree3.txt 512 2048
+	write_fragmented_file ${MNTDIR}/files/btree3.3.txt 512 8192
+
+	mkdir ${MNTDIR}/xattrs
+	mkattrs ${MNTDIR}/xattrs/local 4 0
+	mkattrs ${MNTDIR}/xattrs/extents 64 0
+
+	umount ${MNTDIR}
+	rmdir $MNTDIR
+	zstd -f resources/xfsv4.img
+}
+
 mkfs_4096
 mkfs_512
+mkfs_v4
 mkfs_preallocated
