@@ -28,6 +28,7 @@
 use super::definitions::*;
 use super::utils::{get_file_type, FileKind, Uuid};
 use super::S_IFMT;
+use super::btree::{BmdrBlock, BmbtKey};
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -44,9 +45,11 @@ use num_traits::FromPrimitive;
 
 
 #[derive(Debug, FromPrimitive)]
+#[cfg_attr(test, derive(Default))]
 pub enum XfsDinodeFmt {
     Dev,
     Local,
+    #[cfg_attr(test, default)]
     Extents,
     Btree,
     Uuid,
@@ -61,7 +64,7 @@ impl bincode::Decode for XfsDinodeFmt {
 }
 impl_borrow_decode!(XfsDinodeFmt);
 
-#[derive(Debug, Decode)]
+#[derive(Debug, Decode, Default)]
 pub struct XfsTimestamp {
     pub t_sec: i32,
     pub t_nsec: u32,
@@ -89,6 +92,7 @@ mod constants {
 }
 
 #[derive(Debug, bincode::Decode)]
+#[cfg_attr(test, derive(Default))]
 pub struct DinodeCore {
     pub di_magic: u16,
     pub di_mode: u16,
@@ -135,6 +139,39 @@ impl DinodeCore {
                    "Agi magic number is invalid");
     }
 
+    /// Compute the gap in bytes between the end of the keys and the start of the pointers, for
+    /// BTree-formatted inodes only.
+    pub const fn btree_ptr_gap(&self, inode_size: usize, bb_numrecs: u16) -> usize {
+        debug_assert!(matches!(self.di_format, XfsDinodeFmt::Btree));
+        // The XFS Algorithms and Data Structures document contains an error here.  It says that
+        // the array of xfs_bmbt_ptr_t values immediately follows the array of xfs_bmbt_key_t
+        // values, and the size of both arrays is specified by bb_numrecs.  HOWEVER, there is
+        // actually a gap.  The space from the end of bmbt to the beginning of the attribute fork
+        // is split in half.  Half for keys and half for pointers.  The remaining space is padded
+        // with zeros.  The beginning of the attribute fork is given as di_forkoff *
+        // 8 bytes from the start of the literal area, which is where BmdrBlock is located.
+        let space = if self.di_forkoff == 0 {
+            (inode_size - self.literal_area_offset()) / 2
+        } else {
+            let space = (self.di_forkoff as usize) * 8 / 2;
+            // Round up to a multiple of 8
+            let rem = space % 8;
+            if rem == 0 { space } else { space + 8 - rem }
+         };
+        space -
+            BmdrBlock::SIZE -
+            bb_numrecs as usize * BmbtKey::SIZE -
+            /* XXX Why does it need this extra 4? */ 4
+    }
+
+    pub const fn literal_area_offset(&self) -> usize {
+        match self.di_version {
+            1..=2 => unimplemented!(),
+            3 => 0xb0,
+            _ => unreachable!()
+        }
+    }
+
     pub fn stat(&self, ino: XfsIno) -> Result<FileAttr, c_int> {
         let kind = get_file_type(FileKind::Mode(self.di_mode))?;
         // Special case for ino 1.  FUSE requires / to have inode 1, but XFS
@@ -175,5 +212,40 @@ impl DinodeCore {
                 ts.t_nsec,
             )
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use rstest::rstest;
+
+    /// Test the btree_ptr_gap function against data from real live file systems.  The XFS
+    /// Algorithms & Data Structures book does not accurately document this gap.
+    #[rstest]
+    #[case(512, 0, 3, 1, 152)]
+    #[case(512, 0, 3, 3, 136)]
+    #[case(512, 24, 3, 1, 80)]
+    #[case(512, 0, 3, 2, 144)]
+    #[case(512, 24, 3, 9, 16)]
+    #[case(512, 37, 3, 2, 128)]
+    #[case(2048, 0, 3, 1, 920)]
+    #[case(2048, 0, 3, 3, 904)]
+    #[case(1024, 0, 3, 7, 360)]
+    fn btree_ptr_gap(
+        #[case] inode_size: usize,
+        #[case] di_forkoff: u8,
+        #[case] di_version: i8,
+        #[case] bb_numrecs: u16,
+        #[case] gap: usize)
+    {
+        let dic = DinodeCore {
+            di_forkoff,
+            di_version,
+            di_format: XfsDinodeFmt::Btree,
+            .. Default::default()
+        };
+        assert_eq!(dic.btree_ptr_gap(inode_size, bb_numrecs), gap);
     }
 }
