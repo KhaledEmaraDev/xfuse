@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] - ReleaseDate
+
+### Fixed
+
+- Fixed a crash when trying to read extended attributes from files that once
+  had enough extended attributes to require BTrees for their attribute forks,
+  but then shrunk enough that the remaining extended attributes could fit
+  within a single disk block.
+  ([#140](https://github.com/KhaledEmaraDev/xfuse/issues/140))
+
 ## [0.3.0] - 2024-04-24
 
 ### Added

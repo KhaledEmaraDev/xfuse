@@ -38,17 +38,65 @@ use bincode::de::read::Reader;
 use super::{
     attr::{Attr, AttrLeafblock},
     btree::{Btree, BtreeRoot},
-    definitions::{XfsDablk, XfsFsblock},
+    definitions::{XFS_DA3_NODE_MAGIC, XFS_ATTR3_LEAF_MAGIC, XfsDablk, XfsFsblock},
     da_btree::{hashname, XfsDa3Intnode},
     sb::Sb,
-    utils::decode_from
+    utils
 };
+
+/// According to XFS Algorithms & Data Structures, a BTree attribute fork will always contain an
+/// xfs_da_intnode_t or xfs_da3_intnode_t in its first attribute block.  However, sometimes it
+/// contains a xfs_attr3_leafblock instead.  I think that can happen when a BTree-formatted
+/// attribute fork shrinks enough that it no longer requires more than one extent to hold all
+/// attributes.
+#[derive(Debug)]
+enum AttrBtreeBlock0 {
+    Node(XfsDa3Intnode),
+    Leaf
+}
+
+impl AttrBtreeBlock0 {
+    fn first_block<R, F>(&self, buf_reader: &mut R, super_block: &Sb, map_dblock: F,
+        ) -> XfsDablk
+        where R: BufRead + Reader + Seek,
+              F: Fn(XfsDablk, &mut R) -> XfsFsblock
+    {
+        match self {
+            AttrBtreeBlock0::Node(node) => node.first_block(buf_reader, super_block, map_dblock),
+            AttrBtreeBlock0::Leaf => 0,
+        }
+    }
+
+    fn lookup<R: BufRead + Reader + Seek, F: Fn(XfsDablk, &mut R) -> XfsFsblock>(
+        &self,
+        buf_reader: &mut R,
+        super_block: &Sb,
+        hash: u32,
+        map_dblock: F,
+    ) -> Result<XfsDablk, i32> {
+        match self {
+            AttrBtreeBlock0::Node(node) => node.lookup(buf_reader, super_block, hash, map_dblock),
+            AttrBtreeBlock0::Leaf => Ok(0),
+        }
+    }
+
+    fn new<R: BufRead + Reader + Seek>(buf_reader: &mut R) -> Self {
+        buf_reader.fill_buf().unwrap();
+        let magic: u16 = utils::decode(&buf_reader.peek_read(10).unwrap()[8..]).unwrap().0;
+        match magic {
+            XFS_DA3_NODE_MAGIC => AttrBtreeBlock0::Node(XfsDa3Intnode::from(buf_reader)),
+            XFS_ATTR3_LEAF_MAGIC => AttrBtreeBlock0::Leaf,
+            _ => panic!("Unexpected magic value {:#x}", magic)
+        }
+    }
+}
+
 
 #[derive(Debug)]
 pub struct AttrBtree {
     btree: BtreeRoot,
     total_size: i64,
-    node: XfsDa3Intnode,
+    node: AttrBtreeBlock0,
     /// A cache of leaf blocks, indexed by directory block number
     leaves: RefCell<BTreeMap<XfsDablk, AttrLeafblock>>
 }
@@ -60,7 +108,7 @@ impl AttrBtree {
         let fsblk = btree.map_block(buf_reader.by_ref(), 0).unwrap().0.unwrap();
         buf_reader.seek(SeekFrom::Start(sb.fsb_to_offset(fsblk))).unwrap();
 
-        let node = XfsDa3Intnode::from(buf_reader.by_ref());
+        let node = AttrBtreeBlock0::new(buf_reader.by_ref());
 
         Self {
             btree,
@@ -91,7 +139,7 @@ impl AttrBtree {
             let fsblock = self.map_dblock(buf_reader.by_ref(), dblock)?;
             let leaf_offset = sb.fsb_to_offset(fsblock);
             buf_reader.seek(SeekFrom::Start(leaf_offset)).unwrap();
-            let leaf: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
+            let leaf: AttrLeafblock = utils::decode_from(buf_reader.by_ref()).unwrap();
             entry.or_insert(leaf);
         }
         Ok(std::cell::RefMut::map(cache_guard, |v| v.get_mut(&dblock).unwrap()))
@@ -107,10 +155,13 @@ impl Attr for AttrBtree {
             let mut dablk = self.node.first_block(buf_reader.by_ref(), super_block, |block, reader| {
                 self.map_dblock(reader.by_ref(), block).unwrap()
             });
-            while dablk != 0 {
+            loop {
                 let leaf = self.read_leaf(buf_reader.by_ref(), super_block, dablk).unwrap();
                 total_size += leaf.get_total_size();
                 dablk = leaf.hdr.info.forw;
+                if dablk == 0 {
+                    break;
+                }
             }
 
             self.total_size = i64::from(total_size);
@@ -126,10 +177,13 @@ impl Attr for AttrBtree {
         let mut dablk = self.node.first_block(buf_reader.by_ref(), super_block, |block, reader| {
             self.map_dblock(reader.by_ref(), block).unwrap()
         });
-        while dablk != 0 {
+        loop {
             let leaf = self.read_leaf(buf_reader.by_ref(), super_block, dablk).unwrap();
             (*leaf).list(&mut list);
             dablk = leaf.hdr.info.forw;
+            if dablk == 0 {
+                break;
+            }
         }
 
         list
