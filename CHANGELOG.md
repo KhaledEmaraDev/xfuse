@@ -3,11 +3,11 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] - ReleaseDate
+## [0.3.0] - 2024-04-24
 
 ### Added
 
-- Improved performance ny caching various metadata.
+- Improved performance by caching various metadata.
   ([#107](https://github.com/KhaledEmaraDev/xfuse/issues/107))
 
 - Added support for `FUSE_LSEEK` to efficiently copy sparse files.
