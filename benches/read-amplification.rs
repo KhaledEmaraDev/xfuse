@@ -232,7 +232,7 @@ fn get_extents_xattrs(mountpoint: &Path) -> u64 {
 
 /// Get all extended attributes that are stored in a btree
 fn get_btree_xattrs(mountpoint: &Path) -> u64 {
-    get_xattrs(mountpoint, &["xattrs/btree2", "xattrs/btree2.3", "xattrs/btree3"])
+    get_xattrs(mountpoint, &["xattrs/btree2", "xattrs/btree2.5", "xattrs/btree3"])
 }
 
 #[named]
