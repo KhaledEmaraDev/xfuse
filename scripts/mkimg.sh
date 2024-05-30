@@ -313,5 +313,24 @@ mkfs_512() {
 	zstd -f resources/xfs1024.img
 }
 
+mkfs_preallocated() {
+	# Create a small image to test preallocated files.  It needs a
+	# dedicated image because we must fill the file with garbage data in
+	# order to verify that we don't read garbage back.
+	jot -b X -s "" -n 16777216 > resources/xfs_preallocated.img
+	mkfs.xfs --unsupported -f resources/xfs_preallocated.img
+	MNTDIR=`mktemp -d`
+	mount -t xfs resources/xfs_preallocated.img $MNTDIR
+
+	mkdir ${MNTDIR}/files
+	touch ${MNTDIR}/files/preallocated
+	fallocate -l 8m ${MNTDIR}/files/preallocated
+
+	umount ${MNTDIR}
+	rmdir $MNTDIR
+	zstd -f resources/xfs_preallocated.img
+}
+
 mkfs_4096
 mkfs_512
+mkfs_preallocated

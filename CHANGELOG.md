@@ -7,6 +7,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Fixed read and lseek with files with preallocated extents.  `posix_fallocate`
+  will create such extents in order to reserve disk space for a file, but as
+  they aren't yet written, they should be treated as holes.
+  ([#143](https://github.com/KhaledEmaraDev/xfuse/issues/143))
+
 - Fixed a crash when trying to read extended attributes from files that once
   had enough extended attributes to require BTrees for their attribute forks,
   but then shrunk enough that the remaining extended attributes could fit

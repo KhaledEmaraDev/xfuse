@@ -46,6 +46,9 @@ pub struct BmbtRec {
     pub br_startoff: XfsFileoff,
     pub br_startblock: XfsFsblock,
     pub br_blockcount: XfsFilblks,
+    /// If set, indicates that the extent has been preallocated but has not yet been written
+    /// (unwritten extent)
+    pub br_flag: bool
 }
 
 impl Decode for BmbtRec {
@@ -59,11 +62,13 @@ impl Decode for BmbtRec {
         let br = br >> 52;
 
         let br_startoff = (br & ((1 << 54) - 1)) as u64;
+        let br_flag = (br >> 54) != 0;
 
         Ok(BmbtRec {
             br_startoff,
             br_startblock,
             br_blockcount,
+            br_flag
         })
     }
 }
@@ -74,6 +79,9 @@ pub struct Bmx(pub Vec<BmbtRec>);
 
 impl Bmx {
     pub fn new(bmx: Vec<BmbtRec>) -> Self {
+        // Filter out preallocated but unwritten extents.  This makes the lseek implementation much
+        // easier than if we try to consider the br_flag field in the lseek method itself.
+        let bmx = bmx.into_iter().filter(|rec| !rec.br_flag).collect();
         Self(bmx)
     }
 
@@ -92,6 +100,7 @@ impl Bmx {
                 let entry = &self.0[i - 1];
                 let skip = dblock - entry.br_startoff;
                 if entry.br_startoff + entry.br_blockcount > dblock {
+                    assert!(!entry.br_flag);
                     (Some(entry.br_startblock + skip), Some(entry.br_blockcount - skip))
                 } else {
                     // It's a hole
@@ -130,16 +139,19 @@ mod tests {
                 br_startoff: 0,
                 br_startblock: 20,
                 br_blockcount: 2,
+                br_flag: false
             },
             BmbtRec {
                 br_startoff: 2,
                 br_startblock: 30,
                 br_blockcount: 3,
+                br_flag: false
             },
             BmbtRec {
                 br_startoff: 5,
                 br_startblock: 40,
                 br_blockcount: 2,
+                br_flag: false
             },
         ]);
 
