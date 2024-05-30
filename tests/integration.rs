@@ -24,7 +24,7 @@ use rstest_reuse::{self, apply, template};
 use tempfile::{tempdir, TempDir};
 
 mod util;
-use util::{GOLDEN1K, GOLDEN4K, Md, waitfor};
+use util::{GOLDEN1K, GOLDEN4K, GOLDENPREALLOCATED, Md, waitfor};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 struct ExpectedXattr {
@@ -134,6 +134,11 @@ fn harness1k() -> Harness {
 #[fixture]
 fn harness4k() -> Harness {
     harness(GOLDEN4K.as_path())
+}
+
+#[fixture]
+fn harness_preallocated() -> Harness {
+    harness(GOLDENPREALLOCATED.as_path())
 }
 
 impl Drop for Harness {
@@ -750,6 +755,21 @@ mod lseek {
             assert_eq!(1, raw);
         }
     }
+
+    #[named]
+    #[rstest]
+    fn preallocated(harness_preallocated: Harness) {
+        require_fusefs!();
+
+        let p = harness_preallocated.d.path().join("files/preallocated");
+        let f = fs::File::open(p).unwrap();
+
+        // The unwritten extent should not count as a data region
+        assert_eq!(Err(Errno::ENXIO), nix::unistd::lseek(f.as_raw_fd(), 0, Whence::SeekData));
+
+        // The unwritten extent should count as a hole
+        assert_eq!(Ok(0), nix::unistd::lseek(f.as_raw_fd(), 0, Whence::SeekHole));
+    }
 }
 
 mod lsextattr {
@@ -1071,6 +1091,31 @@ mod read {
     }
     // TODO: add a test case for reading with direct I/O where the image is on a
     // device, not a file
+
+    /// Test reading a file that has been preallocated but unwritten, for example with
+    /// posix_fallocate
+    #[named]
+    #[rstest]
+    fn unwritten(harness_preallocated: Harness) {
+        require_fusefs!();
+
+        const FLEN: u64 = 8388608;
+        const BUFLEN: usize = 1 << 12;
+
+        let path = harness_preallocated.d.path().join("files").join("preallocated");
+        let mut f = fs::File::open(path).unwrap();
+
+        // First verify the length
+        assert_eq!(f.metadata().unwrap().size(), FLEN);
+
+        // Then verify that we read all zeros
+        let zbuf = vec![0; BUFLEN];
+        let mut buf = vec![0; BUFLEN];
+        for _ in 0..(FLEN / BUFLEN as u64) {
+            f.read_exact(&mut buf[..]).unwrap();
+            assert_eq!(zbuf, buf, "Read garbage where there should've been zeros");
+        }
+    }
 }
 
 mod readdir {
