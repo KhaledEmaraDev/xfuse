@@ -41,8 +41,8 @@ use super::{
     attr_leaf::AttrLeaf,
     attr_node::AttrNode,
     bmbt_rec::Bmx,
-    da_btree::{XfsDa3Blkinfo, XfsDa3Intnode},
-    definitions::{XFS_ATTR3_LEAF_MAGIC, XFS_DA3_NODE_MAGIC, XfsDablk, XfsFsblock},
+    da_btree::{XfsDaBlkinfo, XfsDa3Blkinfo, XfsDa3Intnode},
+    definitions::{XFS_ATTR_LEAF_MAGIC, XFS_DA_NODE_MAGIC, XFS_ATTR3_LEAF_MAGIC, XFS_DA3_NODE_MAGIC, XfsDablk, XfsFsblock},
     sb::Sb,
     utils,
     volume::SUPERBLOCK
@@ -83,24 +83,35 @@ pub struct AttrLeafMap {
 
 #[derive(Debug)]
 pub struct AttrLeafHdr {
-    pub info: XfsDa3Blkinfo,
+    pub forw: u32,
     pub count: u16,
 }
 
 impl Decode for AttrLeafHdr {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let info: XfsDa3Blkinfo = Decode::decode(decoder)?;
+        let magic: u16 = utils::decode(&decoder.reader().peek_read(10).unwrap()[8..])?.0;
+        let forw = match magic {
+            XFS_ATTR_LEAF_MAGIC => {
+                let info: XfsDaBlkinfo = Decode::decode(decoder)?;
+                info.forw
+            },
+            XFS_ATTR3_LEAF_MAGIC => {
+                let info: XfsDa3Blkinfo = Decode::decode(decoder)?;
+                info.forw
+            },
+            _ => panic!("Unexpected magic value {:#x}", magic)
+        };
         let count = Decode::decode(decoder)?;
         let _usedbytes: u16 = Decode::decode(decoder)?;
         let _firstused: u16 = Decode::decode(decoder)?;
         let _holes: u8 = Decode::decode(decoder)?;
         let _pad1: u8 = Decode::decode(decoder)?;
         let _freemap: [AttrLeafMap; 3] = Decode::decode(decoder)?;
-        let _pad2: u32 = Decode::decode(decoder)?;
+        if magic == XFS_ATTR3_LEAF_MAGIC {
+            let _pad2: u32 = Decode::decode(decoder)?;
+        }
 
-        assert_eq!(info.magic, XFS_ATTR3_LEAF_MAGIC,
-           "bad magic!  expected {:#x} but found {:#x}", XFS_ATTR3_LEAF_MAGIC, info.magic);
-        Ok(Self{info, count})
+        Ok(Self{forw, count})
     }
 }
 impl_borrow_decode!(AttrLeafHdr);
@@ -332,10 +343,12 @@ pub fn open<R: Reader + BufRead + Seek>(
         buf_reader.seek(SeekFrom::Start(ofs)).unwrap();
         let mut raw = vec![0u8; superblock.sb_blocksize as usize];
         buf_reader.read_exact(&mut raw).unwrap();
-        let info: XfsDa3Blkinfo = utils::decode(&raw).unwrap().0; 
+        // What follows is either a xfs_da_blkinfo or a xfs_da3_blkinfo.  The first three fields
+        // are the same.
+        let magic: u16 = utils::decode(&raw[8..]).unwrap().0;
 
-        match info.magic {
-            XFS_ATTR3_LEAF_MAGIC => {
+        match magic {
+            XFS_ATTR_LEAF_MAGIC | XFS_ATTR3_LEAF_MAGIC => {
                 let leaf: AttrLeafblock = utils::decode(&raw).unwrap().0;
                 Attributes::Leaf(AttrLeaf {
                     bmx,
@@ -343,7 +356,7 @@ pub fn open<R: Reader + BufRead + Seek>(
                     total_size: -1,
                 })
             },
-            XFS_DA3_NODE_MAGIC => {
+            XFS_DA_NODE_MAGIC | XFS_DA3_NODE_MAGIC => {
                 let node: XfsDa3Intnode = utils::decode(&raw).unwrap().0;
                 Attributes::Node(AttrNode::new(bmx, node))
             },

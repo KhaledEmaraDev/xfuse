@@ -47,7 +47,7 @@ use super::{
     definitions::*,
     utils::Uuid,
     sb::Sb,
-    utils::decode_from,
+    utils,
     volume::SUPERBLOCK
 };
 
@@ -87,10 +87,25 @@ pub fn hashname(name: &OsStr) -> XfsDahash {
     }
 }
 
+#[derive(Debug, Decode)]
+pub struct XfsDaBlkinfo {
+    pub forw: u32,
+    _back: u32,
+    _magic: u16,
+    _pad: u16
+}
+
 #[derive(Debug)]
 pub struct XfsDa3Blkinfo {
     pub forw: u32,
+    // _back: u32
     pub magic: u16,
+    // _pad: u16
+    // _crc: u32
+    // _blkno: u64
+    // _lsn: u64
+    // uuid: Uuid
+    // _owner: u64
 }
 
 impl Decode for XfsDa3Blkinfo {
@@ -115,11 +130,19 @@ impl Decode for XfsDa3Blkinfo {
 impl_borrow_decode!(XfsDa3Blkinfo);
 
 
-#[derive(Debug)]
-pub struct XfsDa3NodeHdr {
-    pub info: XfsDa3Blkinfo,
+#[derive(Debug, Decode)]
+struct XfsDaNodeHdr {
+    _info: XfsDaBlkinfo,
     pub count: u16,
     pub level: u16,
+}
+
+#[derive(Debug)]
+struct XfsDa3NodeHdr {
+    // info: XfsDa3Blkinfo,
+    pub count: u16,
+    pub level: u16,
+    // _pad32: u32
 }
 
 impl Decode for XfsDa3NodeHdr {
@@ -132,7 +155,6 @@ impl Decode for XfsDa3NodeHdr {
         let level = Decode::decode(decoder)?;
         let _pad32: u32 = Decode::decode(decoder)?;
         Ok(XfsDa3NodeHdr {
-            info,
             count,
             level,
         })
@@ -155,26 +177,39 @@ impl XfsDa3NodeEntry {
     }
 }
 
+/// A BTree Interior node.  Could be either an xfs_da_intnode or xfs_da3_intnode, depending on file
+/// system verison.
 #[derive(Debug)]
 pub struct XfsDa3Intnode {
-    pub hdr: XfsDa3NodeHdr,
+    pub magic: u16,
+    level: u16,
+    //hdr: XfsDa3NodeHdr,
     pub btree: Vec<XfsDa3NodeEntry>,
     children: RefCell<BTreeMap<XfsDablk, Self>>
 }
 
 impl XfsDa3Intnode {
     pub fn from<R: BufRead + Reader + Seek>(buf_reader: &mut R) -> XfsDa3Intnode {
-        let hdr: XfsDa3NodeHdr = decode_from(buf_reader.by_ref()).unwrap();
-        assert_eq!(hdr.info.magic, XFS_DA3_NODE_MAGIC, "bad magic!  Expected {:#x}, found {:#x}",
-                   XFS_DA3_NODE_MAGIC, hdr.info.magic);
+        let magic: u16 = utils::decode(&buf_reader.peek_read(10).unwrap()[8..]).unwrap().0;
+        let (count, level) = match magic {
+            XFS_DA_NODE_MAGIC =>{
+                let hdr: XfsDaNodeHdr = utils::decode_from(buf_reader.by_ref()).unwrap();
+                (hdr.count, hdr.level)
+            },
+            XFS_DA3_NODE_MAGIC => {
+                let hdr: XfsDa3NodeHdr = utils::decode_from(buf_reader.by_ref()).unwrap();
+                (hdr.count, hdr.level)
+            },
+            _ => panic!("Bad magic in XfsDa3Intnode! {:#x}", magic),
+        };
 
         let mut btree = Vec::<XfsDa3NodeEntry>::new();
-        for _i in 0..hdr.count {
+        for _i in 0..count {
             btree.push(XfsDa3NodeEntry::from(buf_reader.by_ref()))
         }
         let children = Default::default();
 
-        XfsDa3Intnode { hdr, btree, children }
+        XfsDa3Intnode { magic, level, btree, children }
     }
 
     pub fn lookup<R: BufRead + Reader + Seek, F: Fn(XfsDablk, &mut R) -> XfsFsblock>(
@@ -190,10 +225,10 @@ impl XfsDa3Intnode {
         }
         let before = self.btree[pidx].before;
 
-        if self.hdr.level == 1 {
+        if self.level == 1 {
             Ok(before)
         } else {
-            assert!(self.hdr.level > 1);
+            assert!(self.level > 1);
 
             let node = self.read_child(buf_reader.by_ref(), super_block, before,
                 &map_dblock)?;
@@ -211,7 +246,7 @@ impl XfsDa3Intnode {
         where R: BufRead + Reader + Seek,
               F: Fn(XfsDablk, &mut R) -> XfsFsblock
     {
-        if self.hdr.level == 1 {
+        if self.level == 1 {
             self.btree.first().unwrap().before
         } else {
             let before = self.btree.first().unwrap().before;
@@ -237,6 +272,7 @@ impl XfsDa3Intnode {
             let fsblock = map_dblock(dblock, buf_reader.by_ref());
             let offset = super_block.fsb_to_offset(fsblock);
             buf_reader.seek(SeekFrom::Start(offset)).unwrap();
+            buf_reader.fill_buf().unwrap();
             let node = XfsDa3Intnode::from(buf_reader.by_ref());
             entry.or_insert(node);
         }
@@ -250,15 +286,27 @@ impl XfsDa3Intnode {
 
 impl Decode for XfsDa3Intnode {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let hdr: XfsDa3NodeHdr = Decode::decode(decoder)?;
+        let magic: u16 = utils::decode(&decoder.reader().peek_read(10).unwrap()[8..])?.0;
+        let (count, level) = match magic {
+            XFS_DA_NODE_MAGIC =>{
+                let hdr: XfsDaNodeHdr = Decode::decode(decoder)?;
+                (hdr.count, hdr.level)
+            },
+            XFS_DA3_NODE_MAGIC => {
+                let hdr: XfsDa3NodeHdr = Decode::decode(decoder)?;
+                (hdr.count, hdr.level)
+            },
+            _ => panic!("Bad magic in XfsDa3Intnode! {:#x}", magic),
+        };
         let mut btree = Vec::<XfsDa3NodeEntry>::new();
-        for _i in 0..hdr.count {
+        for _i in 0..count {
             btree.push(Decode::decode(decoder)?);
         }
         let children = Default::default();
 
         Ok(XfsDa3Intnode {
-            hdr,
+            magic,
+            level,
             btree,
             children
         })

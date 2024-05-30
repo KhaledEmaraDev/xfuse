@@ -5,6 +5,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- Added support for reading XFS version 4 file systems.
+  ([#145](https://github.com/KhaledEmaraDev/xfuse/issues/145))
+
 ### Fixed
 
 - Fixed read and lseek with files with preallocated extents.  `posix_fallocate`

@@ -10,7 +10,7 @@ use std::{
             fs::{DirEntryExt, MetadataExt, FileExt, OpenOptionsExt}
         },
     },
-    path::Path,
+    path::{Path, PathBuf},
     process::{Child, Command},
     time::Duration,
     thread::sleep
@@ -24,7 +24,7 @@ use rstest_reuse::{self, apply, template};
 use tempfile::{tempdir, TempDir};
 
 mod util;
-use util::{GOLDEN1K, GOLDEN4K, GOLDENPREALLOCATED, Md, waitfor};
+use util::{GOLDEN1K, GOLDEN4K, GOLDENPREALLOCATED, GOLDENV4, Md, waitfor};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 struct ExpectedXattr {
@@ -78,33 +78,40 @@ fn remote_attrs_per_file(f: &str) -> usize {
 
 /// How many directory entries are in each directory?
 // This is a function of the golden image creation.
-fn ents_per_dir_1k(d: &str) -> usize {
-    match d {
-        "leaf" => 256,
-        "node1" => 496,
-        "node3" => 512,
-        "btree2.with-xattrs" => 1024,
-        "btree2.3" => 8192,
-        "btree3" => 131072,
-        _ => unimplemented!()
+fn ents_per_dir_longnames(path: &Path, d: &str) -> usize {
+    match (&*path.file_name().unwrap().to_string_lossy(), d) {
+        ("xfs1024.img", "leaf") => 256,
+        ("xfs1024.img", "node1") => 496,
+        ("xfs1024.img", "node3") => 512,
+        ("xfs1024.img", "btree2.with-xattrs") => 1024,
+        ("xfs1024.img", "btree2.3") => 8192,
+        ("xfs1024.img", "btree3") => 131072,
+        ("xfsv4.img", "block") => 4,
+        ("xfsv4.img", "btree2.2") => 2048,
+        ("xfsv4.img", "btree3") => 16384,
+        x => panic!("{:?} not implemented", x)
     }
 }
 
 /// How many directory entries are in each directory?
 // This is a function of the golden image creation.
-fn ents_per_dir_4k(d: &str) -> usize {
-    match d {
-        "sf" => 2,
-        "block" => 32,
-        "leaf" => 384,
-        "all_name_lengths" => 255,
+fn ents_per_dir_shortnames(path: &Path, d: &str) -> usize {
+    match (&*path.file_name().unwrap().to_string_lossy(), d) {
+        (_, "sf") => 2,
+        ("xfs4096.img", "block") => 32,
+        ("xfs4096.img", "leaf") => 384,
+        ("xfs4096.img", "node1") => 512,
+        ("xfs4096.img", "all_name_lengths") => 255,
+        ("xfsv4.img", "leaf") => 128,
+        ("xfsv4.img", "node") => 512,
         _ => unimplemented!()
     }
 }
 
 struct Harness {
     d: TempDir,
-    child: Child
+    child: Child,
+    path: PathBuf
 }
 
 fn harness(img: &Path) -> Harness {
@@ -122,7 +129,8 @@ fn harness(img: &Path) -> Harness {
 
     Harness {
         d,
-        child
+        child,
+        path: img.to_owned()
     }
 }
 
@@ -139,6 +147,11 @@ fn harness4k() -> Harness {
 #[fixture]
 fn harness_preallocated() -> Harness {
     harness(GOLDENPREALLOCATED.as_path())
+}
+
+#[fixture]
+fn harnessv4() -> Harness {
+    harness(GOLDENV4.as_path())
 }
 
 impl Drop for Harness {
@@ -188,22 +201,29 @@ impl Drop for Harness {
 #[template]
 #[rstest]
 // Leaf directory with > 4 directory blocks
-#[case::leaf("leaf")]
+#[case::leaf(harness1k, "leaf")]
 // Node directory with a single leaf block
-#[case::node1("node1")]
+#[case::node1(harness1k, "node1")]
 // Node directory with multiple leaf blocks
-#[case::node3("node3")]
-#[case::btree_2_with_xattrs("btree2.with-xattrs")]
-#[case::btree_2_3("btree2.3")]
-#[case::btree_3("btree3")]
-fn all_dir_types_1k(d: &str) {}
+#[case::node3(harness1k, "node3")]
+#[case::btree_2_with_xattrs(harness1k, "btree2.with-xattrs")]
+#[case::btree_2_3(harness1k, "btree2.3")]
+#[case::btree_3(harness1k, "btree3")]
+#[case::v4_block(harnessv4, "block")]
+#[case::v4_btree_2_2(harnessv4, "btree2.2")]
+#[case::v4_btree_3(harnessv4, "btree3")]
+fn all_dir_types_longnames(h: fn() -> Harness, d: &str) {}
 
+// All directory types that have short file names
 #[template]
 #[rstest]
-#[case::sf("sf")]
-#[case::block("block")]
-#[case::leaf("leaf")]
-fn all_dir_types_4k(d: &str) {}
+#[case::sf(harness4k, "sf")]
+#[case::block(harness4k, "block")]
+#[case::leaf(harness4k, "leaf")]
+#[case::v4_sf(harnessv4, "sf")]
+#[case::v4_leaf(harnessv4, "leaf")]     // TODO check in xfs_db.  Might not be a leaf dir.
+#[case::v4_node(harnessv4, "node")]
+fn all_dir_types_shortnames(h: fn() -> Harness, d: &str) {}
 
 #[template]
 #[rstest]
@@ -213,6 +233,8 @@ fn all_dir_types_4k(d: &str) {}
 #[case::btree2_5(harness1k, "xattrs/btree2.5")]
 #[case::btree3(harness1k, "xattrs/btree3")]
 #[case::btree2_with_xattrs(harness1k, "btree2.with-xattrs")]
+#[case::v4_local(harnessv4, "xattrs/local")]
+#[case::v4_extents(harnessv4, "xattrs/extents")]
 fn all_xattr_fork_types(h: fn() -> Harness, d: &str) {}
 
 #[template]
@@ -381,6 +403,7 @@ mod dev {
 
 }
 
+// TODO: xattr test on V4 file system
 mod getextattr {
     use super::*;
 
@@ -515,12 +538,16 @@ fn hardlink(harness4k: Harness) {
 }
 
 /// Mount and unmount the golden image
-#[rstest]
 #[named]
-fn mount(harness4k: Harness) {
+#[rstest]
+#[case::fourk(harness4k)]
+#[case::onek(harness1k)]
+#[case::v4(harnessv4)]
+fn mount(#[case] h: fn() -> Harness) {
     require_fusefs!();
 
-    drop(harness4k);
+    let harness = h();
+    drop(harness);
 }
 
 mod lookup {
@@ -569,13 +596,14 @@ mod lookup {
     //
     // In the 1k blocksize golden image, they use a different naming convention.
     #[named]
-    #[apply(all_dir_types_1k)]
-    fn ok_1k(harness1k: Harness, #[case] d: &str) {
+    #[apply(all_dir_types_longnames)]
+    fn longnames(#[case] h: fn() -> Harness, #[case] d: &str) {
         require_fusefs!();
 
+        let harness = h();
         let amode = AccessFlags::F_OK;
-        for i in 0..ents_per_dir_1k(d) {
-            let p = harness1k.d.path().join(format!("{d}/frame__________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________{i:08}"));
+        for i in 0..ents_per_dir_longnames(harness.path.as_path(), d) {
+            let p = harness.d.path().join(format!("{d}/frame__________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________{i:08}"));
             access(p.as_path(), amode)
                 .unwrap_or_else(|_| panic!("Lookup failed: {}", p.display()));
         }
@@ -583,13 +611,14 @@ mod lookup {
 
     /// Lookup all entries in a directory
     #[named]
-    #[apply(all_dir_types_4k)]
-    fn ok_4k(harness4k: Harness, #[case] d: &str) {
+    #[apply(all_dir_types_shortnames)]
+    fn shortnames(#[case] h: fn() -> Harness, #[case] d: &str) {
         require_fusefs!();
 
+        let harness = h();
         let amode = AccessFlags::F_OK;
-        for i in 0..ents_per_dir_4k(d) {
-            let p = harness4k.d.path().join(format!("{d}/frame{i:06}"));
+        for i in 0..ents_per_dir_shortnames(harness.path.as_path(), d) {
+            let p = harness.d.path().join(format!("{d}/frame{i:06}"));
             access(p.as_path(), amode)
                 .unwrap_or_else(|_| panic!("Lookup failed: {}", p.display()));
         }
@@ -598,11 +627,23 @@ mod lookup {
     /// Lookup a directory's "." and ".." entries.  Verify their inode numbers
     #[named]
     #[rstest]
+    // Annoyingly rstest_reuse's "apply" attribute cannot be used more than once.  So we must copy
+    // the case definitions from all_dir_types_longnames and all_dir_types_shortnames
+    #[case::leaf(harness1k, "leaf")]
+    #[case::node1(harness1k, "node1")]
+    #[case::node3(harness1k, "node3")]
+    #[case::btree_2_with_xattrs(harness1k, "btree2.with-xattrs")]
+    #[case::btree_2_3(harness1k, "btree2.3")]
+    #[case::btree_3(harness1k, "btree3")]
+    #[case::v4_block(harnessv4, "block")]
+    #[case::v4_btree_2_2(harnessv4, "btree2.2")]
+    #[case::v4_btree_3(harnessv4, "btree3")]
     #[case::sf(harness4k, "sf")]
     #[case::block(harness4k, "block")]
     #[case::leaf(harness4k, "leaf")]
-    #[case::btree2_3(harness1k, "btree2.3")]
-    #[case::btree3(harness1k, "btree3")]
+    #[case::v4_sf(harnessv4, "sf")]
+    #[case::v4_leaf(harnessv4, "leaf")]
+    #[case::v4_node(harnessv4, "node")]
     fn dots(#[case] h: fn() -> Harness, #[case] d: &str) {
         require_fusefs!();
 
@@ -626,6 +667,8 @@ mod lookup {
     #[case::btree(harness4k, "btree")]
     #[case::btree2_3(harness1k, "btree2.3")]
     #[case::btree3(harness1k, "btree3")]
+    #[case::v4_sf(harness1k, "sf")]
+    #[case::v4_blocks(harness1k, "blocks")]
     fn enoent(#[case] h: fn() -> Harness, #[case] d: &str) {
         require_fusefs!();
 
@@ -939,6 +982,7 @@ mod read {
     #[rstest]
     #[case::large_extent_4k(harness4k, "large_extent.txt", 1048576)]
     #[case::large_extent_1k(harness1k, "large_extent.txt", 1048576)]
+    #[case::large_extent_v4(harnessv4, "large_extent.txt", 1048576)]
     #[case::partial_extent(harness4k, "partial_extent.txt", 8448)]
     #[case::single_extent(harness4k, "single_extent.txt", 4096)]
     #[case::four_extents(harness4k, "four_extents.txt", 16384)]
@@ -948,6 +992,9 @@ mod read {
     #[case::wide_two_height_btree2(harness1k, "btree2.2.txt", 65536)]
     #[case::wide_two_height_btree2(harness1k, "btree3.txt", 2097152)]
     #[case::wide_two_height_btree2(harness1k, "btree3.3.txt", 8388608)]
+    #[case::wide_two_height_btree2_v4(harnessv4, "btree2.2.txt", 32768)]
+    #[case::wide_two_height_btree2_v4(harnessv4, "btree3.txt", 1048576)]
+    #[case::wide_two_height_btree2_v4(harnessv4, "btree3.3.txt", 4194304)]
     #[case::btree_with_xattr(harness1k, "btree2_with_xattrs.txt", 65536)]
     #[case::reflink_a(harness4k, "reflink_a.txt", 16384)]
     #[case::reflink_b(harness4k, "reflink_b.txt", 16384)]
@@ -1143,7 +1190,7 @@ mod readdir {
             // The other metadata fields are checked in a separate test case.
             count += 1;
         }
-        assert_eq!(count, ents_per_dir_4k(d));
+        assert_eq!(count, ents_per_dir_shortnames(harness4k.path.as_path(), d));
     }
 
     /// A block directory with hash collisions
@@ -1172,11 +1219,12 @@ mod readdir {
     //
     // The 1k blocksize formatted golden image uses a different naming convention than the 4k image
     #[named]
-    #[apply(all_dir_types_1k)]
-    fn onek(harness1k: Harness, #[case] d: &str) {
+    #[apply(all_dir_types_longnames)]
+    fn longnames(#[case] h: fn() -> Harness, #[case] d: &str) {
         require_fusefs!();
 
-        let dpath = harness1k.d.path().join(d);
+        let harness = h();
+        let dpath = harness.d.path().join(d);
         let ents = std::fs::read_dir(dpath)
             .unwrap();
         let mut count = 0;
@@ -1190,16 +1238,17 @@ mod readdir {
             // The other metadata fields are checked in a separate test case.
             count += 1;
         }
-        assert_eq!(count, ents_per_dir_1k(d));
+        assert_eq!(count, ents_per_dir_longnames(harness.path.as_path(), d));
     }
 
     /// List a directory's contents with readdir
     #[named]
-    #[apply(all_dir_types_4k)]
-    fn fourk(harness4k: Harness, #[case] d: &str) {
+    #[apply(all_dir_types_shortnames)]
+    fn shortnames(#[case] h: fn() -> Harness, #[case] d: &str) {
         require_fusefs!();
 
-        let dpath = harness4k.d.path().join(d);
+        let harness = h();
+        let dpath = harness.d.path().join(d);
         let ents = std::fs::read_dir(dpath)
             .unwrap();
         let mut count = 0;
@@ -1213,7 +1262,7 @@ mod readdir {
             // The other metadata fields are checked in a separate test case.
             count += 1;
         }
-        assert_eq!(count, ents_per_dir_4k(d));
+        assert_eq!(count, ents_per_dir_shortnames(harness.path.as_path(), d));
     }
 
     /// List a directory's hidden contents with readdir
@@ -1221,12 +1270,23 @@ mod readdir {
     // unconditionally hides the hidden entries.
     #[named]
     #[rstest]
+    // Annoyingly rstest_reuse's "apply" attribute cannot be used more than once.  So we must copy
+    // the case definitions from all_dir_types_longnames and all_dir_types_shortnames
+    #[case::leaf(harness1k, "leaf")]
+    #[case::node1(harness1k, "node1")]
+    #[case::node3(harness1k, "node3")]
+    #[case::btree_2_with_xattrs(harness1k, "btree2.with-xattrs")]
+    #[case::btree_2_3(harness1k, "btree2.3")]
+    #[case::btree_3(harness1k, "btree3")]
+    #[case::v4_block(harnessv4, "block")]
+    #[case::v4_btree_2_2(harnessv4, "btree2.2")]
+    #[case::v4_btree_3(harnessv4, "btree3")]
     #[case::sf(harness4k, "sf")]
     #[case::block(harness4k, "block")]
     #[case::leaf(harness4k, "leaf")]
-    #[case::btree2_with_xattrs(harness1k, "btree2.with-xattrs")]
-    #[case::btree2_3(harness1k, "btree2.3")]
-    #[case::btree3(harness1k, "btree3")]
+    #[case::v4_sf(harnessv4, "sf")]
+    #[case::v4_leaf(harnessv4, "leaf")]
+    #[case::v4_node(harnessv4, "node")]
     fn dots(#[case] h: fn() -> Harness, #[case] d: &str) {
         use nix::{dir::Dir, fcntl::OFlag, sys::stat::Mode};
         require_fusefs!();
@@ -1271,10 +1331,13 @@ mod stat {
     // This may need to be updated whenever the golden image gets rebuilt.
     #[named]
     #[rstest]
-    fn file(harness4k: Harness) {
+    #[case::v4(harnessv4, 140898)]
+    #[case::v5(harness4k, 142530)]
+    fn file(#[case] h: fn() -> Harness, #[case] st_ino: libc::ino_t) {
         require_fusefs!();
 
-        let path = harness4k.d.path().join("files").join("hello.txt");
+        let harness = h();
+        let path = harness.d.path().join("files").join("hello.txt");
 
         // Due to the interaction of two bugs, we can't use std::fs::metadata here.
         // Instead, we'll use the lower-level nix::sys::stat::stat
@@ -1290,7 +1353,7 @@ mod stat {
         // greater than mtime.
         assert!(stat.st_ctime > stat.st_mtime || 
                 stat.st_ctime_nsec > stat.st_mtime_nsec);
-        assert_eq!(stat.st_ino, 142530);
+        assert_eq!(stat.st_ino, st_ino);
         assert_eq!(stat.st_size, 14);
         assert_eq!(stat.st_blksize, 4096);
         assert_eq!(stat.st_blocks, 1);

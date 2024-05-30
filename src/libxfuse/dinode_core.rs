@@ -91,57 +91,53 @@ mod constants {
     pub const XFS_DIFLAG2_BITTIME: u64 = 1 << 3;
 }
 
-#[derive(Debug, bincode::Decode)]
+#[derive(Debug)]
 #[cfg_attr(test, derive(Default))]
 pub struct DinodeCore {
-    pub di_magic: u16,
+    //_di_magic: u16,
     pub di_mode: u16,
     pub di_version: i8,
     pub di_format: XfsDinodeFmt,
-    _di_onlink: u16,
+    //_di_onlink: u16,
     pub di_uid: u32,
     pub di_gid: u32,
     pub di_nlink: u32,
-    _di_projid: u16,
-    _di_projid_hi: u16,
-    _di_pad: [u8; 6],
-    _di_flushiter: u16,
+    //_di_projid: u16,
+    //_di_projid_hi: u16,
+    //_di_pad: [u8; 6],
+    //_di_flushiter: u16,
     pub di_atime: XfsTimestamp,
     pub di_mtime: XfsTimestamp,
     pub di_ctime: XfsTimestamp,
     pub di_size: XfsFsize,
     pub di_nblocks: XfsRfsblock,
-    _di_extsize: XfsExtlen,
+    //_di_extsize: XfsExtlen,
     pub di_nextents: XfsExtnum,
     pub di_anextents: XfsAextnum,
     pub di_forkoff: u8,
     pub di_aformat: XfsDinodeFmt,
-    _di_dmevmask: u32,
-    _di_dmstate: u16,
-    _di_flags: u16,
+    //_di_dmevmask: u32,
+    //_di_dmstate: u16,
+    //_di_flags: u16,
     pub di_gen: u32,
-    _di_next_unlinked: u32,
+    //_di_next_unlinked: u32,
 
-    _di_crc: u32,
-    _di_changecount: u64,
-    _di_lsn: u64,
+    /* Version 5 file system (inode version 3) fields start here */
+    //_di_crc: u32,
+    //_di_changecount: u64,
+    //_di_lsn: u64,
     pub di_flags2: u64,
-    _di_cowextsize: u32,
-    _di_pad2: [u8; 12],
+    //_di_cowextsize: u32,
+    //_di_pad2: [u8; 12],
     pub di_crtime: XfsTimestamp,
     pub di_ino: u64,
-    _di_uuid: Uuid,
+    //_di_uuid: Uuid,
 }
 
 impl DinodeCore {
-    pub fn sanity(&self) {
-        assert_eq!(self.di_magic, XFS_DINODE_MAGIC,
-                   "Agi magic number is invalid");
-    }
-
     /// Compute the gap in bytes between the end of the keys and the start of the pointers, for
-    /// BTree-formatted inodes only.
-    pub const fn btree_ptr_gap(&self, inode_size: usize, bb_numrecs: u16) -> usize {
+    /// BTree-formatted inodes only, for the data fork.
+    pub const fn dfork_btree_ptr_gap(&self, inode_size: usize, bb_numrecs: u16) -> usize {
         debug_assert!(matches!(self.di_format, XfsDinodeFmt::Btree));
         // The XFS Algorithms and Data Structures document contains an error here.  It says that
         // the array of xfs_bmbt_ptr_t values immediately follows the array of xfs_bmbt_key_t
@@ -157,16 +153,36 @@ impl DinodeCore {
             // Round up to a multiple of 8
             let rem = space % 8;
             if rem == 0 { space } else { space + 8 - rem }
-         };
-        space -
-            BmdrBlock::SIZE -
-            bb_numrecs as usize * BmbtKey::SIZE -
-            /* XXX Why does it need this extra 4? */ 4
+        };
+        let gap = space - BmdrBlock::SIZE - bb_numrecs as usize * BmbtKey::SIZE;
+        // Round down to a multiple of 8
+        gap - gap % 8
+    }
+
+    /// Compute the gap in bytes between the end of the keys and the start of the pointers, for
+    /// BTree-formatted inodes only, for the attr fork.
+    pub const fn afork_btree_ptr_gap(&self, inode_size: usize, bb_numrecs: u16) -> usize {
+        debug_assert!(matches!(self.di_aformat, XfsDinodeFmt::Btree));
+        debug_assert!(self.di_forkoff != 0);
+        // The XFS Algorithms and Data Structures document, section 15.4, isn't really specific
+        // about where the pointers are located.  They appear to be halfway between the start of
+        // the attribute fork and the end of the inode, modulo some rounding.
+        let mut already = BmdrBlock::SIZE + bb_numrecs as usize * BmbtKey::SIZE;
+        if already % 8 > 0 {
+            already += 8 - already % 8
+        }
+        let mut attr_fork_ofs = self.literal_area_offset() + self.di_forkoff as usize * 8;
+        attr_fork_ofs -= attr_fork_ofs % 8;
+        let mut ptr_ofs = (inode_size - attr_fork_ofs) / 2 + attr_fork_ofs;
+        if ptr_ofs % 8 > 0 {
+            ptr_ofs += 8 - ptr_ofs % 8
+        }
+        ptr_ofs - attr_fork_ofs - already
     }
 
     pub const fn literal_area_offset(&self) -> usize {
         match self.di_version {
-            1..=2 => unimplemented!(),
+            1..=2 => 0x64,
             3 => 0xb0,
             _ => unreachable!()
         }
@@ -176,7 +192,9 @@ impl DinodeCore {
         let kind = get_file_type(FileKind::Mode(self.di_mode))?;
         // Special case for ino 1.  FUSE requires / to have inode 1, but XFS
         // does not.
-        assert!(ino == 1 || ino == self.di_ino);
+        if self.di_version >= 3 {
+            assert!(ino == 1 || ino == self.di_ino);
+        }
         Ok(FileAttr {
                 ino,
                 size: self.di_size as u64,
@@ -215,13 +233,107 @@ impl DinodeCore {
     }
 }
 
+impl Decode for DinodeCore {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let mut di_flags2 = 0;
+        let mut di_crtime: XfsTimestamp = Default::default();
+        let mut di_ino = 0;
+
+        let di_magic: u16 = Decode::decode(decoder)?;
+        assert_eq!(di_magic, XFS_DINODE_MAGIC, "Inode magic number is invalid");
+        let di_mode: u16 = Decode::decode(decoder)?;
+        let di_version: i8 = Decode::decode(decoder)?;
+        assert!(di_version == 2 || di_version == 3, "Only inode versions 2 and 3 are supported");
+        let di_format: XfsDinodeFmt = Decode::decode(decoder)?;
+        let _di_onlink: u16 = Decode::decode(decoder)?;
+        let di_uid: u32 = Decode::decode(decoder)?;
+        let di_gid: u32 = Decode::decode(decoder)?;
+        let di_nlink: u32 = Decode::decode(decoder)?;
+        let _di_projid: u16 = Decode::decode(decoder)?;
+        let _di_projid_hi: u16 = Decode::decode(decoder)?;
+        let _di_pad: [u8; 6] = Decode::decode(decoder)?;
+        let _di_flushiter: u16 = Decode::decode(decoder)?;
+        let di_atime: XfsTimestamp = Decode::decode(decoder)?;
+        let di_mtime: XfsTimestamp = Decode::decode(decoder)?;
+        let di_ctime: XfsTimestamp = Decode::decode(decoder)?;
+        let di_size: XfsFsize = Decode::decode(decoder)?;
+        let di_nblocks: XfsRfsblock = Decode::decode(decoder)?;
+        let _di_extsize: XfsExtlen = Decode::decode(decoder)?;
+        let di_nextents: XfsExtnum = Decode::decode(decoder)?;
+        let di_anextents: XfsAextnum = Decode::decode(decoder)?;
+        let di_forkoff: u8 = Decode::decode(decoder)?;
+        let di_aformat: XfsDinodeFmt = Decode::decode(decoder)?;
+        let _di_dmevmask: u32 = Decode::decode(decoder)?;
+        let _di_dmstate: u16 = Decode::decode(decoder)?;
+        let _di_flags: u16 = Decode::decode(decoder)?;
+        let di_gen: u32 = Decode::decode(decoder)?;
+        let _di_next_unlinked: u32 = Decode::decode(decoder)?;
+        if di_version >= 3 {
+            let _di_crc: u32 = Decode::decode(decoder)?;
+            let _di_changecount: u64 = Decode::decode(decoder)?;
+            let _di_lsn: u64 = Decode::decode(decoder)?;
+            di_flags2 = Decode::decode(decoder)?;
+            let _di_cowextsize: u32 = Decode::decode(decoder)?;
+            let _di_pad2: [u8; 12] = Decode::decode(decoder)?;
+            di_crtime = Decode::decode(decoder)?;
+            di_ino = Decode::decode(decoder)?;
+            let _di_uuid: Uuid = Decode::decode(decoder)?;
+        }
+
+        Ok(DinodeCore {
+            di_mode,
+            di_version,
+            di_format,
+            di_uid,
+            di_gid,
+            di_nlink,
+            di_atime,
+            di_mtime,
+            di_ctime,
+            di_size,
+            di_nblocks,
+            di_nextents,
+            di_anextents,
+            di_forkoff,
+            di_aformat,
+            di_gen,
+            di_flags2,
+            di_crtime,
+            di_ino,
+        })
+    }
+}
+impl_borrow_decode!(DinodeCore);
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     use rstest::rstest;
 
-    /// Test the btree_ptr_gap function against data from real live file systems.  The XFS
+    /// Test the afork_btree_ptr_gap function against data from real live file systems.  The XFS
+    /// Algorithms & Data Structures book does not accurately document this gap.
+    #[rstest]
+    #[case(512, 24, 3, 1, 56)]
+    #[case(512, 24, 3, 5, 24)]
+    #[case(256, 15, 2, 1, 8)]
+    fn afork_btree_ptr_gap(
+        #[case] inode_size: usize,
+        #[case] di_forkoff: u8,
+        #[case] di_version: i8,
+        #[case] bb_numrecs: u16,
+        #[case] gap: usize)
+    {
+        let dic = DinodeCore {
+            di_forkoff,
+            di_version,
+            di_aformat: XfsDinodeFmt::Btree,
+            .. Default::default()
+        };
+        assert_eq!(dic.afork_btree_ptr_gap(inode_size, bb_numrecs), gap);
+    }
+
+    /// Test the dfork_btree_ptr_gap function against data from real live file systems.  The XFS
     /// Algorithms & Data Structures book does not accurately document this gap.
     #[rstest]
     #[case(512, 0, 3, 1, 152)]
@@ -230,10 +342,13 @@ mod tests {
     #[case(512, 0, 3, 2, 144)]
     #[case(512, 24, 3, 9, 16)]
     #[case(512, 37, 3, 2, 128)]
+    #[case(256, 0, 2, 2, 56)]
+    #[case(256, 0, 2, 1, 64)]
+    #[case(256, 15, 2, 1, 48)]
     #[case(2048, 0, 3, 1, 920)]
     #[case(2048, 0, 3, 3, 904)]
     #[case(1024, 0, 3, 7, 360)]
-    fn btree_ptr_gap(
+    fn dfork_btree_ptr_gap(
         #[case] inode_size: usize,
         #[case] di_forkoff: u8,
         #[case] di_version: i8,
@@ -246,6 +361,6 @@ mod tests {
             di_format: XfsDinodeFmt::Btree,
             .. Default::default()
         };
-        assert_eq!(dic.btree_ptr_gap(inode_size, bb_numrecs), gap);
+        assert_eq!(dic.dfork_btree_ptr_gap(inode_size, bb_numrecs), gap);
     }
 }

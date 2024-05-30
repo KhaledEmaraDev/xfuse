@@ -37,12 +37,13 @@ use tracing::warn;
 
 use super::bmbt_rec::{BmbtRec, Bmx};
 use super::definitions::*;
-use super::dir3::{Dir2LeafEntry, Dir3, Dir3LeafHdr, XfsDir2Dataptr};
+use super::dir3::{Dir2LeafEntry, Dir3, Dir2LeafHdr, Dir3LeafHdr, XfsDir2Dataptr};
 use super::sb::Sb;
+use super::utils;
 
 #[derive(Debug)]
 struct Dir2LeafDisk {
-    pub hdr: Dir3LeafHdr,
+    // hdr: either Dir2LeafHdr or Dir3LeafHdr
     pub ents: Vec<Dir2LeafEntry>,
     // bests: not needed for a read-only implementation of XFS
     // tail:  not needed for a read-only implementation of XFS
@@ -60,18 +61,26 @@ impl Dir2LeafDisk {
         let config = bincode::config::standard()
             .with_big_endian()
             .with_fixed_int_encoding();
+        let magic = utils::decode(&raw[8..]).unwrap().0;
         let reader = bincode::de::read::SliceReader::new(&raw[..]);
         let mut decoder = bincode::de::DecoderImpl::new(reader, config);
-        let hdr = Dir3LeafHdr::decode(&mut decoder).unwrap();
-        assert_eq!(hdr.info.magic, XFS_DIR3_LEAF1_MAGIC,
-            "bad magic! expected {:#x} but found {:#x}", XFS_DIR3_LEAF1_MAGIC, hdr.info.magic);
+        let count: u16 = match magic {
+            XFS_DIR2_LEAF1_MAGIC => {
+                let hdr = Dir2LeafHdr::decode(&mut decoder).unwrap();
+                hdr.count
+            },
+            XFS_DIR3_LEAF1_MAGIC => {
+                let hdr = Dir3LeafHdr::decode(&mut decoder).unwrap();
+                hdr.count
+            }
+            _ => panic!("Unexpected magic {:#x}", magic)
+        };
 
-        let ents = (0..hdr.count).map(|_| {
+        let ents = (0..count).map(|_| {
             Dir2LeafEntry::decode(&mut decoder).unwrap()
         }).collect::<Vec<_>>();
 
         Dir2LeafDisk {
-            hdr,
             ents,
         }
     }
@@ -99,7 +108,6 @@ impl Dir2Leaf {
 
         let leaf_size = (leaf_extent.br_blockcount as usize) << superblock.sb_blocklog;
         let leaf = Dir2LeafDisk::from(buf_reader, offset, leaf_size);
-        assert_eq!(leaf.hdr.info.magic, XFS_DIR3_LEAF1_MAGIC);
 
         let blocks = RefCell::new(Vec::new());
 

@@ -38,7 +38,7 @@ use bincode::de::read::Reader;
 use super::{
     attr::{Attr, AttrLeafblock},
     btree::{Btree, BtreeRoot},
-    definitions::{XFS_DA3_NODE_MAGIC, XFS_ATTR3_LEAF_MAGIC, XfsDablk, XfsFsblock},
+    definitions::{XFS_DA_NODE_MAGIC, XFS_DA3_NODE_MAGIC, XFS_ATTR_LEAF_MAGIC, XFS_ATTR3_LEAF_MAGIC, XfsDablk, XfsFsblock},
     da_btree::{hashname, XfsDa3Intnode},
     sb::Sb,
     utils
@@ -84,8 +84,10 @@ impl AttrBtreeBlock0 {
         buf_reader.fill_buf().unwrap();
         let magic: u16 = utils::decode(&buf_reader.peek_read(10).unwrap()[8..]).unwrap().0;
         match magic {
-            XFS_DA3_NODE_MAGIC => AttrBtreeBlock0::Node(XfsDa3Intnode::from(buf_reader)),
-            XFS_ATTR3_LEAF_MAGIC => AttrBtreeBlock0::Leaf,
+            XFS_DA_NODE_MAGIC | XFS_DA3_NODE_MAGIC => {
+                AttrBtreeBlock0::Node(XfsDa3Intnode::from(buf_reader))
+            },
+            XFS_ATTR_LEAF_MAGIC | XFS_ATTR3_LEAF_MAGIC => AttrBtreeBlock0::Leaf,
             _ => panic!("Unexpected magic value {:#x}", magic)
         }
     }
@@ -108,6 +110,7 @@ impl AttrBtree {
         let fsblk = btree.map_block(buf_reader.by_ref(), 0).unwrap().0.unwrap();
         buf_reader.seek(SeekFrom::Start(sb.fsb_to_offset(fsblk))).unwrap();
 
+        buf_reader.fill_buf().unwrap();
         let node = AttrBtreeBlock0::new(buf_reader.by_ref());
 
         Self {
@@ -158,7 +161,7 @@ impl Attr for AttrBtree {
             loop {
                 let leaf = self.read_leaf(buf_reader.by_ref(), super_block, dablk).unwrap();
                 total_size += leaf.get_total_size();
-                dablk = leaf.hdr.info.forw;
+                dablk = leaf.hdr.forw;
                 if dablk == 0 {
                     break;
                 }
@@ -180,7 +183,7 @@ impl Attr for AttrBtree {
         loop {
             let leaf = self.read_leaf(buf_reader.by_ref(), super_block, dablk).unwrap();
             (*leaf).list(&mut list);
-            dablk = leaf.hdr.info.forw;
+            dablk = leaf.hdr.forw;
             if dablk == 0 {
                 break;
             }

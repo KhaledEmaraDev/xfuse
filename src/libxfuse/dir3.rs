@@ -32,7 +32,7 @@ use std::io::{BufRead, Seek};
 use std::ops::{Deref, Range};
 use std::os::unix::ffi::OsStringExt;
 
-use super::da_btree::{XfsDa3Blkinfo, hashname, XfsDa3Intnode};
+use super::da_btree::{XfsDaBlkinfo, XfsDa3Blkinfo, hashname, XfsDa3Intnode};
 use super::definitions::*;
 use super::sb::Sb;
 use super::utils::{FileKind, Uuid, decode, get_file_type};
@@ -88,6 +88,16 @@ pub struct Dir2DataFree {
 
 impl Dir2DataFree {
     pub const SIZE: u64 = 4;
+}
+
+#[derive(Debug, Decode)]
+pub struct Dir2DataHdr {
+    pub magic: u32,
+    _best_free: [Dir2DataFree; constants::XFS_DIR2_DATA_FD_COUNT],
+}
+
+impl Dir2DataHdr {
+    pub const SIZE: u64 = 4 + constants::XFS_DIR2_DATA_FD_COUNT as u64 * Dir2DataFree::SIZE;
 }
 
 #[derive(Debug, Decode)]
@@ -160,6 +170,13 @@ impl Decode for Dir2DataUnused {
 }
 
 #[derive(Debug, Decode)]
+pub struct Dir2LeafHdr {
+    info: XfsDaBlkinfo,
+    pub count: u16,
+    _stale: u16,
+}
+
+#[derive(Debug, Decode)]
 pub struct Dir3LeafHdr {
     pub info: XfsDa3Blkinfo,
     pub count: u16,
@@ -180,7 +197,7 @@ impl Dir2LeafEntry {
 
 #[derive(Debug)]
 pub struct Dir2LeafNDisk {
-    pub hdr: Dir3LeafHdr,
+    forw: u32,
     pub ents: Vec<Dir2LeafEntry>,
 }
 
@@ -196,16 +213,25 @@ impl Dir2LeafNDisk {
 
 impl Decode for Dir2LeafNDisk {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let hdr: Dir3LeafHdr = Decode::decode(decoder)?;
+        let magic: u16 = decode(&decoder.reader().peek_read(10).unwrap()[8..])?.0;
+        let (count, forw) = match magic {
+            XFS_DIR2_LEAFN_MAGIC => {
+                let hdr: Dir2LeafHdr = Decode::decode(decoder)?;
+                (hdr.count, hdr.info.forw)
+            },
+            XFS_DIR3_LEAFN_MAGIC => {
+                let hdr: Dir3LeafHdr = Decode::decode(decoder)?;
+                (hdr.count, hdr.info.forw)
+            }
+            _ => panic!("Unexpected magic {:#x}", magic)
+        };
         let mut ents = Vec::<Dir2LeafEntry>::new();
-        for _i in 0..hdr.count {
+        for _i in 0..count {
             let leaf_entry: Dir2LeafEntry = Decode::decode(decoder)?;
             ents.push(leaf_entry);
         }
-        assert_eq!(hdr.info.magic, XFS_DIR3_LEAFN_MAGIC,
-            "bad magic! expected {:#x} but found {:#x}", XFS_DIR3_LEAFN_MAGIC, hdr.info.magic);
 
-        Ok(Dir2LeafNDisk { hdr, ents })
+        Ok(Dir2LeafNDisk { forw, ents })
     }
 }
 
@@ -218,14 +244,14 @@ enum Leaf {
 
 impl Leaf {
     fn open(raw: &[u8]) -> Self {
-        let leaf_blk_info: XfsDa3Blkinfo = decode(raw).map_err(|_| libc::EIO).unwrap().0;
-        match leaf_blk_info.magic {
-            XFS_DA3_NODE_MAGIC => {
+        let magic: u16 = decode(&raw[8..]).unwrap().0;
+        match magic {
+            XFS_DA_NODE_MAGIC | XFS_DA3_NODE_MAGIC => {
                 let (leaf_btree, _) = decode::<XfsDa3Intnode>(raw).map_err(|_| libc::EIO).unwrap();
-                assert_eq!(leaf_btree.hdr.info.magic, XFS_DA3_NODE_MAGIC);
+                assert!(leaf_btree.magic == XFS_DA3_NODE_MAGIC || leaf_btree.magic == XFS_DA_NODE_MAGIC);
                 Self::Btree(leaf_btree)
             },
-            XFS_DIR3_LEAFN_MAGIC => {
+            XFS_DIR2_LEAFN_MAGIC | XFS_DIR3_LEAFN_MAGIC => {
                 Self::LeafN(decode(raw).unwrap().0)
             },
             magic => panic!("Bad magic in Leaf block! {:#x}", magic),
@@ -295,7 +321,7 @@ impl<'a, D: NodeLikeDir, R: Reader + BufRead + Seek + 'a> Iterator for NodeLikeA
                     // frequently, since the hash is only 32 bits.  Tragically, the colliding
                     // entries were located in different leaf blocks.
                     // Traverse the forw pointer
-                    let forw = self.leaf.hdr.info.forw;
+                    let forw = self.leaf.forw;
                     let mut buf_reader = self.brrc.borrow_mut();
                     let sb = SUPERBLOCK.get().unwrap();
                     let raw = match self.dir.read_dblock(buf_reader.by_ref(), sb, forw) {
@@ -409,7 +435,12 @@ pub trait Dir3 {
             let mut blk_offset = if offset & dblkmask > 0 {
                 (offset & dblkmask) as usize
             } else {
-                Dir3DataHdr::SIZE as usize
+                let magic: u32 = decode(&raw[..]).unwrap().0;
+                match magic {
+                    XFS_DIR2_BLOCK_MAGIC | XFS_DIR2_DATA_MAGIC => Dir2DataHdr::SIZE as usize,
+                    XFS_DIR3_BLOCK_MAGIC | XFS_DIR3_DATA_MAGIC => Dir3DataHdr::SIZE as usize,
+                    _ => panic!("Unknown magic number for block directory {:#x}", magic)
+                }
             };
             while blk_offset < dblksize as usize {
                 if blk_offset >= raw.len() {

@@ -98,7 +98,7 @@ impl Attr for AttrNode {
             while dablk != 0 {
                 let leaf = self.read_leaf(buf_reader.by_ref(), super_block, dablk).unwrap();
                 total_size += leaf.get_total_size();
-                dablk = leaf.hdr.info.forw;
+                dablk = leaf.hdr.forw;
             }
 
             self.total_size = i64::from(total_size);
@@ -119,7 +119,7 @@ impl Attr for AttrNode {
         while dablk != 0 {
             let leaf = self.read_leaf(buf_reader.by_ref(), super_block, dablk).unwrap();
             (*leaf).list(&mut list);
-            dablk = leaf.hdr.info.forw;
+            dablk = leaf.hdr.forw;
         }
 
         list

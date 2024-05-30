@@ -29,6 +29,7 @@ use std::{
     cell::RefCell,
     collections::{BTreeMap, btree_map::Entry},
     io::{prelude::*, SeekFrom},
+    marker::PhantomData
 };
 
 use bincode::{
@@ -41,24 +42,52 @@ use super::utils::Uuid;
 
 use super::{
     bmbt_rec::{Bmx, BmbtRec},
-    definitions::{XfsFileoff, XfsFsblock},
+    definitions::{XfsFileoff, XfsFsblock, XFS_BMAP_MAGIC, XFS_BMAP_CRC_MAGIC},
     utils::{decode, decode_from},
     volume::SUPERBLOCK
 };
 
-#[derive(Clone, Copy, Debug, Decode)]
+#[derive(Clone, Copy, Debug)]
 pub struct BtreeBlockHdr<T: PrimInt + Unsigned> {
-    _bb_magic: u32,
+    bb_magic: u32,
     pub bb_level: u16,
     pub bb_numrecs: u16,
-    _bb_leftsib: T,
-    _bb_rightsib: T,
-    _bb_blkno: u64,
-    _bb_lsn: u64,
-    pub bb_uuid: Uuid,
-    _bb_owner: u64,
-    _bb_crc: u32,
-    _bb_pad: u32,
+    //_bb_leftsib: T,
+    //_bb_rightsib: T,
+    _phantom: PhantomData<T>,
+
+    // Below fields are for V5 file systems only
+    //_bb_blkno: u64,
+    //_bb_lsn: u64,
+    //_bb_uuid: Uuid,
+    //_bb_owner: u64,
+    //_bb_crc: u32,
+    //_bb_pad: u32,
+}
+
+impl<T: Decode + PrimInt + Unsigned> Decode for BtreeBlockHdr<T> {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let bb_magic: u32 = Decode::decode(decoder)?;
+        let bb_level =  Decode::decode(decoder)?;
+        let bb_numrecs =  Decode::decode(decoder)?;
+        let _bb_leftsib: T =  Decode::decode(decoder)?;
+        let _bb_rightsib: T =  Decode::decode(decoder)?;
+        match bb_magic {
+            XFS_BMAP_MAGIC => {},
+            XFS_BMAP_CRC_MAGIC => {
+                let _bb_blkno: u64 = Decode::decode(decoder)?;
+                let _bb_lsn: u64 = Decode::decode(decoder)?;
+                let bb_uuid: Uuid = Decode::decode(decoder)?;
+                let super_block = SUPERBLOCK.get().unwrap();
+                assert_eq!(bb_uuid, super_block.sb_uuid);
+                let _bb_owner: u64 = Decode::decode(decoder)?;
+                let _bb_crc: u32 = Decode::decode(decoder)?;
+                let _bb_pad: u32 = Decode::decode(decoder)?;
+            },
+            _ => panic!("Unexpected magic value {:#x}", bb_magic)
+        };
+        Ok(BtreeBlockHdr{bb_magic, bb_level, bb_numrecs, _phantom: PhantomData})
+    }
 }
 
 #[derive(Debug, Clone, Decode)]
@@ -122,7 +151,6 @@ pub trait Btree: BtreePriv {
                             .map_err(|e| e.raw_os_error().unwrap())?;
                         let bti: BtreeIntermediate = decode_from(buf_reader.by_ref())
                             .map_err(|_| libc::EDESTADDRREQ)?;
-                        assert_eq!(bti.hdr.bb_uuid, super_block.sb_uuid);
                         ve.insert(bti).map_block(buf_reader, logical_block)
                     }
                     Entry::Occupied(oe) => {
@@ -143,7 +171,6 @@ pub trait Btree: BtreePriv {
                             .map_err(|e| e.raw_os_error().unwrap())?;
                         let btl: BtreeLeaf = decode_from(buf_reader.by_ref())
                             .map_err(|_| libc::EDESTADDRREQ)?;
-                        assert_eq!(btl.hdr.bb_uuid, super_block.sb_uuid);
                         Ok(ve.insert(btl).get_extent(logical_block))
                     }
                     Entry::Occupied(oe) => {
@@ -262,9 +289,13 @@ impl Decode for BtreeIntermediate {
         }
 
         // The XFS Algorithms & Data Structures document section
-        // 16.2 says that the pointers start at offset 0x808 within the block.  But it looks to me
-        // like they really start at offset 0x820.
-        ofs = blocksize / 2 + 0x20;
+        // 16.2 says that the pointers start at offset 0x808 within the block.  But for V5 file
+        // systems it looks to me like they really start at offset 0x820.
+        ofs = match hdr.bb_magic {
+           XFS_BMAP_MAGIC => blocksize / 2 + 0x08,
+           XFS_BMAP_CRC_MAGIC =>  blocksize / 2 + 0x20,
+           _ => unreachable!()
+        };
         let mut ptrs = Vec::with_capacity(usize::from(hdr.bb_numrecs));
         for _ in 0..hdr.bb_numrecs {
             let (ptr, ptrlen) = decode(&raw[ofs..])?;
@@ -285,7 +316,7 @@ impl Decode for BtreeIntermediate {
 /// A Leaf Btree.
 #[derive(Debug)]
 struct BtreeLeaf {
-    hdr: XfsBmbtLblock,
+    // hdr: XfsBmbtLblock,
     bmx: Bmx,
 }
 
@@ -308,7 +339,6 @@ impl Decode for BtreeLeaf {
         }).collect::<Vec<BmbtRec>>());
 
         Ok(Self {
-            hdr,
             bmx
         })
     }
