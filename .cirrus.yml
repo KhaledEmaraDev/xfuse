@@ -6,7 +6,7 @@ task:
   env:
     HOME: /tmp # cargo cache needs it
   freebsd_instance:
-    image: freebsd-13-2-release-amd64
+    image: freebsd-13-3-release-amd64
   matrix:
     - name: FreeBSD stable
       env:
@@ -37,7 +37,8 @@ task:
   audit_script:
     - . $HOME/.cargo/env
     - if [ "$VERSION" = "nightly" ]; then
-    -   pkg install -y cargo-audit
+    # install ca_root_nss due to https://github.com/rustsec/rustsec/issues/1137
+    -   pkg install -y ca_root_nss cargo-audit
     -   cargo audit
     - fi
   before_cache_script: rm -rf $HOME/.cargo/registry/index
