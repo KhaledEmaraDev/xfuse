@@ -136,29 +136,7 @@ impl Dinode {
                         keys.push(BmbtKey::decode(&mut decoder).unwrap())
                     }
 
-                    // The XFS Algorithms and Data Structures document contains
-                    // an error here.  It says that the array of xfs_bmbt_ptr_t
-                    // values immediately follows the array of xfs_bmbt_key_t
-                    // values, and the size of both arrays is specified by
-                    // bb_numrecs.  HOWEVER, there is actually a gap.  The space
-                    // from the end of bmbt to the beginning of the attribute
-                    // fork is split in half.  Half for keys and half for
-                    // pointers.  The remaining space is padded with zeros.  the
-                    // beginning of the attribute fork is given as di_forkoff *
-                    // 8 bytes from the start of the literal area, which is
-                    // where BmdrBlock is located.
-                    let space = if di_core.di_forkoff == 0 {
-                        (usize::from(superblock.sb_inodesize) - LITERAL_AREA_OFFSET) / 2
-                    } else {
-                        let space = usize::from(di_core.di_forkoff) * 8 / 2;
-                        // Round up to a multiple of 8
-                        let rem = space % 8;
-                        if rem == 0 { space } else { space + 8 - rem }
-                    };
-                    let gap = space -
-                        BmdrBlock::SIZE -
-                        bmbt.bb_numrecs as usize * BmbtKey::SIZE -
-                        /* XXX Why does it need this extra 4? */ 4;
+                    let gap = di_core.btree_ptr_gap(usize::from(superblock.sb_inodesize), bmbt.bb_numrecs);
                     decoder.reader().consume(gap as usize);
 
                     let mut pointers = Vec::<XfsBmbtPtr>::new();
@@ -194,29 +172,9 @@ impl Dinode {
                         keys.push(BmbtKey::decode(&mut decoder).unwrap());
                     }
 
-                    // The XFS Algorithms and Data Structures document contains
-                    // an error here.  It says that the pointers start
-                    // immediately after the keys, and the size of each array is
-                    // given by bb_numrecs.  HOWEVER, there is actually a gap.
-                    // The space from the end of bmbt to the end of the inode is
-                    // divided by half.  Half for keys and half for pointers,
-                    // even if only one of each are allocated.  The remaining
-                    // space is padded with zeros.
-                    let space = if di_core.di_forkoff == 0 {
-                        (usize::from(superblock.sb_inodesize) - LITERAL_AREA_OFFSET) / 2
-                    } else {
-                        let space = usize::from(di_core.di_forkoff) * 8 / 2;
-                        // Round up to a multiple of 8.  This is probably necessary, but I've never
-                        // seen a directory like this in practice.
-                        let rem = space % 8;
-                        if rem == 0 { space } else { space + 8 - rem }
-                    };
-                    let gap = space -
-                        BmdrBlock::SIZE -
-                        bmbt.bb_numrecs as usize * BmbtKey::SIZE -
-                        /* XXX Why does it need this extra 4? */ 4;
-
+                    let gap = di_core.btree_ptr_gap(usize::from(superblock.sb_inodesize), bmbt.bb_numrecs);
                     decoder.reader().consume(gap as usize);
+
                     let mut pointers = Vec::<XfsBmbtPtr>::new();
                     for _i in 0..bmbt.bb_numrecs {
                         let pointer = u64::decode(&mut decoder).unwrap();
