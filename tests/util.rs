@@ -1,10 +1,7 @@
 use std::{
-    ffi::OsStr,
     fmt,
     fs,
-    io,
-    os::unix::ffi::OsStrExt,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::Command,
     thread::sleep,
     time::{Duration, Instant},
@@ -65,36 +62,6 @@ macro_rules! require_root {
                 .unwrap();
             return;
         }
-    }
-}
-
-/// A file-backed md(4) device.
-pub struct Md(pub PathBuf);
-impl Md {
-    pub fn new(filename: &Path) -> io::Result<Self> {
-        let output = Command::new("mdconfig")
-            .args(["-a", "-t",  "vnode", "-f"])
-            .arg(filename)
-            .output()?;
-        // Strip the trailing "\n"
-        let l = output.stdout.len() - 1;
-        let mddev = OsStr::from_bytes(&output.stdout[0..l]);
-        let pb = Path::new("/dev").join(mddev);
-        Ok(Self(pb))
-    }
-}
-impl AsRef<Path> for Md {
-    fn as_ref(&self) -> &Path {
-        self.0.as_path()
-    }
-}
-impl Drop for Md {
-    fn drop(&mut self) {
-        Command::new("mdconfig")
-            .args(["-d", "-u"])
-            .arg(&self.0)
-            .output()
-            .expect("failed to deallocate md(4) device");
     }
 }
 

@@ -19,7 +19,7 @@ use xattr::FileExt;
 mod util {
     include!("../tests/util.rs");
 }
-use util::{GOLDEN1K, GOLDEN4K, Md, waitfor};
+use util::{GOLDEN1K, GOLDEN4K, waitfor};
 
 pub struct Gnop {
     path: PathBuf
@@ -257,8 +257,8 @@ fn main() {
     println!("{:=^19} {:=^20} {:=^20}", "", "", "");
 
     for bench in BENCHES {
-        let md = Md::new(bench.image()).unwrap();
-        let gnop = Gnop::new(md.as_ref()).unwrap();
+        let md = mdconfig::Builder::vnode(bench.image()).create().unwrap();
+        let gnop = Gnop::new(md.path()).unwrap();
         let d = tempdir().unwrap();
 
         let mut child = Command::cargo_bin("xfs-fuse").unwrap()
