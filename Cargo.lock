@@ -446,9 +446,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.147"
+version = "0.2.155"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4668fb0ea861c1df094127ac5f1da3409a82116a4ba74fca2e58ef927159bb3"
+checksum = "97b3888a4aecf77e811145cadf6eef5901f4782c53886191b2f693f24761847c"
 
 [[package]]
 name = "linux-raw-sys"
@@ -469,6 +469,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8263075bb86c5a1b1427b5ae862e8889656f126e9f77c484496e8b47cf5c5558"
 dependencies = [
  "regex-automata 0.1.10",
+]
+
+[[package]]
+name = "mdconfig"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cff02ee7b2a0815081bdc7c3dc00681c30577072db35787ea392aef8857fe34b"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "nix",
 ]
 
 [[package]]
@@ -1221,6 +1232,7 @@ dependencies = [
  "fuser",
  "lazy_static",
  "libc",
+ "mdconfig",
  "nix",
  "num-derive",
  "num-traits",

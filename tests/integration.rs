@@ -24,7 +24,7 @@ use rstest_reuse::{self, apply, template};
 use tempfile::{tempdir, TempDir};
 
 mod util;
-use util::{GOLDEN1K, GOLDEN4K, GOLDENPREALLOCATED, GOLDENV4, Md, waitfor};
+use util::{GOLDEN1K, GOLDEN4K, GOLDENPREALLOCATED, GOLDENV4, waitfor};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 struct ExpectedXattr {
@@ -285,16 +285,16 @@ mod dev {
     use super::*;
 
     struct MdHarness {
-        _md: Md,
+        _md: mdconfig::Md,
         d: TempDir,
         child: Child
     }
 
     fn mdharness(image: &Path) -> MdHarness {
-        let md = Md::new(image).unwrap();
+        let md = mdconfig::Builder::vnode(image).create().unwrap();
         let d = tempdir().unwrap();
         let child = Command::cargo_bin("xfs-fuse").unwrap()
-            .arg(md.0.as_path())
+            .arg(md.path())
             .arg(d.path())
             .spawn()
             .unwrap();
