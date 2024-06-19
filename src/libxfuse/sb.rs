@@ -98,7 +98,51 @@ impl SbFeatures2 {
     pub const fn crc(&self) -> bool {
         self.contains(SbFeatures2::Crc)
     }
+    pub const fn ftype(&self) -> bool {
+        self.contains(SbFeatures2::Ftype)
+    }
 }
+
+bitflags! {
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct SbFeaturesIncompat: u32 {
+        const Ftype = constants::XFS_SB_FEAT_INCOMPAT_FTYPE;
+        const SpInodes = constants::XFS_SB_FEAT_INCOMPAT_SPINODES;
+        const MetaUuid = constants::XFS_SB_FEAT_INCOMPAT_META_UUID;
+        const Bigtime = constants::XFS_SB_FEAT_INCOMPAT_BIGTIME;
+        const NeedsRepair = constants::XFS_SB_FEAT_INCOMPAT_NEEDSREPAIR;
+        const NrExt64 = constants::XFS_SB_FEAT_INCOMPAT_NREXT64;
+    }
+}
+
+impl SbFeaturesIncompat {
+    pub const fn ftype(&self) -> bool {
+        self.contains(SbFeaturesIncompat::Ftype)
+    }
+    pub const fn sparse_inodes(&self) -> bool {
+        self.contains(SbFeaturesIncompat::SpInodes)
+    }
+    pub const fn meta_uuid(&self) -> bool {
+        self.contains(SbFeaturesIncompat::MetaUuid)
+    }
+    pub const fn bigtime(&self) -> bool {
+        self.contains(SbFeaturesIncompat::Bigtime)
+    }
+    pub const fn needs_repair(&self) -> bool {
+        self.contains(SbFeaturesIncompat::NeedsRepair)
+    }
+    pub const fn large_extent_counters(&self) -> bool {
+        self.contains(SbFeaturesIncompat::NrExt64)
+    }
+}
+
+bitflags! {
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct SbFeaturesLogIncompat: u32 {}
+}
+
 
 #[derive(Clone, Copy, Debug)]
 pub struct Sb {
@@ -146,11 +190,11 @@ pub struct Sb {
     // sb_logsectlog: u8,
     // sb_logsectsize: u16,
     // sb_logsunit: u32,
-    // sb_features2: u32,
+    sb_features2: SbFeatures2,
     // sb_bad_features2: u32,
     // sb_features_compat: u32,
     // sb_features_ro_compat: u32,
-    // sb_features_incompat: u32,
+    sb_features_incompat: SbFeaturesIncompat,
     // sb_features_log_incompat: u32,
 }
 
@@ -216,8 +260,16 @@ impl Sb {
         /* Version 5 superblock features */
         let _sb_features_compat = buf_reader.read_u32::<BigEndian>().unwrap();
         let _sb_features_ro_compat = buf_reader.read_u32::<BigEndian>().unwrap();
-        let _sb_features_incompat = buf_reader.read_u32::<BigEndian>().unwrap();
-        let _sb_features_log_incompat = buf_reader.read_u32::<BigEndian>().unwrap();
+        let incompat_raw = buf_reader.read_u32::<BigEndian>().unwrap();
+        let sb_features_incompat = SbFeaturesIncompat::from_bits(incompat_raw)
+            .unwrap_or_else(||
+                panic!("Unknown value in sb_features_incompat: {:?}", incompat_raw)
+            );
+        let log_incompat_raw = buf_reader.read_u32::<BigEndian>().unwrap();
+        let _sb_features_log_incompat = SbFeaturesLogIncompat::from_bits(log_incompat_raw)
+            .unwrap_or_else(||
+                panic!("Unknown value in sb_features_log_incompat: {:?}", log_incompat_raw)
+            );
 
         buf_reader.seek(SeekFrom::Start(0)).unwrap();
 
@@ -248,8 +300,17 @@ impl Sb {
         if sb_features2.crc() && digest.finalize() != sb_crc {
             panic!("Crc check failed!");
         }
+        if sb_features_incompat.meta_uuid() {
+            panic!("The Metadata UUID feature is not supported");
+        }
+        if sb_features_incompat.needs_repair() {
+            panic!("The NeedsRepair feature is not supported");
+        }
+        if sb_features_incompat.large_extent_counters() {
+            panic!("The Large Extent Counters feature is not supported");
+        }
 
-        Sb {
+        let sb = Sb {
             sb_blocksize,
             sb_dblocks,
             sb_uuid,
@@ -266,7 +327,13 @@ impl Sb {
             sb_ifree,
             sb_fdblocks,
             sb_dirblklog,
+            sb_features2,
+            sb_features_incompat
+        };
+        if !sb.has_ftype() {
+            panic!("File systems without directory ftype are not yet supported");
         }
+        sb
     }
 
     #[inline]
@@ -291,5 +358,12 @@ impl Sb {
     /// Given a file system block number, calculate its disk byte offset
     pub fn fsb_to_offset(&self, fsbno: XfsFsblock) -> u64 {
         self.fsb_to_daddr(fsbno) << Self::BBSHIFT
+    }
+
+    /// Does this file system record file type in its directory inodes?
+    pub fn has_ftype(&self) -> bool {
+        // Though it isn't documented, it seems that the ftype bit was originally part of the
+        // sb_features2 field, and then later moved to the sb_features_incompat field.
+        self.sb_features2.ftype() || self.sb_features_incompat.ftype()
     }
 }
