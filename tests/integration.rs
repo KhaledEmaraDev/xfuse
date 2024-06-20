@@ -24,7 +24,8 @@ use rstest_reuse::{self, apply, template};
 use tempfile::{tempdir, TempDir};
 
 mod util;
-use util::{GOLDEN1K, GOLDEN4K, GOLDENPREALLOCATED, GOLDENV4, waitfor};
+use util::{GOLDEN1K, GOLDEN4K, GOLDENPREALLOCATED, GOLDENV4, GOLDEN_NOFTYPE,
+    waitfor};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 struct ExpectedXattr {
@@ -89,6 +90,7 @@ fn ents_per_dir_longnames(path: &Path, d: &str) -> usize {
         ("xfsv4.img", "block") => 4,
         ("xfsv4.img", "btree2.2") => 2048,
         ("xfsv4.img", "btree3") => 16384,
+        ("xfs_noftype.img", "block") => 4,
         x => panic!("{:?} not implemented", x)
     }
 }
@@ -154,6 +156,11 @@ fn harnessv4() -> Harness {
     harness(GOLDENV4.as_path())
 }
 
+#[fixture]
+fn harness_noftype() -> Harness {
+    harness(GOLDEN_NOFTYPE.as_path())
+}
+
 impl Drop for Harness {
     #[allow(clippy::if_same_then_else)]
     fn drop(&mut self) {
@@ -212,6 +219,7 @@ impl Drop for Harness {
 #[case::v4_block(harnessv4, "block")]
 #[case::v4_btree_2_2(harnessv4, "btree2.2")]
 #[case::v4_btree_3(harnessv4, "btree3")]
+#[case::noftype_block(harness_noftype, "block")]
 fn all_dir_types_longnames(h: fn() -> Harness, d: &str) {}
 
 // All directory types that have short file names
@@ -223,6 +231,7 @@ fn all_dir_types_longnames(h: fn() -> Harness, d: &str) {}
 #[case::v4_sf(harnessv4, "sf")]
 #[case::v4_leaf(harnessv4, "leaf")]     // TODO check in xfs_db.  Might not be a leaf dir.
 #[case::v4_node(harnessv4, "node")]
+#[case::noftype_sf(harness_noftype, "sf")]
 fn all_dir_types_shortnames(h: fn() -> Harness, d: &str) {}
 
 #[template]
@@ -644,6 +653,8 @@ mod lookup {
     #[case::v4_sf(harnessv4, "sf")]
     #[case::v4_leaf(harnessv4, "leaf")]
     #[case::v4_node(harnessv4, "node")]
+    #[case::noftype_sf(harness_noftype, "sf")]
+    #[case::noftype_block(harness_noftype, "block")]
     fn dots(#[case] h: fn() -> Harness, #[case] d: &str) {
         require_fusefs!();
 
@@ -1287,6 +1298,8 @@ mod readdir {
     #[case::v4_sf(harnessv4, "sf")]
     #[case::v4_leaf(harnessv4, "leaf")]
     #[case::v4_node(harnessv4, "node")]
+    #[case::noftype_sf(harness_noftype, "sf")]
+    #[case::noftype_block(harness_noftype, "block")]
     fn dots(#[case] h: fn() -> Harness, #[case] d: &str) {
         use nix::{dir::Dir, fcntl::OFlag, sys::stat::Mode};
         require_fusefs!();

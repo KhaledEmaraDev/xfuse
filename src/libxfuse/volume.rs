@@ -287,6 +287,32 @@ impl Filesystem for Volume {
                     } else {
                         ino
                     };
+                    let kind = match kind {
+                        Some(kind) => kind,
+                        None => {
+                            // This is very inefficient.  Frequently, getattr will be called for
+                            // every entry returned by readdir.  In such cases, this code will read
+                            // the inode twice.  The best solution is for everybody to use the
+                            // ftype option in their XFS format.
+                            let f = &self.device;
+                            let dinode = Dinode::from(
+                                BufReader::with_capacity(self.sb.inode_size(), f).by_ref(),
+                                &self.sb,
+                                if ino == FUSE_ROOT_ID {
+                                    self.sb.sb_rootino
+                                } else {
+                                    ino as XfsIno
+                                },
+                            );
+                            match dinode.di_core.stat(ino) {
+                                Ok(attr) => attr.kind,
+                                Err(e) => {
+                                    reply.error(e);
+                                    return;
+                                }
+                            }
+                        }
+                    };
                     let res = reply.add(ino, offset, kind, name);
                     if res {
                         reply.ok();

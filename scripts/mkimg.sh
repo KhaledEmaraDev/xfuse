@@ -400,7 +400,28 @@ mkfs_v4() {
 	zstd -f resources/xfsv4.img
 }
 
+mkfs_noftype() {
+	# Create an XFS V4 image that does not use the ftype feature.
+	# Such an image was seen in the wild on a RHEL7 system.
+	# Use block size 512 to test large directories without using as much
+	# disk space, even though in the wild we've only seen V4 file systems
+	# with 4k block size.
+	rm resources/xfs_noftype.img
+	truncate -s 64m resources/xfs_noftype.img
+	mkfs.xfs --unsupported -b size=512 -n size=4096 -n ftype=0 -m crc=0 -f resources/xfs_noftype.img
+	MNTDIR=`mktemp -d`
+	mount -t xfs resources/xfs_noftype.img $MNTDIR
+
+	mkfiles ${MNTDIR}/sf 2
+	mkfiles2 ${MNTDIR}/block 4
+
+	umount ${MNTDIR}
+	rmdir $MNTDIR
+	zstd -f resources/xfs_noftype.img
+}
+
 mkfs_4096
 mkfs_512
 mkfs_v4
 mkfs_preallocated
+mkfs_noftype
