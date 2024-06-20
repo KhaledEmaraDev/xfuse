@@ -19,6 +19,21 @@ mkfiles2() {
 	seq -f "%08.0f" 0 $(( COUNT - 1 )) | xargs -I % touch "$DIR/frame__________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________%"
 }
 
+# Make a directory filled with far more holes than files
+mkfiles_sparse() {
+	DIR=$1
+	COUNT=$2
+
+	mkdir $DIR
+	for i in $( seq -f "%08.0f" 0 $(( COUNT - 1 )) ); do
+		touch "$DIR/frame__________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________${i}"
+		for j in `seq 0 9`; do
+			touch "$DIR/frame________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________${i}".${j}
+		done
+	done
+	rm ${DIR}/frame*.*
+}
+
 # Make a directory filled with 40 files whose names include hash collisions
 mk_colliding_files() {
 	DIR=$1
@@ -378,6 +393,10 @@ mkfs_v4() {
 	mkfiles ${MNTDIR}/node 512
 	mkfiles2 ${MNTDIR}/btree2.2 2048
 	mkfiles2 ${MNTDIR}/btree3 16384
+	# Create a btree-formatted directory with a Leaf that can fit into a single dir block.
+	# This can only be done by creating a btree-formatted directory and
+	# then deleting most entries.
+	mkfiles_sparse ${MNTDIR}/btree_with_single_leaf 204
 
 	mkdir ${MNTDIR}/files
 	echo "Hello, World!" > ${MNTDIR}/files/hello.txt
