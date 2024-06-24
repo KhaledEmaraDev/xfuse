@@ -310,7 +310,7 @@ impl Sb {
             panic!("The Large Extent Counters feature is not supported");
         }
 
-        let sb = Sb {
+        Sb {
             sb_blocksize,
             sb_dblocks,
             sb_uuid,
@@ -329,11 +329,7 @@ impl Sb {
             sb_dirblklog,
             sb_features2,
             sb_features_incompat
-        };
-        if !sb.has_ftype() {
-            panic!("File systems without directory ftype are not yet supported");
         }
-        sb
     }
 
     #[inline]

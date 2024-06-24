@@ -34,6 +34,7 @@ use super::{
     dir3::{Dir3, XFS_DIR3_FT_DIR},
     sb::Sb,
     utils::{get_file_type, FileKind},
+    volume::SUPERBLOCK,
 };
 
 use bincode::{
@@ -71,21 +72,26 @@ impl Decode for Dir2SfHdr {
 }
 
 #[derive(Debug, Clone)]
-pub struct Dir2SfEntry32 {
-    pub offset: u16,
-    pub name: OsString,
-    pub ftype: u8,
-    pub inumber: u32,
+struct Dir2SfEntry32 {
+    offset: u16,
+    name: OsString,
+    ftype: Option<u8>,
+    inumber: u32,
 }
 
 impl Decode for Dir2SfEntry32 {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let sb = SUPERBLOCK.get().unwrap();
         let namelen: u8 = Decode::decode(decoder)?;
         let offset: u16 = Decode::decode(decoder)?;
         let mut namebytes = vec![0u8; namelen.into()];
         decoder.reader().read(&mut namebytes[..])?;
         let name = OsString::from_vec(namebytes);
-        let ftype: u8 = Decode::decode(decoder)?;
+        let ftype: Option<u8> = if sb.has_ftype() {
+            Some(Decode::decode(decoder)?)
+        } else {
+            None
+        };
         let inumber: u32 = Decode::decode(decoder)?;
         Ok(Dir2SfEntry32 {
             offset,
@@ -97,11 +103,11 @@ impl Decode for Dir2SfEntry32 {
 }
 
 #[derive(Debug, Clone)]
-pub struct Dir2SfEntry64 {
-    pub offset: u16,
-    pub name: OsString,
-    pub ftype: u8,
-    pub inumber: XfsIno,
+struct Dir2SfEntry64 {
+    offset: u16,
+    name: OsString,
+    ftype: Option<u8>,
+    inumber: XfsIno,
 }
 
 impl Dir2SfEntry64 {
@@ -112,7 +118,7 @@ impl Dir2SfEntry64 {
         Self {
             offset,
             name,
-            ftype,
+            ftype: Some(ftype),
             inumber
         }
     }
@@ -120,12 +126,17 @@ impl Dir2SfEntry64 {
 
 impl Decode for Dir2SfEntry64 {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let sb = SUPERBLOCK.get().unwrap();
         let namelen: u8 = Decode::decode(decoder)?;
         let offset: u16 = Decode::decode(decoder)?;
         let mut namebytes = vec![0u8; namelen.into()];
         decoder.reader().read(&mut namebytes[..])?;
         let name = OsString::from_vec(namebytes);
-        let ftype: u8 = Decode::decode(decoder)?;
+        let ftype: Option<u8> = if sb.has_ftype() {
+            Some(Decode::decode(decoder)?)
+        } else {
+            None
+        };
         let inumber: XfsIno = Decode::decode(decoder)?;
         Ok(Dir2SfEntry64 {
             offset,
@@ -152,7 +163,7 @@ impl From<Dir2SfEntry32> for Dir2SfEntry64 {
 
 #[derive(Debug, Clone)]
 pub struct Dir2Sf {
-    pub list: Vec<Dir2SfEntry64>,
+    list: Vec<Dir2SfEntry64>,
 }
 
 impl Dir2Sf {
@@ -212,7 +223,7 @@ impl Dir3 for Dir2Sf {
         _buf_reader: &mut R,
         _super_block: &Sb,
         offset: i64,
-    ) -> Result<(XfsIno, i64, FileType, OsString), c_int> {
+    ) -> Result<(XfsIno, i64, Option<FileType>, OsString), c_int> {
         for entry in self.list.iter() {
             if i64::from(entry.offset) <= offset {
                 continue;
@@ -220,7 +231,10 @@ impl Dir3 for Dir2Sf {
 
             let ino = entry.inumber;
 
-            let kind = get_file_type(FileKind::Type(entry.ftype))?;
+            let kind = match entry.ftype {
+                Some(ftype) => Some(get_file_type(FileKind::Type(ftype))?),
+                None => None
+            };
 
             let name = entry.name.to_owned();
 

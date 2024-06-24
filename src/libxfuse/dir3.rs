@@ -115,28 +115,42 @@ impl Dir3DataHdr {
 pub struct Dir2DataEntry {
     pub inumber: XfsIno,
     pub name: OsString,
-    pub ftype: u8,
+    ftype: Option<u8>,
     pub tag: XfsDir2DataOff,
 }
 
 impl Dir2DataEntry {
-    pub fn get_length(raw: &[u8]) -> i64 {
+    pub fn get_length(sb: &Sb, raw: &[u8]) -> i64 {
         let namelen: u8 = decode(&raw[8..]).unwrap().0;
-        ((namelen as i64 + 19) / 8) * 8
+        if sb.has_ftype() {
+            ((namelen as i64 + 19) / 8) * 8
+        } else {
+            ((namelen as i64 + 18) / 8) * 8
+        }
     }
 }
 
 impl Decode for Dir2DataEntry {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let inumber = Decode::decode(decoder)?;
+        let sb = SUPERBLOCK.get().unwrap();
         let namelen: u8 = Decode::decode(decoder)?;
         let mut namebytes = vec![0u8; namelen.into()];
         decoder.reader().read(&mut namebytes[..])?;
         let name = OsString::from_vec(namebytes);
-        let ftype = Decode::decode(decoder)?;
+        let ftype: Option<u8> = if sb.has_ftype() {
+            Some(Decode::decode(decoder)?)
+        } else {
+            None
+        };
         // Pad up to 1 less than a multiple of 8 bytes
-        // current offset is 9 + 1 + namelen + 1
-        let pad: usize = (4 - namelen as i16).rem_euclid(8).try_into().unwrap();
+        let pad: usize = if sb.has_ftype() {
+            // current offset is 9 + 1 + namelen + 1
+            4 - namelen as i16
+        } else {
+            // current offset is 9 + 1 + namelen
+            5 - namelen as i16
+        }.rem_euclid(8).try_into().unwrap();
         decoder.reader().consume(pad);
         let tag = Decode::decode(decoder)?;
         Ok(Dir2DataEntry {
@@ -417,7 +431,7 @@ pub trait Dir3 {
         buf_reader: &mut R,
         sb: &Sb,
         offset: i64,
-    ) -> Result<(XfsIno, i64, FileType, OsString), c_int> {
+    ) -> Result<(XfsIno, i64, Option<FileType>, OsString), c_int> {
         let dblksize: u64 = 1 << (sb.sb_blocklog + sb.sb_dirblklog);
         let dblkmask: u64 = dblksize - 1;
         let mut offset: u64 = offset.try_into().unwrap();
@@ -455,13 +469,16 @@ pub trait Dir3 {
                     offset += length as u64;
                     blk_offset += length;
                 } else if !next {
-                    let length = Dir2DataEntry::get_length(&raw[blk_offset..]);
+                    let length = Dir2DataEntry::get_length(sb, &raw[blk_offset..]);
                     blk_offset += length as usize;
                     offset += length as u64;
                     next = true;
                 } else {
                     let (entry, _l)= decode::<Dir2DataEntry >(&raw[blk_offset..]).unwrap();
-                    let kind = get_file_type(FileKind::Type(entry.ftype))?;
+                    let kind = match entry.ftype {
+                        Some(ftype) => Some(get_file_type(FileKind::Type(ftype))?),
+                        None => None
+                    };
                     let name = entry.name;
                     let entry_offset = doffset + entry.tag as u64;
                     return Ok((entry.inumber, entry_offset as i64, kind, name));
