@@ -37,10 +37,7 @@ use super::definitions::*;
 use super::dinode_core::{DinodeCore, XfsDinodeFmt};
 use super::dir3::Directory;
 use super::dir3_block::Dir2Block;
-use super::dir3_bptree::Dir2Btree;
-use super::dir3_leaf::Dir2Leaf;
-use super::dir3_node::Dir2Node;
-//use super::dir3_extents::Dir2Extents;
+use super::dir3_lf::Dir2Lf;
 use super::dir3_sf::Dir2Sf;
 use super::file::File;
 use super::file_btree::FileBtree;
@@ -274,26 +271,24 @@ impl Dinode {
     pub fn get_dir<R: bincode::de::read::Reader + BufRead + Seek>(
         &mut self,
         buf_reader: &mut R,
-        superblock: &Sb,
+        sb: &Sb,
     ) -> &Directory {
         if self.directory.is_none() {
             let directory = match &self.di_u {
                 DiU::Dir2Sf(dir) => Directory::Sf(dir.clone()),
                 DiU::Bmx(bmbtv) => {
-                    let leaf_start = superblock.get_dir3_leaf_offset().into();
                     if bmbtv.len() == 1 {
                         Directory::Block(Dir2Block::new(
                             buf_reader.by_ref(),
-                            superblock,
+                            sb,
                             bmbtv[0].br_startblock,
                         ))
-                    } else if bmbtv.iter().filter(|e| e.br_startoff >= leaf_start).count() > 1 {
-                        Directory::Node(Dir2Node::from(Bmx::new(bmbtv.clone())))
                     } else {
-                        Directory::Leaf(Dir2Leaf::from(buf_reader.by_ref(), superblock, bmbtv))
+                        let bmx = Bmx::new(bmbtv.clone());
+                        Directory::Lf(Dir2Lf::from_bmx(bmx))
                     }
                 }
-                DiU::Bmbt((bmbt, keys, pointers)) => Directory::Btree(Dir2Btree::from(
+                DiU::Bmbt((bmbt, keys, pointers)) => Directory::Lf(Dir2Lf::from_btree(
                     bmbt.clone(),
                     keys.clone(),
                     pointers.clone(),
