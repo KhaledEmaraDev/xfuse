@@ -26,17 +26,20 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 use std::{
-    cell::RefCell,
+    convert::TryInto,
     io::{BufRead, Seek, SeekFrom},
-    ops::Deref
 };
 
 use super::definitions::*;
-use super::dir3::{Dir2LeafEntry, Dir3, Dir2DataHdr, Dir3DataHdr, XfsDir2Dataptr};
+use std::ffi::{OsStr, OsString};
+use super::da_btree::hashname;
+use super::dir3::{Dir2LeafEntry, Dir3, Dir2DataHdr, Dir2DataEntry, Dir2DataUnused, Dir3DataHdr};
 use super::sb::Sb;
-use super::utils::decode;
+use super::utils::{FileKind, decode, get_file_type};
 
 use bincode::{Decode, de::read::Reader};
+use fuser::FileType;
+use libc::{c_int, ENOENT};
 
 #[derive(Debug, Decode)]
 pub struct Dir2BlockTail {
@@ -52,8 +55,10 @@ impl Dir2BlockTail {
 #[derive(Debug)]
 pub struct Dir2BlockDisk {
     pub leaf: Vec<Dir2LeafEntry>,
-    pub tail: Dir2BlockTail,
+    tail: Dir2BlockTail,
     raw: Vec<u8>,
+    /// Start of directory entries within the directory block
+    data_offset: usize,
 }
 
 impl Dir2BlockDisk {
@@ -65,17 +70,19 @@ impl Dir2BlockDisk {
         buf_reader.read_exact(&mut raw).unwrap();
 
         let magic: u32 = decode(&raw[..]).unwrap().0;
-        match magic {
+        let data_offset = match magic {
             XFS_DIR2_BLOCK_MAGIC => {
                 let hdr: Dir2DataHdr = decode(&raw[..]).unwrap().0;
                 assert_eq!(hdr.magic, XFS_DIR2_BLOCK_MAGIC);
+                Dir2DataHdr::SIZE as usize
             },
             XFS_DIR3_BLOCK_MAGIC => {
                 let hdr: Dir3DataHdr = decode(&raw[..]).unwrap().0;
                 assert_eq!(hdr.hdr.magic, XFS_DIR3_BLOCK_MAGIC);
+                Dir3DataHdr::SIZE as usize
             },
             _ => panic!("Unknown magic number for block directory {:#x}", magic)
-        }
+        };
 
         let tail_offset = (size as usize) - Dir2BlockTail::SIZE;
         let tail: Dir2BlockTail = decode(&raw[tail_offset..]).unwrap().0;
@@ -88,7 +95,7 @@ impl Dir2BlockDisk {
             leaf_offset += Dir2LeafEntry::SIZE;
         }
 
-        Dir2BlockDisk { leaf, tail, raw }
+        Dir2BlockDisk { leaf, tail, raw, data_offset }
     }
 
     /// get the length of the raw data region
@@ -103,13 +110,15 @@ impl Dir2BlockDisk {
 pub struct Dir2Block {
     ents: Vec<Dir2LeafEntry>,
     raw: Box<[u8]>,
+    /// Start of directory entries within the directory block
+    data_offset: usize,
 }
 
 impl Dir2Block {
     pub fn new<T: BufRead + Seek>(
         buf_reader: &mut T,
         superblock: &Sb,
-        start_block: u64,
+        start_block: XfsFsblock,
     ) -> Dir2Block {
         let offset = superblock.fsb_to_offset(start_block);
         let dir_blk_size = superblock.sb_blocksize << superblock.sb_dirblklog;
@@ -123,27 +132,75 @@ impl Dir2Block {
 
         Dir2Block {
             raw: raw.into(),
-            ents: dir_disk.leaf
+            ents: dir_disk.leaf,
+            data_offset: dir_disk.data_offset
         }
     }
-}
 
-impl Dir3 for Dir2Block {
-    fn get_addresses<'a, R>(&'a self, _buf_reader: &'a RefCell<&'a mut R>, hash: XfsDahash)
-        -> Box<dyn Iterator<Item=XfsDir2Dataptr> + 'a>
-            where R: Reader + BufRead + Seek + 'a
+    fn get_addresses(&self, hash: XfsDahash) -> impl Iterator<Item=usize> + '_
     {
         let i = self.ents.partition_point(|ent| ent.hashval < hash);
         let l = self.ents.len();
         let j = (i..l).find(|x| self.ents[*x].hashval > hash).unwrap_or(l);
-        Box::new(self.ents[i..j].iter().map(|ent| ent.address << 3))
+        self.ents[i..j].iter().map(|ent| (ent.address << 3) as usize)
+    }
+}
+
+impl Dir3 for Dir2Block {
+    fn lookup<R: Reader + BufRead + Seek>(
+        &self,
+        _buf_reader: &mut R,
+        _sb: &Sb,
+        name: &OsStr,
+    ) -> Result<u64, c_int> {
+        let hash = hashname(name);
+
+        for offset in self.get_addresses(hash) {
+            assert!(offset < self.raw.len());
+            let entry: Dir2DataEntry = decode(&self.raw[offset..]).unwrap().0;
+            if entry.name == name {
+                return Ok(entry.inumber);
+            }
+        }
+        Err(libc::ENOENT)
     }
 
-    fn read_dblock<'a, R>(&'a self, _buf_reader: R, _sb: &Sb, dblock: XfsDablk)
-        -> Result<Box<dyn Deref<Target=[u8]> + 'a>, i32>
-        where R: Reader + BufRead + Seek
-    {
-        assert_eq!(dblock, 0);
-        Ok(Box::new(&self.raw[..]))
+    /// Read the next dirent from a Directory
+    fn next<R: Reader + BufRead + Seek>(
+        &self,
+        _buf_reader: &mut R,
+        sb: &Sb,
+        offset: i64,
+    ) -> Result<(XfsIno, i64, Option<FileType>, OsString), c_int> {
+        let mut offset: usize = offset.try_into().unwrap();
+        assert!(offset < self.raw.len());
+        let mut next = offset == 0;
+
+        if offset == 0 {
+            offset += self.data_offset;
+        }
+
+        while offset < self.raw.len() {
+            let freetag: u16 = decode(&self.raw[offset..]).unwrap().0;
+            if freetag == 0xffff {
+                let (_, length) = decode::<Dir2DataUnused>(&self.raw[offset..])
+                    .unwrap();
+                offset += length;
+            } else if !next {
+                let length = Dir2DataEntry::get_length(sb, &self.raw[offset..]);
+                offset += length as usize;
+                next = true;
+            } else {
+                let (entry, _l)= decode::<Dir2DataEntry >(&self.raw[offset..]).unwrap();
+                let kind = match entry.ftype {
+                    Some(ftype) => Some(get_file_type(FileKind::Type(ftype))?),
+                    None => None
+                };
+                let name = entry.name;
+                let entry_offset = entry.tag as u64;
+                return Ok((entry.inumber, entry_offset as i64, kind, name));
+            }
+        }
+        Err(ENOENT)
     }
 }
