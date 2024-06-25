@@ -46,7 +46,7 @@ impl<R: BufRead + Reader + Seek> File<R> for FileBtree {
     fn get_extent(&self, buf_reader: &mut R, block: XfsFileoff) -> (Option<XfsFsblock>, u64) {
         let sb = SUPERBLOCK.get().unwrap();
         let (start, len) = self.btree.map_block(buf_reader.by_ref(), block).unwrap();
-        let len = len.unwrap_or((self.size as u64).div_ceil(sb.sb_blocksize.into()));
+        let len = len.unwrap_or((self.size as u64).div_ceil(sb.sb_blocksize.into()) - block);
         (start, len)
     }
 

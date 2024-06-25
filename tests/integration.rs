@@ -774,12 +774,14 @@ mod lseek {
     /// Try to seek to a data region, but it's only hole untiL EOF
     #[named]
     #[rstest]
-    fn hole_at_end(harness4k: Harness) {
+    #[case::extents("hole_at_end.extents.txt", 16384)]
+    #[case::btree("hole_at_end.btree.txt", 65536)]
+    fn hole_at_end(harness4k: Harness, #[case] fname: &str, #[case] offset: i64) {
         require_fusefs!();
 
-        let p = harness4k.d.path().join("files/hole_at_end.txt");
+        let p = harness4k.d.path().join("files").join(fname);
         let f = fs::File::open(p).unwrap();
-        assert_eq!(Err(Errno::ENXIO), nix::unistd::lseek(f.as_raw_fd(), 16384, Whence::SeekData));
+        assert_eq!(Err(Errno::ENXIO), nix::unistd::lseek(f.as_raw_fd(), offset, Whence::SeekData));
     }
 
     #[named]
@@ -1128,18 +1130,20 @@ mod read {
 
     #[named]
     #[rstest]
-    fn hole_at_end(harness4k: Harness) {
+    #[case::extents("hole_at_end.extents.txt", 16384)]
+    #[case::btree("hole_at_end.btree.txt", 65536)]
+    fn hole_at_end(harness4k: Harness, #[case] fname: &str, #[case] offset: usize) {
         require_fusefs!();
 
         const BUFSIZE: usize = 16;
-        let path = harness4k.d.path().join("files").join("hole_at_end.txt");
+        let path = harness4k.d.path().join("files").join(fname);
         let mut f = fs::File::open(path).unwrap();
 
         // First read the dense parts
-        let mut buf = vec![0; 4 * 4096];
+        let mut buf = vec![0; offset];
         f.read_exact(&mut buf[..]).unwrap();
         let mut ofs = 0;
-        while ofs < 4 * 4096 {
+        while ofs < offset {
             let expected = format!("{:016x}", ofs);
             assert_eq!(&buf[ofs..ofs + BUFSIZE], expected.as_bytes());
             ofs += BUFSIZE;
@@ -1444,7 +1448,7 @@ fn statfs(harness4k: Harness) {
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
     // here.
-    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 749);
+    assert_eq!(i64::try_from(sfs.files()).unwrap() - sfs.files_free(), 750);
 
     // There are legitimate questions about what the correct value for
     // optimal_transfer_size
@@ -1469,7 +1473,7 @@ fn statvfs(harness4k: Harness) {
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
     // here.
-    assert_eq!(svfs.files() - svfs.files_free(), 749);
+    assert_eq!(svfs.files() - svfs.files_free(), 750);
     assert_eq!(svfs.files_free(), svfs.files_available());
 
     // Linux's calculation for blocks available and free is complicated and the
