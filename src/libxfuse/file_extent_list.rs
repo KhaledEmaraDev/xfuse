@@ -43,8 +43,6 @@ pub struct FileExtentList {
 }
 
 impl<R: BufRead + Reader + Seek> File<R> for FileExtentList {
-    /// Return the extent, if any, that contains the given data block within the file.
-    /// Return its starting position as an FSblock, and its length in file system block units
     fn get_extent(&self, _buf_reader: &mut R, block: XfsFileoff) -> (Option<XfsFsblock>, u64) {
         let sb = SUPERBLOCK.get().unwrap();
         let (start, len) = self.bmx.get_extent(block);
