@@ -157,7 +157,7 @@ impl Filesystem for Volume {
 
         let oi = &self.open_files.get(&ino).unwrap();
         let mut buf_reader = BufReader::with_capacity(self.sb.sb_blocksize as usize, &self.device);
-        let mut file = oi.dinode.get_file(buf_reader.by_ref());
+        let file = oi.dinode.get_file(buf_reader.by_ref());
         if offset > file.size() {
             reply.error(libc::ENXIO);
             return;
@@ -245,7 +245,7 @@ impl Filesystem for Volume {
         let oi = &self.open_files.get(&ino).unwrap();
         let mut buf_reader = BufReader::with_capacity(self.sb.sb_blocksize as usize, &self.device);
 
-        let mut file = oi.dinode.get_file(buf_reader.by_ref());
+        let file = oi.dinode.get_file(buf_reader.by_ref());
 
         match file.read(buf_reader.by_ref(), offset, size) {
             Ok((v, ignore)) => reply.data(&v[ignore..]),
