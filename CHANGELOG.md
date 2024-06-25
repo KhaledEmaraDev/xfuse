@@ -15,6 +15,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   removed.
   ([#150](https://github.com/KhaledEmaraDev/xfuse/issues/150))
 
+- Fixed operating on XFS version 4 file systems that do not use the ftype
+  feature.
+  ([#149](https://github.com/KhaledEmaraDev/xfuse/issues/149))
+
 ## [0.4.1] - 2024-06-19
 
 ### Fixed
