@@ -31,7 +31,7 @@ use bincode::de::read::Reader;
 
 use super::{
     btree::{Btree, BtreeRoot},
-    definitions::{XfsFileoff, XfsFsize, XfsFsblock},
+    definitions::{XfsFileoff, XfsFsblock, XfsFsize},
     file::File,
     volume::SUPERBLOCK
 };
@@ -42,20 +42,38 @@ pub struct FileBtree {
     pub size: XfsFsize,
 }
 
-impl<R: Reader + BufRead + Seek> File<R> for FileBtree {
+impl<R: BufRead + Reader + Seek> File<R> for FileBtree {
+    fn get_extent(&self, buf_reader: &mut R, block: XfsFileoff) -> (Option<XfsFsblock>, u64) {
+        let sb = SUPERBLOCK.get().unwrap();
+        let (start, len) = self.btree.map_block(buf_reader.by_ref(), block).unwrap();
+        let len = len.unwrap_or((self.size as u64).div_ceil(sb.sb_blocksize.into()) - block);
+        (start, len)
+    }
+
     fn lseek(&mut self, buf_reader: &mut R, offset: u64, whence: i32) -> Result<u64, i32> {
         let sb = SUPERBLOCK.get().unwrap();
 
         let mut dblock = offset >> sb.sb_blocklog;
         match self.btree.map_block(buf_reader.by_ref(), dblock)? {
+            (None, Some(len)) => {
+                // A hole, followed by data
+                if whence == libc::SEEK_HOLE {
+                    Ok(offset)
+                } else {
+                    // It should be impossible to have two hole extents in a row.  But
+                    // double-check.
+                    debug_assert!(
+                        self.btree.map_block(buf_reader.by_ref(), dblock + len).unwrap().0.is_some()
+                    );
+                    Ok(offset + (len << sb.sb_blocklog))
+                }
+            },
             (Some(_), None) => {
                 unreachable!("Btree::map_block should never return None for the length of a data region");
             },
             (Some(_), Some(len)) => {
                 // In a data region
-                if whence == libc::SEEK_DATA {
-                    Ok(offset)
-                } else {
+                if whence == libc::SEEK_HOLE {
                     // Scan for the next hole
                     dblock += len;
                     loop {
@@ -72,37 +90,19 @@ impl<R: Reader + BufRead + Seek> File<R> for FileBtree {
                              },
                          }
                     }
+                } else {
+                    Ok(offset)
                 }
             },
             (None, None) => {
                 // A hole that extends to EOF
-                if whence == libc::SEEK_DATA {
+                if whence == libc::SEEK_HOLE {
+                    Ok(offset)
+                } else {
                     Err(libc::ENXIO)
-                } else {
-                    Ok(offset)
-                }
-            },
-            (None, Some(len)) => {
-                // A hole, followed by data
-                if whence == libc::SEEK_DATA {
-                    // It should be impossible to have two hole extents in a row.  But
-                    // double-check.
-                    debug_assert!(
-                        self.btree.map_block(buf_reader.by_ref(), dblock + len).unwrap().0.is_some()
-                    );
-                    Ok(offset + (len << sb.sb_blocklog))
-                } else {
-                    Ok(offset)
                 }
             },
          }
-    }
-
-    fn get_extent(&self, buf_reader: &mut R, block: XfsFileoff) -> (Option<XfsFsblock>, u64) {
-        let sb = SUPERBLOCK.get().unwrap();
-        let (blk, len) = self.btree.map_block(buf_reader.by_ref(), block).unwrap();
-        let len = len.unwrap_or((self.size as u64).div_ceil(sb.sb_blocksize.into()));
-        (blk, len)
     }
 
     fn size(&self) -> XfsFsize {

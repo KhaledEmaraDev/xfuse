@@ -202,8 +202,10 @@ mkfs_4096() {
 	write_fragmented_file ${MNTDIR}/files/sparse.btree.txt 4096 16
 	fallocate -p -o 0 -l 4096 ${MNTDIR}/files/sparse.btree.txt
 	fallocate -p -o 8192 -l 4096 ${MNTDIR}/files/sparse.btree.txt
-	write_fragmented_file ${MNTDIR}/files/hole_at_end.txt 4096 4
-	truncate -s 20480 ${MNTDIR}/files/hole_at_end.txt 
+	write_fragmented_file ${MNTDIR}/files/hole_at_end.extents.txt 4096 4
+	truncate -s 20480 ${MNTDIR}/files/hole_at_end.extents.txt 
+	write_fragmented_file ${MNTDIR}/files/hole_at_end.btree.txt 4096 16
+	truncate -s 69632 ${MNTDIR}/files/hole_at_end.btree.txt 4096 16
 
 	# Create a pair of reflinked files
 	write_sequential_file ${MNTDIR}/files/reflink_a.txt 16384
