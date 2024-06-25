@@ -44,10 +44,10 @@ pub trait File<R: BufRead + Reader + Seek> {
     fn get_extent(&self, buf_reader: &mut R, block: XfsFileoff) -> (Option<XfsFsblock>, u64);
 
     /// Like lseek(2), but only works for SEEK_HOLE and SEEK_DATA
-    fn lseek(&mut self, buf_reader: &mut R, offset: u64, whence: i32) -> Result<u64, i32>;
+    fn lseek(&self, buf_reader: &mut R, offset: u64, whence: i32) -> Result<u64, i32>;
 
     /// Perform a sector-size aligned read of the file
-    fn read_sectors(&mut self, buf_reader: &mut R, offset: i64, mut size: usize)
+    fn read_sectors(&self, buf_reader: &mut R, offset: i64, mut size: usize)
         -> Result<Vec<u8>, i32>
     {
         let sb = SUPERBLOCK.get().unwrap();
@@ -91,7 +91,7 @@ pub trait File<R: BufRead + Reader + Seek> {
 
     /// Return from a file.  Return a buffer containing the requested data, plus a number of bytes
     /// that the caller should ignore from the head of the vector.
-    fn read(&mut self, buf_reader: &mut R, offset: i64, size: u32) -> Result<(Vec<u8>, usize), i32>
+    fn read(&self, buf_reader: &mut R, offset: i64, size: u32) -> Result<(Vec<u8>, usize), i32>
     {
         let sb = SUPERBLOCK.get().unwrap();
         let size = u32::try_from(i64::from(size).min(self.size() - offset)).unwrap();

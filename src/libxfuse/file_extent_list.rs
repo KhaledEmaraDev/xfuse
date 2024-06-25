@@ -50,7 +50,7 @@ impl<R: BufRead + Reader + Seek> File<R> for FileExtentList {
         (start, len)
     }
 
-    fn lseek(&mut self, _buf_reader: &mut R, offset: u64, whence: i32) -> Result<u64, i32> {
+    fn lseek(&self, _buf_reader: &mut R, offset: u64, whence: i32) -> Result<u64, i32> {
         let sb = SUPERBLOCK.get().unwrap();
 
         let dblock = offset >> sb.sb_blocklog;
