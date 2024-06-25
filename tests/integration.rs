@@ -91,6 +91,8 @@ fn ents_per_dir_longnames(path: &Path, d: &str) -> usize {
         ("xfsv4.img", "btree2.2") => 2048,
         ("xfsv4.img", "btree3") => 16384,
         ("xfsv4.img", "btree_with_single_leaf") => 204,
+        ("xfsv4.img", "sparse_leaf") => 4,
+        ("xfsv4.img", "sparse_btree") => 10,
         ("xfs_noftype.img", "block") => 4,
         x => panic!("{:?} not implemented", x)
     }
@@ -221,6 +223,8 @@ impl Drop for Harness {
 #[case::v4_btree_2_2(harnessv4, "btree2.2")]
 #[case::v4_btree_3(harnessv4, "btree3")]
 #[case::v4_btree_with_single_leaf(harnessv4, "btree_with_single_leaf")]
+#[case::sparse_leaf(harnessv4, "sparse_leaf")]
+#[case::sparse_btree(harnessv4, "sparse_btree")]
 #[case::noftype_block(harness_noftype, "block")]
 fn all_dir_types_longnames(h: fn() -> Harness, d: &str) {}
 
@@ -650,6 +654,8 @@ mod lookup {
     #[case::v4_btree_2_2(harnessv4, "btree2.2")]
     #[case::v4_btree_3(harnessv4, "btree3")]
     #[case::v4_btree_with_single_leaf(harnessv4, "btree_with_single_leaf")]
+    #[case::sparse_leaf(harnessv4, "sparse_leaf")]
+    #[case::sparse_btree(harnessv4, "sparse_btree")]
     #[case::sf(harness4k, "sf")]
     #[case::block(harness4k, "block")]
     #[case::leaf(harness4k, "leaf")]
@@ -1300,6 +1306,8 @@ mod readdir {
     #[case::v4_btree_2_2(harnessv4, "btree2.2")]
     #[case::v4_btree_3(harnessv4, "btree3")]
     #[case::v4_btree_with_single_leaf(harnessv4, "btree_with_single_leaf")]
+    #[case::sparse_leaf(harnessv4, "sparse_leaf")]
+    #[case::sparse_btree(harnessv4, "sparse_btree")]
     #[case::sf(harness4k, "sf")]
     #[case::block(harness4k, "block")]
     #[case::leaf(harness4k, "leaf")]
@@ -1349,10 +1357,10 @@ mod stat {
     use super::*;
 
     /// Verify all of an inode's metadata
-    // This may need to be updated whenever the golden image gets rebuilt.
+    // This may need to be updated whenever the golden images get rebuilt.
     #[named]
     #[rstest]
-    #[case::v4(harnessv4, 197282)]
+    #[case::v4(harnessv4, 100551)]
     #[case::v5(harness4k, 142530)]
     fn file(#[case] h: fn() -> Harness, #[case] st_ino: libc::ino_t) {
         require_fusefs!();
