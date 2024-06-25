@@ -7,6 +7,18 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Fix readdir in directories containing holes.
+  ([#154](https://github.com/KhaledEmaraDev/xfuse/issues/154))
+
+- Fix readdir in a BTree directory whose Leaf is stored in a single directory
+  block.  That can happen if most of the directory's contents have been
+  removed.
+  ([#150](https://github.com/KhaledEmaraDev/xfuse/issues/150))
+
+## [0.4.1] - 2024-06-19
+
+### Fixed
+
 - Better error messages when attempting to mount a file system with unsupported features.
   ([#147](https://github.com/KhaledEmaraDev/xfuse/issues/147))
 
