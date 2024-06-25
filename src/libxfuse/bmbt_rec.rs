@@ -25,7 +25,6 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use super::definitions::*;
 
 use bincode::{
     Decode,
@@ -33,6 +32,8 @@ use bincode::{
     error::DecodeError
 };
 use num_derive::FromPrimitive;
+use super::definitions::*;
+use super::volume::SUPERBLOCK;
 
 #[derive(Debug, FromPrimitive, Clone)]
 pub enum XfsExntst {
@@ -114,6 +115,61 @@ impl Bmx {
 
     pub fn first(&self) -> Option<&BmbtRec> {
         self.0.first()
+    }
+
+    pub fn lseek(&self, offset: u64, whence: i32) -> Result<u64, i32> {
+        let sb = SUPERBLOCK.get().unwrap();
+
+        let dblock = offset >> sb.sb_blocklog;
+        match self.0.partition_point(|entry| entry.br_startoff <= dblock) {
+            0 => {
+                // A hole at the beginning of the file
+                if whence == libc::SEEK_HOLE {
+                    Ok(offset)
+                } else {
+                    self.first()
+                        .map(|b| b.br_startoff << sb.sb_blocklog)
+                        .ok_or(libc::ENXIO)
+                }
+            },
+            i => {
+                let cur_entry = &self.0[i - 1];
+                let br_end = cur_entry.br_startoff + cur_entry.br_blockcount;
+                if dblock < br_end {
+                    // In a data region
+                    if whence == libc::SEEK_HOLE {
+                        // Scan for the next hole
+                        for j in (i - 1)..self.0.len() - 1 {
+                            let before = &self.0[j];
+                            let after = &self.0[j + 1];
+                            let br_end = before.br_startoff + before.br_blockcount;
+                            if after.br_startoff > br_end {
+                                return Ok(br_end << sb.sb_blocklog);
+                            }
+                        }
+                        // Reached EOF without finding another hole.  Return the virtual hole at
+                        // EOF
+                        let entry = self.0.last().unwrap();
+                        let br_end = entry.br_startoff + entry.br_blockcount;
+                        Ok(br_end << sb.sb_blocklog)
+                    } else {
+                        Ok(offset)
+                    }
+                } else {
+                    // In a hole
+                    if whence == libc::SEEK_HOLE {
+                        Ok(offset)
+                    } else {
+                        match self.0.get(i) {
+                            Some(next_entry) => {
+                                Ok(next_entry.br_startoff << sb.sb_blocklog)
+                            },
+                            None => Err(libc::ENXIO)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     pub fn map_dblock(&self, dblock: XfsDablk) -> Option<XfsFsblock> {

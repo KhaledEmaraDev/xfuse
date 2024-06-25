@@ -379,6 +379,8 @@ impl Dir3 for Dir2Lf {
             // Offset of this directory block within the directory
             let doffset = offset - dir_block_offset;
 
+            // TODO: need to find the next dblock after offset, which might be a hole.  Use a
+            // SEEK_DATA operation.
             let dblock = (offset >> sb.sb_blocklog & !((1u64 << sb.sb_dirblklog) - 1)).try_into().unwrap();
             let raw = self.read_dblock(buf_reader.by_ref(), sb, dblock)?;
 

@@ -51,58 +51,7 @@ impl<R: BufRead + Reader + Seek> File<R> for FileBtree {
     }
 
     fn lseek(&self, buf_reader: &mut R, offset: u64, whence: i32) -> Result<u64, i32> {
-        let sb = SUPERBLOCK.get().unwrap();
-
-        let mut dblock = offset >> sb.sb_blocklog;
-        match self.btree.map_block(buf_reader.by_ref(), dblock)? {
-            (None, Some(len)) => {
-                // A hole, followed by data
-                if whence == libc::SEEK_HOLE {
-                    Ok(offset)
-                } else {
-                    // It should be impossible to have two hole extents in a row.  But
-                    // double-check.
-                    debug_assert!(
-                        self.btree.map_block(buf_reader.by_ref(), dblock + len).unwrap().0.is_some()
-                    );
-                    Ok(offset + (len << sb.sb_blocklog))
-                }
-            },
-            (Some(_), None) => {
-                unreachable!("Btree::map_block should never return None for the length of a data region");
-            },
-            (Some(_), Some(len)) => {
-                // In a data region
-                if whence == libc::SEEK_HOLE {
-                    // Scan for the next hole
-                    dblock += len;
-                    loop {
-                         match self.btree.map_block(buf_reader.by_ref(), dblock)? {
-                             (Some(_fsblock), Some(len)) => {
-                                 dblock += len;
-                             },
-                             (Some(_fsblock), None) => {
-                                 unreachable!("Btree::map_block should never return \
-                                        None for the length of a data region");
-                             },
-                             (None, _) => {
-                                 return Ok(dblock << sb.sb_blocklog);
-                             },
-                         }
-                    }
-                } else {
-                    Ok(offset)
-                }
-            },
-            (None, None) => {
-                // A hole that extends to EOF
-                if whence == libc::SEEK_HOLE {
-                    Ok(offset)
-                } else {
-                    Err(libc::ENXIO)
-                }
-            },
-         }
+        self.btree.lseek(buf_reader, offset, whence)
     }
 
     fn size(&self) -> XfsFsize {
