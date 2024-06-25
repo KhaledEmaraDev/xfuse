@@ -68,6 +68,15 @@ enum Dfork {
 }
 
 impl Dfork {
+    fn lseek<R>(&self, buf_reader: &mut R, offset: u64, whence: i32) -> Result<u64, i32>
+        where R: BufRead + Reader + Seek
+    {
+        match self {
+            Dfork::Bmx(bmx) => bmx.lseek(offset, whence),
+            Dfork::Btree(btree_root) => btree_root.lseek(buf_reader, offset, whence)
+        }
+    }
+
     fn map_dblock<R: Reader + BufRead + Seek>(
         &self,
         buf_reader: &mut R,
@@ -374,13 +383,19 @@ impl Dir3 for Dir2Lf {
         let mut next = offset == 0;
 
         loop {
+            // Skip any holes in the directory
+            let newoffset = self.dfork.lseek(buf_reader.by_ref(), offset, libc::SEEK_DATA)
+                .map_err(|e| if e == libc::ENXIO {libc::ENOENT} else {e})?;
+            if newoffset >= u64::from(sb.get_dir3_leaf_offset()) << sb.sb_blocklog {
+                return Err(libc::ENOENT);
+            }
+            offset = newoffset;
+
             // Byte offset within this directory block
             let dir_block_offset = offset & ((1 << (sb.sb_dirblklog + sb.sb_blocklog)) - 1);
             // Offset of this directory block within the directory
             let doffset = offset - dir_block_offset;
 
-            // TODO: need to find the next dblock after offset, which might be a hole.  Use a
-            // SEEK_DATA operation.
             let dblock = (offset >> sb.sb_blocklog & !((1u64 << sb.sb_dirblklog) - 1)).try_into().unwrap();
             let raw = self.read_dblock(buf_reader.by_ref(), sb, dblock)?;
 

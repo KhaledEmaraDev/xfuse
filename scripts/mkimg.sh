@@ -23,12 +23,13 @@ mkfiles2() {
 mkfiles_sparse() {
 	DIR=$1
 	COUNT=$2
+	MULTIPLIER=$3
 
 	mkdir $DIR
 	for i in $( seq -f "%08.0f" 0 $(( COUNT - 1 )) ); do
 		touch "$DIR/frame__________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________${i}"
-		for j in `seq 0 9`; do
-			touch "$DIR/frame________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________${i}".${j}
+		for j in `seq 1 ${MULTIPLIER}`; do
+			touch "$DIR/frame_______________________________________________________________________________________________________________________________________________________________________________________________________________________________________________${i}".${j}
 		done
 	done
 	rm ${DIR}/frame*.*
@@ -398,7 +399,10 @@ mkfs_v4() {
 	# Create a btree-formatted directory with a Leaf that can fit into a single dir block.
 	# This can only be done by creating a btree-formatted directory and
 	# then deleting most entries.
-	mkfiles_sparse ${MNTDIR}/btree_with_single_leaf 204
+	mkfiles_sparse ${MNTDIR}/btree_with_single_leaf 204 10
+	# Create Leaf and Btree directories containing holes
+	mkfiles_sparse ${MNTDIR}/sparse_leaf 4 32
+	mkfiles_sparse ${MNTDIR}/sparse_btree 10 99
 
 	mkdir ${MNTDIR}/files
 	echo "Hello, World!" > ${MNTDIR}/files/hello.txt
