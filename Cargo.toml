@@ -2,12 +2,13 @@
 name = "xfs-fuse"
 description = "Read-only FUSE server implementing XFS"
 version = "0.4.2"
-edition = "2018"
+edition = "2021"
 rust-version = "1.74"
 authors = ["Khaled Emara <mail@khaledemara.dev>"]
 repository = "https://github.com/KhaledEmaraDev/xfuse"
 license = "BSD-2-Clause"
 categories = ["filesystem"]
+keywords = ["xfs", "fuse", "filesystem"]
 exclude = [
   "/.gitignore",
   "/.cirrus.yml",
@@ -27,7 +28,7 @@ libc = "0.2.97"
 num-derive = "0.4.2"
 num-traits = "0.2.14"
 tracing = "0.1.37"
-uuid = "0.8.2"
+uuid = "1.0"
 
 [[test]]
 name = "integration"
