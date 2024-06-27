@@ -1,14 +1,14 @@
 use std::{
     convert::TryFrom,
-    ffi::{OsString, OsStr},
+    ffi::{OsStr, OsString},
     fs::File,
     io::{self, Read},
-    os::unix::ffi::{OsStringExt, OsStrExt},
+    os::unix::ffi::{OsStrExt, OsStringExt},
     path::{Path, PathBuf},
     process::Command,
     str::FromStr,
     thread::sleep,
-    time::Duration
+    time::Duration,
 };
 
 use assert_cmd::cargo::CommandCargoExt;
@@ -19,10 +19,10 @@ use xattr::FileExt;
 mod util {
     include!("../tests/util.rs");
 }
-use util::{GOLDEN1K, GOLDEN4K, waitfor};
+use util::{waitfor, GOLDEN1K, GOLDEN4K};
 
 pub struct Gnop {
-    path: PathBuf
+    path: PathBuf,
 }
 impl Gnop {
     pub fn new(dev: &Path) -> io::Result<Self> {
@@ -37,7 +37,7 @@ impl Gnop {
         }
         let mut path = PathBuf::from(dev);
         path.set_extension("nop");
-        Ok(Self{path})
+        Ok(Self { path })
     }
 
     pub fn as_path(&self) -> &Path {
@@ -76,23 +76,23 @@ impl Drop for Gnop {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Image {
     Golden1K,
-    Golden4K
+    Golden4K,
 }
 
 struct Bench {
     /// Name of the benchmark
-    name: &'static str,
+    name:  &'static str,
     /// The disk image to use
     image: Image,
     /// The benchmark's function.  The argument is the path to the mounted file
     /// sytem.  The return value is the number of "useful" bytes the benchmark
     /// read.  An ideal file system would never read anything else.
-    f: fn(&Path) -> u64
+    f:     fn(&Path) -> u64,
 }
 
 impl Bench {
     const fn new(name: &'static str, image: Image, f: fn(&Path) -> u64) -> Self {
-        Self{name, image, f}
+        Self { name, image, f }
     }
 
     fn image(&self) -> &Path {
@@ -127,8 +127,7 @@ const BENCHES: &[Bench] = &[
 
 fn stat_files(path: &Path, inode_size: u64) -> u64 {
     let mut nfiles = 0;
-    let walker = walkdir::WalkDir::new(path)
-        .into_iter();
+    let walker = walkdir::WalkDir::new(path).into_iter();
     for entry in walker {
         let entry = entry.unwrap();
         let _ = entry.metadata().unwrap();
@@ -191,14 +190,30 @@ fn read_files(mountpoint: &Path, files: &[&'static str]) -> u64 {
 
 /// Read all fragmented dense files in the 4k golden image, sequentially
 fn read_fragmented_1k(mountpoint: &Path) -> u64 {
-    read_files(mountpoint,
-               &["btree2.2.txt", "btree3.txt", "btree3.3.txt", "btree2_with_xattrs.txt"])
+    read_files(
+        mountpoint,
+        &[
+            "btree2.2.txt",
+            "btree3.txt",
+            "btree3.3.txt",
+            "btree2_with_xattrs.txt",
+        ],
+    )
 }
 
 /// Read all fragmented dense files in the 1k golden image, sequentially
 fn read_fragmented_4k(mountpoint: &Path) -> u64 {
-    read_files(mountpoint, &["partial_extent.txt", "single_extent.txt", "four_extents.txt",
-               "btree2.txt", "btree2.4.txt", "btree3.txt"])
+    read_files(
+        mountpoint,
+        &[
+            "partial_extent.txt",
+            "single_extent.txt",
+            "four_extents.txt",
+            "btree2.txt",
+            "btree2.4.txt",
+            "btree3.txt",
+        ],
+    )
 }
 
 /// Read all sequential dense files, sequentially
@@ -232,7 +247,10 @@ fn get_extents_xattrs(mountpoint: &Path) -> u64 {
 
 /// Get all extended attributes that are stored in a btree
 fn get_btree_xattrs(mountpoint: &Path) -> u64 {
-    get_xattrs(mountpoint, &["xattrs/btree2", "xattrs/btree2.5", "xattrs/btree3"])
+    get_xattrs(
+        mountpoint,
+        &["xattrs/btree2", "xattrs/btree2.5", "xattrs/btree3"],
+    )
 }
 
 #[named]
@@ -252,8 +270,10 @@ fn main() {
     //   4) unmount
     //   5) Check the gnop's stats and print the difference
 
-    println!("{:^19} {:^20} {:^20}", "Benchmark", "Total bytes read",
-             "Read Amplification");
+    println!(
+        "{:^19} {:^20} {:^20}",
+        "Benchmark", "Total bytes read", "Read Amplification"
+    );
     println!("{:=^19} {:=^20} {:=^20}", "", "", "");
 
     for bench in BENCHES {
@@ -261,7 +281,8 @@ fn main() {
         let gnop = Gnop::new(md.path()).unwrap();
         let d = tempdir().unwrap();
 
-        let mut child = Command::cargo_bin("xfs-fuse").unwrap()
+        let mut child = Command::cargo_bin("xfs-fuse")
+            .unwrap()
             .arg(gnop.as_path())
             .arg(d.path())
             .spawn()
@@ -270,7 +291,8 @@ fn main() {
         waitfor(Duration::from_secs(5), || {
             let s = nix::sys::statfs::statfs(d.path()).unwrap();
             s.filesystem_type_name() == "fusefs.xfs"
-        }).unwrap();
+        })
+        .unwrap();
 
         // start_bytes excludes whatever was necessary to mount the file system.
         let start_bytes = gnop.read_bytes();
@@ -278,9 +300,7 @@ fn main() {
         let useful_bytes = bench.run(d.path());
 
         loop {
-            let cmd = Command::new("umount")
-                .arg(d.path())
-                .output();
+            let cmd = Command::new("umount").arg(d.path()).output();
             match cmd {
                 Err(e) => {
                     eprintln!("Executing umount failed: {}", e);
@@ -289,15 +309,12 @@ fn main() {
                         return;
                     }
                     panic!("Executing umount failed");
-                },
+                }
                 Ok(output) => {
-                    let errmsg = OsString::from_vec(output.stderr)
-                        .into_string()
-                        .unwrap();
+                    let errmsg = OsString::from_vec(output.stderr).into_string().unwrap();
                     if output.status.success() {
                         break;
-                    } else if errmsg.contains("not a file system root directory")
-                    {
+                    } else if errmsg.contains("not a file system root directory") {
                         // The daemon probably crashed.
                         break;
                     } else if errmsg.contains("Device busy") {

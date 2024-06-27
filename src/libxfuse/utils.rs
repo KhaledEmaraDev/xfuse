@@ -25,24 +25,40 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use fuser::FileType;
-
-use super::dir3::{XFS_DIR3_FT_DIR, XFS_DIR3_FT_REG_FILE, XFS_DIR3_FT_SYMLINK, XFS_DIR3_FT_SOCK, XFS_DIR3_FT_CHRDEV, XFS_DIR3_FT_BLKDEV, XFS_DIR3_FT_FIFO};
-
-use libc::{c_int, mode_t, ENOENT, S_IFDIR, S_IFLNK, S_IFMT, S_IFREG, S_IFSOCK, S_IFCHR, S_IFBLK, S_IFIFO};
 use bincode::{
-    Decode,
-    de::{
-        Decoder,
-        read::Reader
-    },
+    de::{read::Reader, Decoder},
     error::DecodeError,
-    impl_borrow_decode
+    impl_borrow_decode,
+    Decode,
+};
+use fuser::FileType;
+use libc::{
+    c_int,
+    mode_t,
+    ENOENT,
+    S_IFBLK,
+    S_IFCHR,
+    S_IFDIR,
+    S_IFIFO,
+    S_IFLNK,
+    S_IFMT,
+    S_IFREG,
+    S_IFSOCK,
 };
 use tracing::error;
 
+use super::dir3::{
+    XFS_DIR3_FT_BLKDEV,
+    XFS_DIR3_FT_CHRDEV,
+    XFS_DIR3_FT_DIR,
+    XFS_DIR3_FT_FIFO,
+    XFS_DIR3_FT_REG_FILE,
+    XFS_DIR3_FT_SOCK,
+    XFS_DIR3_FT_SYMLINK,
+};
+
 /// xfs-fuse UUID type
-/// 
+///
 /// This is just like the `Uuid` from the `uuid` crate, except that it
 /// serializes as a fixed-size array instead of a slice
 // The Uuid crate serializes to a slice, and its maintainers have ruled out ever
@@ -59,8 +75,7 @@ impl Uuid {
 
 impl bincode::Decode for Uuid {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-        <[u8; 16]>::decode(decoder)
-        .map(|v| Uuid(uuid::Uuid::from_bytes(v)))
+        <[u8; 16]>::decode(decoder).map(|v| Uuid(uuid::Uuid::from_bytes(v)))
     }
 }
 impl_borrow_decode!(Uuid);
@@ -103,7 +118,8 @@ pub fn get_file_type(kind: FileKind) -> Result<FileType, c_int> {
 
 /// Decode a Bincode structure from a byte slice.
 pub fn decode<T>(bytes: &[u8]) -> Result<(T, usize), DecodeError>
-    where T: Decode
+where
+    T: Decode,
 {
     let config = bincode::config::standard()
         .with_big_endian()
@@ -113,8 +129,9 @@ pub fn decode<T>(bytes: &[u8]) -> Result<(T, usize), DecodeError>
 
 /// Decode a Bincode structure from a Reader
 pub fn decode_from<T, R>(r: R) -> Result<T, DecodeError>
-    where T: Decode,
-          R: Reader
+where
+    T: Decode,
+    R: Reader,
 {
     let config = bincode::config::standard()
         .with_big_endian()

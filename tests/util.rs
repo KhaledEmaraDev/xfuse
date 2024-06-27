@@ -33,13 +33,13 @@ macro_rules! require_fusefs {
         use nix::unistd::Uid;
         use sysctl::Sysctl as _;
 
-        if (!Uid::current().is_root() &&
-            ::sysctl::CtlValue::Int(0) ==
-                ::sysctl::Ctl::new(&"vfs.usermount")
+        if (!Uid::current().is_root()
+            && ::sysctl::CtlValue::Int(0)
+                == ::sysctl::Ctl::new(&"vfs.usermount")
                     .unwrap()
                     .value()
-                    .unwrap()) ||
-            !::std::path::Path::new("/dev/fuse").exists()
+                    .unwrap())
+            || !::std::path::Path::new("/dev/fuse").exists()
         {
             skip!(
                 "{} requires the ability to mount fusefs. Skipping test.",
@@ -52,17 +52,20 @@ macro_rules! require_fusefs {
 #[macro_export]
 macro_rules! require_root {
     () => {
-        if ! ::nix::unistd::Uid::current().is_root() {
+        if !::nix::unistd::Uid::current().is_root() {
             use ::std::io::Write;
 
             let stderr = ::std::io::stderr();
             let mut handle = stderr.lock();
-            writeln!(handle, "{} requires root privileges.  Skipping test.",
-                concat!(::std::module_path!(), "::", function_name!()))
-                .unwrap();
+            writeln!(
+                handle,
+                "{} requires root privileges.  Skipping test.",
+                concat!(::std::module_path!(), "::", function_name!())
+            )
+            .unwrap();
             return;
         }
-    }
+    };
 }
 
 fn prepare_image(filename: &str) -> PathBuf {
@@ -79,9 +82,7 @@ fn prepare_image(filename: &str) -> PathBuf {
     // https://github.com/facebook/zstd/issues/3748
     let zmtime = fs::metadata(&zimg).unwrap().modified().unwrap();
     let mtime = fs::metadata(&img);
-    if mtime.is_err() || (mtime.unwrap().modified().unwrap() +
-                          Duration::from_secs(1)) < zmtime
-    {
+    if mtime.is_err() || (mtime.unwrap().modified().unwrap() + Duration::from_secs(1)) < zmtime {
         Command::new("unzstd")
             .arg("-f")
             .arg("-o")

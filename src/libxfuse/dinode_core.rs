@@ -25,24 +25,20 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use super::definitions::*;
-use super::utils::{get_file_type, FileKind, Uuid};
-use super::S_IFMT;
-use super::btree::{BmdrBlock, BmbtKey};
-
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use bincode::{
-    Decode,
-    de::Decoder,
-    error::DecodeError,
-    impl_borrow_decode
-};
+use bincode::{de::Decoder, error::DecodeError, impl_borrow_decode, Decode};
 use fuser::FileAttr;
 use libc::c_int;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 
+use super::{
+    btree::{BmbtKey, BmdrBlock},
+    definitions::*,
+    utils::{get_file_type, FileKind, Uuid},
+    S_IFMT,
+};
 
 #[derive(Debug, FromPrimitive)]
 #[cfg_attr(test, derive(Default))]
@@ -66,7 +62,7 @@ impl_borrow_decode!(XfsDinodeFmt);
 
 #[derive(Debug, Decode, Default)]
 pub struct XfsTimestamp {
-    pub t_sec: i32,
+    pub t_sec:  i32,
     pub t_nsec: u32,
 }
 
@@ -95,31 +91,32 @@ mod constants {
 #[cfg_attr(test, derive(Default))]
 pub struct DinodeCore {
     //_di_magic: u16,
-    pub di_mode: u16,
-    pub di_version: i8,
-    pub di_format: XfsDinodeFmt,
+    pub di_mode:      u16,
+    pub di_version:   i8,
+    pub di_format:    XfsDinodeFmt,
     //_di_onlink: u16,
-    pub di_uid: u32,
-    pub di_gid: u32,
-    pub di_nlink: u32,
+    pub di_uid:       u32,
+    pub di_gid:       u32,
+    pub di_nlink:     u32,
     //_di_projid: u16,
     //_di_projid_hi: u16,
     //_di_pad: [u8; 6],
     //_di_flushiter: u16,
-    pub di_atime: XfsTimestamp,
-    pub di_mtime: XfsTimestamp,
-    pub di_ctime: XfsTimestamp,
-    pub di_size: XfsFsize,
-    pub di_nblocks: XfsRfsblock,
+    pub di_atime:     XfsTimestamp,
+    pub di_mtime:     XfsTimestamp,
+    pub di_ctime:     XfsTimestamp,
+    pub di_size:      XfsFsize,
+    pub di_nblocks:   XfsRfsblock,
     //_di_extsize: XfsExtlen,
-    pub di_nextents: XfsExtnum,
+    pub di_nextents:  XfsExtnum,
     pub di_anextents: XfsAextnum,
-    pub di_forkoff: u8,
-    pub di_aformat: XfsDinodeFmt,
+    pub di_forkoff:   u8,
+    pub di_aformat:   XfsDinodeFmt,
     //_di_dmevmask: u32,
     //_di_dmstate: u16,
     //_di_flags: u16,
-    pub di_gen: u32,
+    pub di_gen:       u32,
+
     //_di_next_unlinked: u32,
 
     /* Version 5 file system (inode version 3) fields start here */
@@ -130,7 +127,7 @@ pub struct DinodeCore {
     //_di_cowextsize: u32,
     //_di_pad2: [u8; 12],
     pub di_crtime: XfsTimestamp,
-    pub di_ino: u64,
+    pub di_ino:    u64,
     //_di_uuid: Uuid,
 }
 
@@ -152,7 +149,11 @@ impl DinodeCore {
             let space = (self.di_forkoff as usize) * 8 / 2;
             // Round up to a multiple of 8
             let rem = space % 8;
-            if rem == 0 { space } else { space + 8 - rem }
+            if rem == 0 {
+                space
+            } else {
+                space + 8 - rem
+            }
         };
         let gap = space - BmdrBlock::SIZE - bb_numrecs as usize * BmbtKey::SIZE;
         // Round down to a multiple of 8
@@ -184,7 +185,7 @@ impl DinodeCore {
         match self.di_version {
             1..=2 => 0x64,
             3 => 0xb0,
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     }
 
@@ -196,21 +197,21 @@ impl DinodeCore {
             assert!(ino == 1 || ino == self.di_ino);
         }
         Ok(FileAttr {
-                ino,
-                size: self.di_size as u64,
-                blocks: self.di_nblocks,
-                atime: self.timestamp(&self.di_atime),
-                mtime: self.timestamp(&self.di_mtime),
-                ctime: self.timestamp(&self.di_ctime),
-                crtime: self.timestamp(&self.di_crtime),
-                kind,
-                perm: self.di_mode & !S_IFMT,
-                nlink: self.di_nlink,
-                uid: self.di_uid,
-                gid: self.di_gid,
-                rdev: 0,
-                blksize: 0,
-                flags: 0,
+            ino,
+            size: self.di_size as u64,
+            blocks: self.di_nblocks,
+            atime: self.timestamp(&self.di_atime),
+            mtime: self.timestamp(&self.di_mtime),
+            ctime: self.timestamp(&self.di_ctime),
+            crtime: self.timestamp(&self.di_crtime),
+            kind,
+            perm: self.di_mode & !S_IFMT,
+            nlink: self.di_nlink,
+            uid: self.di_uid,
+            gid: self.di_gid,
+            rdev: 0,
+            blksize: 0,
+            flags: 0,
         })
     }
 
@@ -220,15 +221,12 @@ impl DinodeCore {
             // feature stabilizes.
             let classic_epoch: SystemTime = UNIX_EPOCH - Duration::from_secs(i32::MAX as u64 + 1);
 
-            classic_epoch + Duration::from_nanos(
-                u64::from(ts.t_sec as u32) * (1u64 << 32) + 
-                u64::from(ts.t_nsec)
-            )
+            classic_epoch
+                + Duration::from_nanos(
+                    u64::from(ts.t_sec as u32) * (1u64 << 32) + u64::from(ts.t_nsec),
+                )
         } else {
-            UNIX_EPOCH + Duration::new(
-                ts.t_sec as u64,
-                ts.t_nsec,
-            )
+            UNIX_EPOCH + Duration::new(ts.t_sec as u64, ts.t_nsec)
         }
     }
 }
@@ -243,7 +241,10 @@ impl Decode for DinodeCore {
         assert_eq!(di_magic, XFS_DINODE_MAGIC, "Inode magic number is invalid");
         let di_mode: u16 = Decode::decode(decoder)?;
         let di_version: i8 = Decode::decode(decoder)?;
-        assert!(di_version == 2 || di_version == 3, "Only inode versions 2 and 3 are supported");
+        assert!(
+            di_version == 2 || di_version == 3,
+            "Only inode versions 2 and 3 are supported"
+        );
         let di_format: XfsDinodeFmt = Decode::decode(decoder)?;
         let _di_onlink: u16 = Decode::decode(decoder)?;
         let di_uid: u32 = Decode::decode(decoder)?;
@@ -307,9 +308,9 @@ impl_borrow_decode!(DinodeCore);
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use rstest::rstest;
+
+    use super::*;
 
     /// Test the afork_btree_ptr_gap function against data from real live file systems.  The XFS
     /// Algorithms & Data Structures book does not accurately document this gap.
@@ -322,13 +323,13 @@ mod tests {
         #[case] di_forkoff: u8,
         #[case] di_version: i8,
         #[case] bb_numrecs: u16,
-        #[case] gap: usize)
-    {
+        #[case] gap: usize,
+    ) {
         let dic = DinodeCore {
             di_forkoff,
             di_version,
             di_aformat: XfsDinodeFmt::Btree,
-            .. Default::default()
+            ..Default::default()
         };
         assert_eq!(dic.afork_btree_ptr_gap(inode_size, bb_numrecs), gap);
     }
@@ -353,13 +354,13 @@ mod tests {
         #[case] di_forkoff: u8,
         #[case] di_version: i8,
         #[case] bb_numrecs: u16,
-        #[case] gap: usize)
-    {
+        #[case] gap: usize,
+    ) {
         let dic = DinodeCore {
             di_forkoff,
             di_version,
             di_format: XfsDinodeFmt::Btree,
-            .. Default::default()
+            ..Default::default()
         };
         assert_eq!(dic.dfork_btree_ptr_gap(inode_size, bb_numrecs), gap);
     }

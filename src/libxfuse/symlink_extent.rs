@@ -30,25 +30,25 @@ use std::{
     io::{BufRead, Seek, SeekFrom},
 };
 
-use bincode::{Decode, de::read::Reader};
+use bincode::{de::read::Reader, Decode};
 
 use super::{
-    bmbt_rec::Bmx, 
+    bmbt_rec::Bmx,
     definitions::XFS_SYMLINK_MAGIC,
     sb::Sb,
-    utils::{Uuid, decode_from}
+    utils::{decode_from, Uuid},
 };
 
 #[derive(Clone, Copy, Debug, Decode)]
 pub struct DsymlinkHdr {
-    sl_magic: u32,
+    sl_magic:  u32,
     sl_offset: u32,
-    sl_bytes: u32,
-    _sl_crc: u32,
-    _sl_uuid: Uuid,
+    sl_bytes:  u32,
+    _sl_crc:   u32,
+    _sl_uuid:  Uuid,
     _sl_owner: u64,
     _sl_blkno: u64,
-    _sl_lsn: u64,
+    _sl_lsn:   u64,
 }
 
 #[derive(Debug)]
@@ -70,7 +70,9 @@ impl SymlinkExtents {
             }
             let fsb = ofsb.unwrap();
             let blocks = oblocks.unwrap();
-            buf_reader.seek(SeekFrom::Start(superblock.fsb_to_offset(fsb))).unwrap();
+            buf_reader
+                .seek(SeekFrom::Start(superblock.fsb_to_offset(fsb)))
+                .unwrap();
 
             let bytes = match superblock.version() {
                 5 => {
@@ -81,12 +83,12 @@ impl SymlinkExtents {
                         .seek(SeekFrom::Current(hdr.sl_offset as i64))
                         .unwrap();
                     hdr.sl_bytes as usize
-                },
+                }
                 4 => {
                     // Version 4 file systems do not have the DsymlinkHdr
                     (blocks as usize) << superblock.sb_blocklog
-                },
-                _ => unimplemented!()
+                }
+                _ => unimplemented!(),
             };
 
             let oldlen = data.len();

@@ -25,30 +25,41 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use std::collections::HashMap;
-use std::ffi::OsStr;
-use std::fs::File;
-use std::io::{BufReader, Read};
-use std::os::unix::ffi::OsStrExt;
-use std::sync::OnceLock;
-use std::time::Duration;
-
-use super::attr::Attr;
-use super::definitions::XfsIno;
-use super::dinode::Dinode;
-use super::dir3::Dir3;
-use super::sb::Sb;
+use std::{
+    collections::HashMap,
+    ffi::OsStr,
+    fs::File,
+    io::{BufReader, Read},
+    os::unix::ffi::OsStrExt,
+    sync::OnceLock,
+    time::Duration,
+};
 
 use fuser::{
-    Filesystem, KernelConfig, ReplyAttr, ReplyDirectory, ReplyEntry, ReplyLseek, ReplyOpen,
-    ReplyStatfs, ReplyXattr, Request, FUSE_ROOT_ID,
     consts::{
-        FOPEN_KEEP_CACHE, FOPEN_CACHE_DIR, FUSE_NO_OPEN_SUPPORT, FUSE_NO_OPENDIR_SUPPORT,
-        FUSE_ASYNC_READ, FUSE_EXPORT_SUPPORT
-    }
+        FOPEN_CACHE_DIR,
+        FOPEN_KEEP_CACHE,
+        FUSE_ASYNC_READ,
+        FUSE_EXPORT_SUPPORT,
+        FUSE_NO_OPENDIR_SUPPORT,
+        FUSE_NO_OPEN_SUPPORT,
+    },
+    Filesystem,
+    KernelConfig,
+    ReplyAttr,
+    ReplyDirectory,
+    ReplyEntry,
+    ReplyLseek,
+    ReplyOpen,
+    ReplyStatfs,
+    ReplyXattr,
+    Request,
+    FUSE_ROOT_ID,
 };
 use libc::ERANGE;
 use tracing::warn;
+
+use super::{attr::Attr, definitions::XfsIno, dinode::Dinode, dir3::Dir3, sb::Sb};
 
 /// We must store the Superblock in a global variable.  This is unfortunate, and limits us to only
 /// opening one disk image at a time, but it's necessary in order to use information from the
@@ -58,15 +69,15 @@ pub(super) static SUPERBLOCK: OnceLock<Sb> = OnceLock::new();
 #[derive(Debug)]
 struct OpenInode {
     dinode: Dinode,
-    count: u64
+    count:  u64,
 }
 
 #[derive(Debug)]
 pub struct Volume {
     pub device: File,
-    pub sb: Sb,
+    pub sb:     Sb,
     open_files: HashMap<u64, OpenInode>,
-    no_open: bool,
+    no_open:    bool,
     no_opendir: bool,
 }
 
@@ -85,22 +96,29 @@ impl Volume {
         let root_inode = Dinode::from(buf_reader.by_ref(), &superblock, superblock.sb_rootino);
         let mut open_files = HashMap::new();
         // Prepopulate the root inode into the cache, since fusefs never sends a lookup for it.
-        open_files.insert(FUSE_ROOT_ID, OpenInode{dinode: root_inode, count: 1});
+        open_files.insert(
+            FUSE_ROOT_ID,
+            OpenInode {
+                dinode: root_inode,
+                count:  1,
+            },
+        );
 
         Volume {
             device,
             sb: superblock,
             open_files,
             no_open: false,
-            no_opendir: false
+            no_opendir: false,
         }
     }
 
-    fn open_inode(&mut self, ino: u64) -> &mut OpenInode{
+    fn open_inode(&mut self, ino: u64) -> &mut OpenInode {
         let f = &self.device;
         let sb = &self.sb;
-        self.open_files.entry(ino)
-            .and_modify(|e| e.count +=1 )
+        self.open_files
+            .entry(ino)
+            .and_modify(|e| e.count += 1)
             .or_insert_with(|| {
                 let dinode = Dinode::from(
                     BufReader::with_capacity(sb.inode_size(), f).by_ref(),
@@ -111,7 +129,7 @@ impl Volume {
                         ino as XfsIno
                     },
                 );
-                OpenInode{dinode, count: 1}
+                OpenInode { dinode, count: 1 }
             })
     }
 }
@@ -130,28 +148,28 @@ impl Filesystem for Volume {
                         // We don't need to report the inode generation since this is a read-only
                         // file system.  But we'll do it anyway.
                         reply.entry(&Self::TTL, &attr, oi.dinode.di_core.di_gen.into())
-                    },
-                    Err(err) => reply.error(err)
+                    }
+                    Err(err) => reply.error(err),
                 }
             }
             Err(err) => reply.error(err),
         }
     }
 
-    fn lseek(&mut self,
+    fn lseek(
+        &mut self,
         _req: &Request<'_>,
         ino: u64,
         _fh: u64,
         offset: i64,
         whence: i32,
-        reply: ReplyLseek
-    )
-    {
+        reply: ReplyLseek,
+    ) {
         let uoffset = if let Ok(offs) = u64::try_from(offset) {
             offs
         } else {
             reply.error(libc::EINVAL);
-            return
+            return;
         };
 
         let oi = &self.open_files.get(&ino).unwrap();
@@ -164,7 +182,7 @@ impl Filesystem for Volume {
 
         match file.lseek(buf_reader.by_ref(), uoffset, whence) {
             Ok(ofs) => reply.offset(i64::try_from(ofs).unwrap()),
-            Err(e) => reply.error(e)
+            Err(e) => reply.error(e),
         }
     }
 
@@ -184,15 +202,18 @@ impl Filesystem for Volume {
                     // ever happens.
                     warn!("Partial forget for ino {}", ino);
                 }
-            },
-            None => warn!("Forget without lookup for inode {}", ino)
+            }
+            None => warn!("Forget without lookup for inode {}", ino),
         }
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
-        let attr = self.open_files.get(&ino)
+        let attr = self
+            .open_files
+            .get(&ino)
             .expect("getattr before lookup")
-            .dinode.di_core
+            .dinode
+            .di_core
             .stat(ino)
             .expect("Unknown file type");
 
@@ -211,10 +232,10 @@ impl Filesystem for Volume {
     }
 
     fn readlink(&mut self, _req: &Request, ino: u64, reply: fuser::ReplyData) {
-        let mut buf_reader = BufReader::with_capacity(self.sb.sb_blocksize as usize,
-                                                      &self.device);
+        let mut buf_reader = BufReader::with_capacity(self.sb.sb_blocksize as usize, &self.device);
         reply.data(
-            self.open_files.get(&ino)
+            self.open_files
+                .get(&ino)
                 .expect("readlink before lookup")
                 .dinode
                 .get_link_data(buf_reader.by_ref(), &self.sb)
@@ -248,7 +269,7 @@ impl Filesystem for Volume {
 
         match file.read(buf_reader.by_ref(), offset, size) {
             Ok((v, ignore)) => reply.data(&v[ignore..]),
-            Err(e) => reply.error(e)
+            Err(e) => reply.error(e),
         }
     }
 
@@ -349,21 +370,19 @@ impl Filesystem for Volume {
         let oi = &mut self.open_files.get_mut(&ino).unwrap();
         let mut buf_reader = BufReader::with_capacity(self.sb.sb_blocksize as usize, &self.device);
         match oi.dinode.get_attrs(buf_reader.by_ref(), &self.sb) {
-            Some(attrs) => {
-                match attrs.get(buf_reader.by_ref(), &self.sb, name) {
-                    Ok(value) => {
-                        let len: u32 = value.len().try_into().unwrap();
-                        if size == 0 {
-                            reply.size(len);
-                        } else if len > size {
-                            reply.error(ERANGE);
-                        } else {
-                             reply.data(value.as_slice())
-                        }
-                    },
-                    Err(e) => reply.error(e)
+            Some(attrs) => match attrs.get(buf_reader.by_ref(), &self.sb, name) {
+                Ok(value) => {
+                    let len: u32 = value.len().try_into().unwrap();
+                    if size == 0 {
+                        reply.size(len);
+                    } else if len > size {
+                        reply.error(ERANGE);
+                    } else {
+                        reply.data(value.as_slice())
+                    }
                 }
-            }
+                Err(e) => reply.error(e),
+            },
             None => {
                 reply.error(libc::ENOATTR);
             }
@@ -371,7 +390,10 @@ impl Filesystem for Volume {
     }
 
     fn listxattr(&mut self, _req: &Request, ino: u64, size: u32, reply: ReplyXattr) {
-        let oi = &mut self.open_files.get_mut(&ino).expect("listxattr before lookup");
+        let oi = &mut self
+            .open_files
+            .get_mut(&ino)
+            .expect("listxattr before lookup");
         let mut buf_reader = BufReader::with_capacity(self.sb.sb_blocksize as usize, &self.device);
         match oi.dinode.get_attrs(buf_reader.by_ref(), &self.sb) {
             Some(ref mut attrs) => {
@@ -390,7 +412,11 @@ impl Filesystem for Volume {
                 let list = attrs.list(buf_reader.by_ref(), &self.sb);
                 // Assert that we calculated the list size correctly.  This assertion is only
                 // safe since we're a read-only file system.
-                assert_eq!(list.len(), attrs_size as usize, "size calculation was wrong!");
+                assert_eq!(
+                    list.len(),
+                    attrs_size as usize,
+                    "size calculation was wrong!"
+                );
                 reply.data(list.as_slice());
             }
             None => {

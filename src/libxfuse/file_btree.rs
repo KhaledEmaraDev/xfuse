@@ -33,13 +33,13 @@ use super::{
     btree::{Btree, BtreeRoot},
     definitions::{XfsFileoff, XfsFsblock, XfsFsize},
     file::File,
-    volume::SUPERBLOCK
+    volume::SUPERBLOCK,
 };
 
 #[derive(Debug)]
 pub struct FileBtree {
     pub btree: BtreeRoot,
-    pub size: XfsFsize,
+    pub size:  XfsFsize,
 }
 
 impl<R: BufRead + Reader + Seek> File<R> for FileBtree {

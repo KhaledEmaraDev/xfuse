@@ -25,22 +25,26 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use std::ffi::{OsStr, OsString};
-use std::io::{BufRead, Seek};
-use std::os::unix::ffi::OsStringExt;
-
-use super::definitions::*;
-use super::sb::Sb;
-use super::utils::{Uuid, decode};
-use super::volume::SUPERBLOCK;
+use std::{
+    ffi::{OsStr, OsString},
+    io::{BufRead, Seek},
+    os::unix::ffi::OsStringExt,
+};
 
 use bincode::{
+    de::{read::Reader, Decoder},
+    error::DecodeError,
     Decode,
-    de::{Decoder, read::Reader},
-    error::DecodeError
 };
 use fuser::FileType;
 use libc::c_int;
+
+use super::{
+    definitions::*,
+    sb::Sb,
+    utils::{decode, Uuid},
+    volume::SUPERBLOCK,
+};
 
 type XfsDir2DataOff = u16;
 /// Block address of a directory entry, in eight byte units.
@@ -65,11 +69,11 @@ pub use constants::*;
 #[derive(Debug, Decode)]
 pub struct Dir3BlkHdr {
     pub magic: u32,
-    _crc: u32,
-    _blkno: u64,
-    _lsn: u64,
-    _uuid: Uuid,
-    _owner: u64,
+    _crc:      u32,
+    _blkno:    u64,
+    _lsn:      u64,
+    _uuid:     Uuid,
+    _owner:    u64,
 }
 
 impl Dir3BlkHdr {
@@ -88,7 +92,7 @@ impl Dir2DataFree {
 
 #[derive(Debug, Decode)]
 pub struct Dir2DataHdr {
-    pub magic: u32,
+    pub magic:  u32,
     _best_free: [Dir2DataFree; constants::XFS_DIR2_DATA_FD_COUNT],
 }
 
@@ -98,21 +102,22 @@ impl Dir2DataHdr {
 
 #[derive(Debug, Decode)]
 pub struct Dir3DataHdr {
-    pub hdr: Dir3BlkHdr,
+    pub hdr:    Dir3BlkHdr,
     _best_free: [Dir2DataFree; constants::XFS_DIR2_DATA_FD_COUNT],
-    _pad: u32,
+    _pad:       u32,
 }
 
 impl Dir3DataHdr {
-    pub const SIZE: u64 = Dir3BlkHdr::SIZE + constants::XFS_DIR2_DATA_FD_COUNT as u64 * Dir2DataFree::SIZE + 4;
+    pub const SIZE: u64 =
+        Dir3BlkHdr::SIZE + constants::XFS_DIR2_DATA_FD_COUNT as u64 * Dir2DataFree::SIZE + 4;
 }
 
 #[derive(Debug)]
 pub struct Dir2DataEntry {
     pub inumber: XfsIno,
-    pub name: OsString,
-    pub ftype: Option<u8>,
-    pub tag: XfsDir2DataOff,
+    pub name:    OsString,
+    pub ftype:   Option<u8>,
+    pub tag:     XfsDir2DataOff,
 }
 
 impl Dir2DataEntry {
@@ -146,7 +151,10 @@ impl Decode for Dir2DataEntry {
         } else {
             // current offset is 9 + 1 + namelen
             5 - namelen as i16
-        }.rem_euclid(8).try_into().unwrap();
+        }
+        .rem_euclid(8)
+        .try_into()
+        .unwrap();
         decoder.reader().consume(pad);
         let tag = Decode::decode(decoder)?;
         Ok(Dir2DataEntry {
@@ -161,8 +169,8 @@ impl Decode for Dir2DataEntry {
 #[derive(Debug)]
 pub struct Dir2DataUnused {
     _freetag: u16,
-    _length: XfsDir2DataOff,
-    _tag: XfsDir2DataOff,
+    _length:  XfsDir2DataOff,
+    _tag:     XfsDir2DataOff,
 }
 
 impl Decode for Dir2DataUnused {

@@ -27,29 +27,21 @@
  */
 use std::{
     cell::{Ref, RefCell},
-    collections::{BTreeMap, btree_map::Entry},
+    collections::{btree_map::Entry, BTreeMap},
     ffi::OsStr,
     io::{BufRead, Seek, SeekFrom},
-    os::unix::ffi::OsStrExt
+    os::unix::ffi::OsStrExt,
 };
-
 
 use bincode::{
-    Decode,
-    de::{Decoder, read::Reader},
+    de::{read::Reader, Decoder},
     error::DecodeError,
     impl_borrow_decode,
+    Decode,
 };
-
 use byteorder::{BigEndian, ReadBytesExt};
 
-use super::{
-    definitions::*,
-    utils::Uuid,
-    sb::Sb,
-    utils,
-    volume::SUPERBLOCK
-};
+use super::{definitions::*, sb::Sb, utils, utils::Uuid, volume::SUPERBLOCK};
 
 macro_rules! rol32 {
     ($x:expr, $y:expr) => {
@@ -90,14 +82,14 @@ pub fn hashname(name: &OsStr) -> XfsDahash {
 #[derive(Debug, Decode)]
 pub struct XfsDaBlkinfo {
     pub forw: u32,
-    _back: u32,
-    _magic: u16,
-    _pad: u16
+    _back:    u32,
+    _magic:   u16,
+    _pad:     u16,
 }
 
 #[derive(Debug)]
 pub struct XfsDa3Blkinfo {
-    pub forw: u32,
+    pub forw:  u32,
     // _back: u32
     pub magic: u16,
     // _pad: u16
@@ -121,18 +113,14 @@ impl Decode for XfsDa3Blkinfo {
         let _owner: u64 = Decode::decode(decoder)?;
         assert_eq!(uuid, SUPERBLOCK.get().unwrap().sb_uuid, "UUID mismatch!");
 
-        Ok(XfsDa3Blkinfo {
-            forw,
-            magic,
-        })
+        Ok(XfsDa3Blkinfo { forw, magic })
     }
 }
 impl_borrow_decode!(XfsDa3Blkinfo);
 
-
 #[derive(Debug, Decode)]
 struct XfsDaNodeHdr {
-    _info: XfsDaBlkinfo,
+    _info:     XfsDaBlkinfo,
     pub count: u16,
     pub level: u16,
 }
@@ -154,10 +142,7 @@ impl Decode for XfsDa3NodeHdr {
         let count = Decode::decode(decoder)?;
         let level = Decode::decode(decoder)?;
         let _pad32: u32 = Decode::decode(decoder)?;
-        Ok(XfsDa3NodeHdr {
-            count,
-            level,
-        })
+        Ok(XfsDa3NodeHdr { count, level })
     }
 }
 impl_borrow_decode!(XfsDa3NodeHdr);
@@ -165,7 +150,7 @@ impl_borrow_decode!(XfsDa3NodeHdr);
 #[derive(Debug, Decode)]
 pub struct XfsDa3NodeEntry {
     pub hashval: XfsDahash,
-    pub before: XfsDablk,
+    pub before:  XfsDablk,
 }
 
 impl XfsDa3NodeEntry {
@@ -182,24 +167,26 @@ impl XfsDa3NodeEntry {
 #[derive(Debug)]
 pub struct XfsDa3Intnode {
     pub magic: u16,
-    level: u16,
+    level:     u16,
     //hdr: XfsDa3NodeHdr,
     pub btree: Vec<XfsDa3NodeEntry>,
-    children: RefCell<BTreeMap<XfsDablk, Self>>
+    children:  RefCell<BTreeMap<XfsDablk, Self>>,
 }
 
 impl XfsDa3Intnode {
     pub fn from<R: BufRead + Reader + Seek>(buf_reader: &mut R) -> XfsDa3Intnode {
-        let magic: u16 = utils::decode(&buf_reader.peek_read(10).unwrap()[8..]).unwrap().0;
+        let magic: u16 = utils::decode(&buf_reader.peek_read(10).unwrap()[8..])
+            .unwrap()
+            .0;
         let (count, level) = match magic {
-            XFS_DA_NODE_MAGIC =>{
+            XFS_DA_NODE_MAGIC => {
                 let hdr: XfsDaNodeHdr = utils::decode_from(buf_reader.by_ref()).unwrap();
                 (hdr.count, hdr.level)
-            },
+            }
             XFS_DA3_NODE_MAGIC => {
                 let hdr: XfsDa3NodeHdr = utils::decode_from(buf_reader.by_ref()).unwrap();
                 (hdr.count, hdr.level)
-            },
+            }
             _ => panic!("Bad magic in XfsDa3Intnode! {:#x}", magic),
         };
 
@@ -209,7 +196,12 @@ impl XfsDa3Intnode {
         }
         let children = Default::default();
 
-        XfsDa3Intnode { magic, level, btree, children }
+        XfsDa3Intnode {
+            magic,
+            level,
+            btree,
+            children,
+        }
     }
 
     pub fn lookup<R: BufRead + Reader + Seek, F: Fn(XfsDablk, &mut R) -> XfsFsblock>(
@@ -230,28 +222,23 @@ impl XfsDa3Intnode {
         } else {
             assert!(self.level > 1);
 
-            let node = self.read_child(buf_reader.by_ref(), super_block, before,
-                &map_dblock)?;
-            node.lookup(
-                buf_reader.by_ref(),
-                super_block,
-                hash,
-                map_dblock,
-            )
+            let node = self.read_child(buf_reader.by_ref(), super_block, before, &map_dblock)?;
+            node.lookup(buf_reader.by_ref(), super_block, hash, map_dblock)
         }
     }
 
-    pub fn first_block<R, F>(&self, buf_reader: &mut R, super_block: &Sb, map_dblock: F,
-        ) -> XfsDablk
-        where R: BufRead + Reader + Seek,
-              F: Fn(XfsDablk, &mut R) -> XfsFsblock
+    pub fn first_block<R, F>(&self, buf_reader: &mut R, super_block: &Sb, map_dblock: F) -> XfsDablk
+    where
+        R: BufRead + Reader + Seek,
+        F: Fn(XfsDablk, &mut R) -> XfsFsblock,
     {
         if self.level == 1 {
             self.btree.first().unwrap().before
         } else {
             let before = self.btree.first().unwrap().before;
-            let node = self.read_child(buf_reader.by_ref(), super_block, before,
-                &map_dblock).unwrap();
+            let node = self
+                .read_child(buf_reader.by_ref(), super_block, before, &map_dblock)
+                .unwrap();
             node.first_block(buf_reader.by_ref(), super_block, map_dblock)
         }
     }
@@ -261,10 +248,11 @@ impl XfsDa3Intnode {
         buf_reader: &mut R,
         super_block: &Sb,
         dblock: XfsDablk,
-        map_dblock: &F
-        ) -> Result<impl std::ops::Deref<Target=Self> + 'a, i32>
-        where R: BufRead + Reader + Seek,
-              F: Fn(XfsDablk, &mut R) -> XfsFsblock
+        map_dblock: &F,
+    ) -> Result<impl std::ops::Deref<Target = Self> + 'a, i32>
+    where
+        R: BufRead + Reader + Seek,
+        F: Fn(XfsDablk, &mut R) -> XfsFsblock,
     {
         let mut cache_guard = self.children.borrow_mut();
         let entry = cache_guard.entry(dblock);
@@ -283,19 +271,18 @@ impl XfsDa3Intnode {
     }
 }
 
-
 impl Decode for XfsDa3Intnode {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let magic: u16 = utils::decode(&decoder.reader().peek_read(10).unwrap()[8..])?.0;
         let (count, level) = match magic {
-            XFS_DA_NODE_MAGIC =>{
+            XFS_DA_NODE_MAGIC => {
                 let hdr: XfsDaNodeHdr = Decode::decode(decoder)?;
                 (hdr.count, hdr.level)
-            },
+            }
             XFS_DA3_NODE_MAGIC => {
                 let hdr: XfsDa3NodeHdr = Decode::decode(decoder)?;
                 (hdr.count, hdr.level)
-            },
+            }
             _ => panic!("Bad magic in XfsDa3Intnode! {:#x}", magic),
         };
         let mut btree = Vec::<XfsDa3NodeEntry>::new();
@@ -308,7 +295,7 @@ impl Decode for XfsDa3Intnode {
             magic,
             level,
             btree,
-            children
+            children,
         })
     }
 }
@@ -317,10 +304,7 @@ impl Decode for XfsDa3Intnode {
 #[test]
 #[ignore = "Not a real test"]
 fn hashname_collisions() {
-    use std::{
-        collections::HashMap,
-        ffi::OsString
-    };
+    use std::{collections::HashMap, ffi::OsString};
 
     let way = 4;
     let want = 10;
@@ -332,8 +316,11 @@ fn hashname_collisions() {
         if let Some(mut v) = allnames.insert(hash, vec![name.clone()]) {
             v.push(name);
             if v.len() >= way {
-                println!("{}-way hash collision found: {}", way,
-                         v.join(OsStr::new(" ")).to_string_lossy());
+                println!(
+                    "{}-way hash collision found: {}",
+                    way,
+                    v.join(OsStr::new(" ")).to_string_lossy()
+                );
                 collisions += 1;
             }
             allnames.insert(hash, v);

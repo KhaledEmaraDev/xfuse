@@ -27,7 +27,7 @@
  */
 use std::{
     cmp::min,
-    io::{BufRead, Seek, SeekFrom}
+    io::{BufRead, Seek, SeekFrom},
 };
 
 use bincode::de::read::Reader;
@@ -46,16 +46,27 @@ pub trait File<R: BufRead + Reader + Seek> {
     fn lseek(&self, buf_reader: &mut R, offset: u64, whence: i32) -> Result<u64, i32>;
 
     /// Perform a sector-size aligned read of the file
-    fn read_sectors(&self, buf_reader: &mut R, offset: i64, mut size: usize)
-        -> Result<Vec<u8>, i32>
-    {
+    fn read_sectors(
+        &self,
+        buf_reader: &mut R,
+        offset: i64,
+        mut size: usize,
+    ) -> Result<Vec<u8>, i32> {
         let sb = SUPERBLOCK.get().unwrap();
-        debug_assert_eq!(offset & ((1i64 << sb.sb_blocklog) - 1), 0,
+        debug_assert_eq!(
+            offset & ((1i64 << sb.sb_blocklog) - 1),
+            0,
             "fusefs did a non-sector-size aligned read.  offset={:?} size={:?}",
-            offset, size);
-        debug_assert_eq!(size & ((1usize << sb.sb_blocklog) - 1), 0,
+            offset,
+            size
+        );
+        debug_assert_eq!(
+            size & ((1usize << sb.sb_blocklog) - 1),
+            0,
             "fusefs did a non-sector-size aligned read.  offset={:?} size={:?}",
-            offset, size);
+            offset,
+            size
+        );
 
         let mut data = Vec::<u8>::with_capacity(size);
 
@@ -64,9 +75,11 @@ pub trait File<R: BufRead + Reader + Seek> {
 
         while size > 0 {
             let (blk, blocks) = self.get_extent(buf_reader.by_ref(), logical_block);
-            let z = usize::try_from(
-                min(u64::try_from(size).unwrap(), (blocks << sb.sb_blocklog) - block_offset)
-            ).unwrap();
+            let z = usize::try_from(min(
+                u64::try_from(size).unwrap(),
+                (blocks << sb.sb_blocklog) - block_offset,
+            ))
+            .unwrap();
 
             let oldlen = data.len();
             data.resize(oldlen + z, 0u8);
@@ -75,7 +88,8 @@ pub trait File<R: BufRead + Reader + Seek> {
                     .seek(SeekFrom::Start(sb.fsb_to_offset(blk) + block_offset))
                     .map_err(|e| e.raw_os_error().unwrap())?;
 
-                buf_reader.read_exact(&mut data[oldlen..])
+                buf_reader
+                    .read_exact(&mut data[oldlen..])
                     .map_err(|e| e.raw_os_error().unwrap())?;
             } else {
                 // A hole
@@ -90,8 +104,7 @@ pub trait File<R: BufRead + Reader + Seek> {
 
     /// Return from a file.  Return a buffer containing the requested data, plus a number of bytes
     /// that the caller should ignore from the head of the vector.
-    fn read(&self, buf_reader: &mut R, offset: i64, size: u32) -> Result<(Vec<u8>, usize), i32>
-    {
+    fn read(&self, buf_reader: &mut R, offset: i64, size: u32) -> Result<(Vec<u8>, usize), i32> {
         let sb = SUPERBLOCK.get().unwrap();
         let size = u32::try_from(i64::from(size).min(self.size() - offset)).unwrap();
 
