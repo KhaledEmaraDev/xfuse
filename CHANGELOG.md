@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] - ReleaseDate
+
+### Fixed
+
+- Fixed reading long symlinks (more than about 150 bytes) on V4 file systems.
+  ([#156](https://github.com/KhaledEmaraDev/xfuse/issues/156))
+
 ## [0.4.2] - 2024-06-25
 
 ### Fixed

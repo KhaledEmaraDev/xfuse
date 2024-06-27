@@ -326,7 +326,10 @@ impl Dinode {
     {
         match &self.di_u {
             DiU::Symlink(data) => CString::new(data.clone()).unwrap(),
-            DiU::Bmx(bmx) => SymlinkExtents::get_target(buf_reader.by_ref(), bmx, superblock),
+            DiU::Bmx(bmbtv) => {
+                let bmx = Bmx::new(bmbtv.clone());
+                SymlinkExtents::get_target(buf_reader.by_ref(), &bmx, superblock)
+            },
             _ => {
                 panic!("Unsupported link format!");
             }
