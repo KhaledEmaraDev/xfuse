@@ -284,7 +284,7 @@ impl Dinode {
                             bmbtv[0].br_startblock,
                         ))
                     } else {
-                        let bmx = Bmx::new(bmbtv.clone());
+                        let bmx = Bmx::new(bmbtv);
                         Directory::Lf(Dir2Lf::from_bmx(bmx))
                     }
                 }
@@ -308,7 +308,7 @@ impl Dinode {
     ) -> Box<dyn File<R>> {
         match &self.di_u {
             DiU::Bmx(bmx) => Box::new(FileExtentList {
-                bmx: Bmx::new(bmx.clone()),
+                bmx: Bmx::new(bmx),
                 size: self.di_core.di_size,
             }),
             DiU::Bmbt((bmdr, keys, pointers)) => Box::new(FileBtree {
@@ -326,10 +326,8 @@ impl Dinode {
     {
         match &self.di_u {
             DiU::Symlink(data) => CString::new(data.clone()).unwrap(),
-            DiU::Bmx(bmbtv) => {
-                let bmx = Bmx::new(bmbtv.clone());
-                SymlinkExtents::get_target(buf_reader.by_ref(), &bmx, superblock)
-            },
+            DiU::Bmx(bmbtv) => 
+                SymlinkExtents::get_target(buf_reader.by_ref(), &Bmx::new(bmbtv), superblock),
             _ => {
                 panic!("Unsupported link format!");
             }
@@ -349,7 +347,7 @@ impl Dinode {
                         Some(crate::libxfuse::attr::open(
                             buf_reader.by_ref(),
                             superblock,
-                            Bmx::new(bmbtv.clone()),
+                            Bmx::new(bmbtv),
                         ))
                     } else {
                         None

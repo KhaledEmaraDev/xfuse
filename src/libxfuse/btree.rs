@@ -41,7 +41,7 @@ use num_traits::{PrimInt, Unsigned};
 use super::utils::Uuid;
 
 use super::{
-    bmbt_rec::{Bmx, BmbtRec},
+    bmbt_rec::Bmx,
     definitions::{XfsFileoff, XfsFsblock, XFS_BMAP_MAGIC, XFS_BMAP_CRC_MAGIC},
     utils::{decode, decode_from},
     volume::SUPERBLOCK
@@ -391,9 +391,9 @@ impl Decode for BtreeLeaf {
         let hdr: XfsBmbtLblock = Decode::decode(decoder)?;
         assert_eq!(hdr.bb_level, 0);
 
-        let bmx = Bmx::new((0..hdr.bb_numrecs).map(|_| {
+        let bmx = Bmx::from((0..hdr.bb_numrecs).map(|_| {
             Decode::decode(decoder).unwrap()
-        }).collect::<Vec<BmbtRec>>());
+        }));
 
         Ok(Self {
             bmx

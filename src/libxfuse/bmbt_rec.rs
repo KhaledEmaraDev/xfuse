@@ -42,7 +42,7 @@ pub enum XfsExntst {
     Invalid,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct BmbtRec {
     pub br_startoff: XfsFileoff,
     pub br_startblock: XfsFsblock,
@@ -75,15 +75,16 @@ impl Decode for BmbtRec {
 }
 
 /// An ordered list of [`BmbtRec`].
-// TODO: consider wrapping a borrowed slice instead of a vec.
 #[derive(Debug, Clone)]
-pub struct Bmx(pub Vec<BmbtRec>);
+pub struct Bmx(Vec<BmbtRec>);
 
 impl Bmx {
-    pub fn new(bmx: Vec<BmbtRec>) -> Self {
+    pub fn new<'a, I>(bmx: I) -> Self
+        where I: IntoIterator<Item=&'a BmbtRec>
+    {
         // Filter out preallocated but unwritten extents.  This makes the lseek implementation much
         // easier than if we try to consider the br_flag field in the lseek method itself.
-        let bmx = bmx.into_iter().filter(|rec| !rec.br_flag).collect();
+        let bmx = bmx.into_iter().filter(|rec| !rec.br_flag).cloned().collect();
         Self(bmx)
     }
 
@@ -185,13 +186,23 @@ impl Bmx {
     }
 }
 
+impl<I: IntoIterator<Item=BmbtRec>> From<I> for Bmx {
+    // The same as Bmx::new, but with an owned iterator
+    fn from(i: I) -> Self {
+        // Filter out preallocated but unwritten extents.  This makes the lseek implementation much
+        // easier than if we try to consider the br_flag field in the lseek method itself.
+        let bmx = i.into_iter().filter(|rec| !rec.br_flag).collect();
+        Self(bmx)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn map_dblock() {
-        let bmx = Bmx::new(vec![
+        let bmx = Bmx::new(&[
             BmbtRec {
                 br_startoff: 0,
                 br_startblock: 20,
