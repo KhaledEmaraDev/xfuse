@@ -27,7 +27,7 @@
  */
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, btree_map::Entry},
+    collections::{btree_map::Entry, BTreeMap},
     convert::TryInto,
     ffi::OsStr,
     io::{BufRead, Seek, SeekFrom},
@@ -41,16 +41,16 @@ use super::{
     da_btree::{hashname, XfsDa3Intnode},
     definitions::{XfsDablk, XfsFsblock},
     sb::Sb,
-    utils::decode_from
+    utils::decode_from,
 };
 
 #[derive(Debug)]
 pub struct AttrNode {
-    pub bmx: Bmx,
-    pub node: XfsDa3Intnode,
+    pub bmx:        Bmx,
+    pub node:       XfsDa3Intnode,
     pub total_size: i64,
     /// A cache of leaf blocks, indexed by directory block number
-    leaves: RefCell<BTreeMap<XfsDablk, AttrLeafblock>>
+    leaves:         RefCell<BTreeMap<XfsDablk, AttrLeafblock>>,
 }
 
 impl AttrNode {
@@ -59,18 +59,25 @@ impl AttrNode {
             bmx,
             node,
             total_size: -1,
-            leaves: Default::default()
+            leaves: Default::default(),
         }
     }
 
     fn map_dblock(&self, dblock: XfsDablk) -> XfsFsblock {
-        self.bmx.map_dblock(dblock).expect("holes are not allowed in attr forks")
+        self.bmx
+            .map_dblock(dblock)
+            .expect("holes are not allowed in attr forks")
     }
 
     /// Read the AttrLeafblock located at the given directory block number
-    fn read_leaf<'a, R>(&'a self, buf_reader: &mut R, sb: &Sb, dblock: XfsDablk)
-        -> Result<impl std::ops::DerefMut<Target=AttrLeafblock> + 'a, i32>
-        where R: Reader + BufRead + Seek
+    fn read_leaf<'a, R>(
+        &'a self,
+        buf_reader: &mut R,
+        sb: &Sb,
+        dblock: XfsDablk,
+    ) -> Result<impl std::ops::DerefMut<Target = AttrLeafblock> + 'a, i32>
+    where
+        R: Reader + BufRead + Seek,
     {
         let mut cache_guard = self.leaves.borrow_mut();
         let entry = cache_guard.entry(dblock);
@@ -81,12 +88,18 @@ impl AttrNode {
             let node: AttrLeafblock = decode_from(buf_reader.by_ref()).unwrap();
             entry.or_insert(node);
         }
-        Ok(std::cell::RefMut::map(cache_guard, |v| v.get_mut(&dblock).unwrap()))
+        Ok(std::cell::RefMut::map(cache_guard, |v| {
+            v.get_mut(&dblock).unwrap()
+        }))
     }
 }
 
 impl Attr for AttrNode {
-    fn get_total_size<R: Reader + BufRead + Seek>(&mut self, buf_reader: &mut R, super_block: &Sb) -> u32 {
+    fn get_total_size<R: Reader + BufRead + Seek>(
+        &mut self,
+        buf_reader: &mut R,
+        super_block: &Sb,
+    ) -> u32 {
         if self.total_size == -1 {
             let mut total_size: u32 = 0;
 
@@ -96,7 +109,9 @@ impl Attr for AttrNode {
                     self.map_dblock(block)
                 });
             while dablk != 0 {
-                let leaf = self.read_leaf(buf_reader.by_ref(), super_block, dablk).unwrap();
+                let leaf = self
+                    .read_leaf(buf_reader.by_ref(), super_block, dablk)
+                    .unwrap();
                 total_size += leaf.get_total_size();
                 dablk = leaf.hdr.forw;
             }
@@ -107,7 +122,11 @@ impl Attr for AttrNode {
         self.total_size.try_into().unwrap()
     }
 
-    fn list<R: Reader + BufRead + Seek>(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8> {
+    fn list<R: Reader + BufRead + Seek>(
+        &mut self,
+        buf_reader: &mut R,
+        super_block: &Sb,
+    ) -> Vec<u8> {
         let mut list: Vec<u8> =
             Vec::with_capacity(self.get_total_size(buf_reader.by_ref(), super_block) as usize);
 
@@ -117,7 +136,9 @@ impl Attr for AttrNode {
                 self.map_dblock(block)
             });
         while dablk != 0 {
-            let leaf = self.read_leaf(buf_reader.by_ref(), super_block, dablk).unwrap();
+            let leaf = self
+                .read_leaf(buf_reader.by_ref(), super_block, dablk)
+                .unwrap();
             (*leaf).list(&mut list);
             dablk = leaf.hdr.forw;
         }
@@ -126,19 +147,20 @@ impl Attr for AttrNode {
     }
 
     fn get<R>(&mut self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, i32>
-        where R: Reader + BufRead + Seek
+    where
+        R: Reader + BufRead + Seek,
     {
         let hash = hashname(name);
 
-        let dablk = self.node.lookup(buf_reader.by_ref(), super_block, hash, |block, _| {
-            self.map_dblock(block)
-        }).map_err(|e| if e == libc::ENOENT {libc::ENOATTR} else {e})?;
+        let dablk = self
+            .node
+            .lookup(buf_reader.by_ref(), super_block, hash, |block, _| {
+                self.map_dblock(block)
+            })
+            .map_err(|e| if e == libc::ENOENT { libc::ENOATTR } else { e })?;
         let mut leaf = self.read_leaf(buf_reader.by_ref(), super_block, dablk)?;
 
-        leaf.get(
-            buf_reader.by_ref(),
-            hash,
-            |block, _| self.map_dblock(block),
-        ).map(Vec::from)
+        leaf.get(buf_reader.by_ref(), hash, |block, _| self.map_dblock(block))
+            .map(Vec::from)
     }
 }

@@ -41,4 +41,10 @@ task:
     -   pkg install -y ca_root_nss cargo-audit
     -   cargo audit
     - fi
+  fmt_script:
+    - . $HOME/.cargo/env
+    - if [ "$VERSION" = "nightly" ]; then
+    -   rustup component add rustfmt
+    -   cargo fmt -- --check --color=never
+    - fi
   before_cache_script: rm -rf $HOME/.cargo/registry/index

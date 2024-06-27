@@ -25,31 +25,35 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use std::ffi::CString;
-use std::io::{BufRead, Seek, SeekFrom};
-
-use super::attr::Attributes;
-use super::attr_bptree::AttrBtree;
-use super::attr_shortform::AttrShortform;
-use super::bmbt_rec::{Bmx, BmbtRec};
-use super::btree::{BmbtKey, BmdrBlock, BtreeRoot, XfsBmbtPtr};
-use super::definitions::*;
-use super::dinode_core::{DinodeCore, XfsDinodeFmt};
-use super::dir3::Directory;
-use super::dir3_block::Dir2Block;
-use super::dir3_lf::Dir2Lf;
-use super::dir3_sf::Dir2Sf;
-use super::file::File;
-use super::file_btree::FileBtree;
-use super::file_extent_list::FileExtentList;
-use super::sb::Sb;
-use super::symlink_extent::SymlinkExtents;
+use std::{
+    ffi::CString,
+    io::{BufRead, Seek, SeekFrom},
+};
 
 use bincode::{
+    de::{read::Reader, Decoder},
     Decode,
-    de::{Decoder, read::Reader}
 };
-use libc::{mode_t, S_IFDIR, S_IFLNK, S_IFMT, S_IFREG, S_IFSOCK, S_IFIFO, S_IFCHR, S_IFBLK};
+use libc::{mode_t, S_IFBLK, S_IFCHR, S_IFDIR, S_IFIFO, S_IFLNK, S_IFMT, S_IFREG, S_IFSOCK};
+
+use super::{
+    attr::Attributes,
+    attr_bptree::AttrBtree,
+    attr_shortform::AttrShortform,
+    bmbt_rec::{BmbtRec, Bmx},
+    btree::{BmbtKey, BmdrBlock, BtreeRoot, XfsBmbtPtr},
+    definitions::*,
+    dinode_core::{DinodeCore, XfsDinodeFmt},
+    dir3::Directory,
+    dir3_block::Dir2Block,
+    dir3_lf::Dir2Lf,
+    dir3_sf::Dir2Sf,
+    file::File,
+    file_btree::FileBtree,
+    file_extent_list::FileExtentList,
+    sb::Sb,
+    symlink_extent::SymlinkExtents,
+};
 
 #[derive(Debug)]
 pub enum DiU {
@@ -73,12 +77,12 @@ pub enum DiA {
 #[derive(Debug)]
 pub struct Dinode {
     pub di_core: DinodeCore,
-    pub di_u: DiU,
-    pub di_a: Option<DiA>,
+    pub di_u:    DiU,
+    pub di_a:    Option<DiA>,
     /// Cache of this inode's directory object, if any.
-    directory: Option<Directory>,
+    directory:   Option<Directory>,
     /// Cache of this inode's attribute object, if any
-    attributes: Option<Attributes>
+    attributes:  Option<Attributes>,
 }
 
 impl Dinode {
@@ -87,8 +91,7 @@ impl Dinode {
         superblock: &Sb,
         inode_number: XfsIno,
     ) -> Dinode {
-        let ag_no: u64 =
-            inode_number >> (superblock.sb_agblklog + superblock.sb_inopblog);
+        let ag_no: u64 = inode_number >> (superblock.sb_agblklog + superblock.sb_inopblog);
         if ag_no >= superblock.sb_agcount.into() {
             panic!("Wrong AG number!");
         }
@@ -198,18 +201,10 @@ impl Dinode {
                     panic!("Unexpected format for symlink");
                 }
             },
-            S_IFBLK => {
-                di_u = Some(DiU::Blk)
-            },
-            S_IFCHR => {
-                di_u = Some(DiU::Chr)
-            },
-            S_IFIFO => {
-                di_u = Some(DiU::Fifo)
-            },
-            S_IFSOCK => {
-                di_u = Some(DiU::Socket)
-            },
+            S_IFBLK => di_u = Some(DiU::Blk),
+            S_IFCHR => di_u = Some(DiU::Chr),
+            S_IFIFO => di_u = Some(DiU::Fifo),
+            S_IFSOCK => di_u = Some(DiU::Socket),
             x => panic!("Inode type ({:#o}) not yet supported.", x),
         }
 
@@ -264,7 +259,7 @@ impl Dinode {
             di_u: di_u.unwrap(),
             di_a,
             directory: None,
-            attributes: None
+            attributes: None,
         }
     }
 
@@ -308,12 +303,12 @@ impl Dinode {
     ) -> Box<dyn File<R>> {
         match &self.di_u {
             DiU::Bmx(bmx) => Box::new(FileExtentList {
-                bmx: Bmx::new(bmx),
+                bmx:  Bmx::new(bmx),
                 size: self.di_core.di_size,
             }),
             DiU::Bmbt((bmdr, keys, pointers)) => Box::new(FileBtree {
                 btree: BtreeRoot::new(bmdr.clone(), keys.clone(), pointers.clone()),
-                size: self.di_core.di_size,
+                size:  self.di_core.di_size,
             }),
             _ => {
                 panic!("Unsupported file format!");
@@ -322,12 +317,14 @@ impl Dinode {
     }
 
     pub fn get_link_data<R>(&self, buf_reader: &mut R, superblock: &Sb) -> CString
-        where R: BufRead + Reader + Seek
+    where
+        R: BufRead + Reader + Seek,
     {
         match &self.di_u {
             DiU::Symlink(data) => CString::new(data.clone()).unwrap(),
-            DiU::Bmx(bmbtv) => 
-                SymlinkExtents::get_target(buf_reader.by_ref(), &Bmx::new(bmbtv), superblock),
+            DiU::Bmx(bmbtv) => {
+                SymlinkExtents::get_target(buf_reader.by_ref(), &Bmx::new(bmbtv), superblock)
+            }
             _ => {
                 panic!("Unsupported link format!");
             }
@@ -355,8 +352,12 @@ impl Dinode {
                 }
                 Some(DiA::Abmbt((bmdr, keys, pointers))) => {
                     let btree_root = BtreeRoot::new(bmdr.clone(), keys.clone(), pointers.clone());
-                    Some(Attributes::Btree(AttrBtree::new(buf_reader.by_ref(), superblock, btree_root)))
-                },
+                    Some(Attributes::Btree(AttrBtree::new(
+                        buf_reader.by_ref(),
+                        superblock,
+                        btree_root,
+                    )))
+                }
                 None => None,
             };
         }

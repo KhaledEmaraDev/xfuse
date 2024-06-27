@@ -27,35 +27,33 @@
  */
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, btree_map::Entry},
+    collections::{btree_map::Entry, BTreeMap},
     io::{prelude::*, SeekFrom},
-    marker::PhantomData
+    marker::PhantomData,
 };
 
 use bincode::{
+    de::{read::Reader, Decoder},
+    error::DecodeError,
     Decode,
-    de::{Decoder, read::Reader},
-    error::DecodeError
 };
 use num_traits::{PrimInt, Unsigned};
-use super::utils::Uuid;
 
 use super::{
     bmbt_rec::Bmx,
-    definitions::{XfsFileoff, XfsFsblock, XFS_BMAP_MAGIC, XFS_BMAP_CRC_MAGIC},
-    utils::{decode, decode_from},
-    volume::SUPERBLOCK
+    definitions::{XfsFileoff, XfsFsblock, XFS_BMAP_CRC_MAGIC, XFS_BMAP_MAGIC},
+    utils::{decode, decode_from, Uuid},
+    volume::SUPERBLOCK,
 };
 
 #[derive(Clone, Copy, Debug)]
 pub struct BtreeBlockHdr<T: PrimInt + Unsigned> {
-    bb_magic: u32,
-    pub bb_level: u16,
+    bb_magic:       u32,
+    pub bb_level:   u16,
     pub bb_numrecs: u16,
     //_bb_leftsib: T,
     //_bb_rightsib: T,
-    _phantom: PhantomData<T>,
-
+    _phantom:       PhantomData<T>,
     // Below fields are for V5 file systems only
     //_bb_blkno: u64,
     //_bb_lsn: u64,
@@ -68,12 +66,12 @@ pub struct BtreeBlockHdr<T: PrimInt + Unsigned> {
 impl<T: Decode + PrimInt + Unsigned> Decode for BtreeBlockHdr<T> {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let bb_magic: u32 = Decode::decode(decoder)?;
-        let bb_level =  Decode::decode(decoder)?;
-        let bb_numrecs =  Decode::decode(decoder)?;
-        let _bb_leftsib: T =  Decode::decode(decoder)?;
-        let _bb_rightsib: T =  Decode::decode(decoder)?;
+        let bb_level = Decode::decode(decoder)?;
+        let bb_numrecs = Decode::decode(decoder)?;
+        let _bb_leftsib: T = Decode::decode(decoder)?;
+        let _bb_rightsib: T = Decode::decode(decoder)?;
         match bb_magic {
-            XFS_BMAP_MAGIC => {},
+            XFS_BMAP_MAGIC => {}
             XFS_BMAP_CRC_MAGIC => {
                 let _bb_blkno: u64 = Decode::decode(decoder)?;
                 let _bb_lsn: u64 = Decode::decode(decoder)?;
@@ -83,16 +81,21 @@ impl<T: Decode + PrimInt + Unsigned> Decode for BtreeBlockHdr<T> {
                 let _bb_owner: u64 = Decode::decode(decoder)?;
                 let _bb_crc: u32 = Decode::decode(decoder)?;
                 let _bb_pad: u32 = Decode::decode(decoder)?;
-            },
-            _ => panic!("Unexpected magic value {:#x}", bb_magic)
+            }
+            _ => panic!("Unexpected magic value {:#x}", bb_magic),
         };
-        Ok(BtreeBlockHdr{bb_magic, bb_level, bb_numrecs, _phantom: PhantomData})
+        Ok(BtreeBlockHdr {
+            bb_magic,
+            bb_level,
+            bb_numrecs,
+            _phantom: PhantomData,
+        })
     }
 }
 
 #[derive(Debug, Clone, Decode)]
 pub struct BmdrBlock {
-    pub bb_level: u16,
+    pub bb_level:   u16,
     pub bb_numrecs: u16,
 }
 
@@ -132,7 +135,9 @@ pub trait Btree: BtreePriv {
         logical_block: XfsFileoff,
     ) -> Result<(Option<XfsFsblock>, Option<u64>), i32> {
         let super_block = SUPERBLOCK.get().unwrap();
-        let pp = self.keys().partition_point(|k| k.br_startoff <= logical_block);
+        let pp = self
+            .keys()
+            .partition_point(|k| k.br_startoff <= logical_block);
         // If there's a hole at the start, we should still descend into the leftmost child.
         // BtreeLeaf::get_extent will calculate the hole's size.
         let idx = pp.saturating_sub(1);
@@ -149,8 +154,8 @@ pub trait Btree: BtreePriv {
                         buf_reader
                             .seek(SeekFrom::Start(offset))
                             .map_err(|e| e.raw_os_error().unwrap())?;
-                        let bti: BtreeIntermediate = decode_from(buf_reader.by_ref())
-                            .map_err(|_| libc::EDESTADDRREQ)?;
+                        let bti: BtreeIntermediate =
+                            decode_from(buf_reader.by_ref()).map_err(|_| libc::EDESTADDRREQ)?;
                         ve.insert(bti).map_block(buf_reader, logical_block)
                     }
                     Entry::Occupied(oe) => {
@@ -158,7 +163,7 @@ pub trait Btree: BtreePriv {
                         v.map_block(buf_reader, logical_block)
                     }
                 }
-            },
+            }
             BlockCache::Leaf(bcl) => {
                 assert!(self.level() <= 1);
 
@@ -169,8 +174,8 @@ pub trait Btree: BtreePriv {
                         buf_reader
                             .seek(SeekFrom::Start(offset))
                             .map_err(|e| e.raw_os_error().unwrap())?;
-                        let btl: BtreeLeaf = decode_from(buf_reader.by_ref())
-                            .map_err(|_| libc::EDESTADDRREQ)?;
+                        let btl: BtreeLeaf =
+                            decode_from(buf_reader.by_ref()).map_err(|_| libc::EDESTADDRREQ)?;
                         Ok(ve.insert(btl).get_extent(logical_block))
                     }
                     Entry::Occupied(oe) => {
@@ -186,7 +191,7 @@ pub trait Btree: BtreePriv {
 #[derive(Debug)]
 enum BlockCache {
     Intermediate(BTreeMap<usize, BtreeIntermediate>),
-    Leaf(BTreeMap<usize, BtreeLeaf>)
+    Leaf(BTreeMap<usize, BtreeLeaf>),
 }
 
 impl BlockCache {
@@ -210,12 +215,13 @@ pub struct BtreeRoot {
     pub keys: Vec<BmbtKey>,
     pub ptrs: Vec<XfsBmdrPtr>,
     /// A cache of the object's extents, indexed by block number
-    blocks: RefCell<BlockCache>
+    blocks:   RefCell<BlockCache>,
 }
 
 impl BtreeRoot {
     pub fn lseek<R>(&self, buf_reader: &mut R, offset: u64, whence: i32) -> Result<u64, i32>
-        where R: BufRead + Reader + Seek
+    where
+        R: BufRead + Reader + Seek,
     {
         let sb = SUPERBLOCK.get().unwrap();
 
@@ -228,38 +234,44 @@ impl BtreeRoot {
                 } else {
                     // It should be impossible to have two hole extents in a row.  But
                     // double-check.
-                    debug_assert!(
-                        self.map_block(buf_reader.by_ref(), dblock + len).unwrap().0.is_some()
-                    );
+                    debug_assert!(self
+                        .map_block(buf_reader.by_ref(), dblock + len)
+                        .unwrap()
+                        .0
+                        .is_some());
                     Ok(offset + (len << sb.sb_blocklog))
                 }
-            },
+            }
             (Some(_), None) => {
-                unreachable!("Btree::map_block should never return None for the length of a data region");
-            },
+                unreachable!(
+                    "Btree::map_block should never return None for the length of a data region"
+                );
+            }
             (Some(_), Some(len)) => {
                 // In a data region
                 if whence == libc::SEEK_HOLE {
                     // Scan for the next hole
                     dblock += len;
                     loop {
-                         match self.map_block(buf_reader.by_ref(), dblock)? {
-                             (Some(_fsblock), Some(len)) => {
-                                 dblock += len;
-                             },
-                             (Some(_fsblock), None) => {
-                                 unreachable!("Btree::map_block should never return \
-                                        None for the length of a data region");
-                             },
-                             (None, _) => {
-                                 return Ok(dblock << sb.sb_blocklog);
-                             },
-                         }
+                        match self.map_block(buf_reader.by_ref(), dblock)? {
+                            (Some(_fsblock), Some(len)) => {
+                                dblock += len;
+                            }
+                            (Some(_fsblock), None) => {
+                                unreachable!(
+                                    "Btree::map_block should never return None for the length of \
+                                     a data region"
+                                );
+                            }
+                            (None, _) => {
+                                return Ok(dblock << sb.sb_blocklog);
+                            }
+                        }
                     }
                 } else {
                     Ok(offset)
                 }
-            },
+            }
             (None, None) => {
                 // A hole that extends to EOF
                 if whence == libc::SEEK_HOLE {
@@ -267,14 +279,17 @@ impl BtreeRoot {
                 } else {
                     Err(libc::ENXIO)
                 }
-            },
-         }
+            }
+        }
     }
 
     pub fn new(bmdr: BmdrBlock, keys: Vec<BmbtKey>, ptrs: Vec<XfsBmdrPtr>) -> Self {
         let blocks = RefCell::new(BlockCache::new(bmdr.bb_level));
-        Self {bmdr, keys, ptrs,
-        blocks
+        Self {
+            bmdr,
+            keys,
+            ptrs,
+            blocks,
         }
     }
 }
@@ -302,11 +317,11 @@ impl Btree for BtreeRoot {}
 /// An intermediate Btree.
 #[derive(Debug)]
 struct BtreeIntermediate {
-    hdr: XfsBmbtLblock,
-    keys: Vec<BmbtKey>,
-    ptrs: Vec<XfsBmbtPtr>,
+    hdr:    XfsBmbtLblock,
+    keys:   Vec<BmbtKey>,
+    ptrs:   Vec<XfsBmbtPtr>,
     /// A cache of the object's extents, indexed by block number
-    blocks: RefCell<BlockCache>
+    blocks: RefCell<BlockCache>,
 }
 
 impl BtreePriv for BtreeIntermediate {
@@ -329,7 +344,6 @@ impl BtreePriv for BtreeIntermediate {
 
 impl Btree for BtreeIntermediate {}
 
-
 impl Decode for BtreeIntermediate {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let blocksize = SUPERBLOCK.get().unwrap().sb_blocksize as usize;
@@ -349,9 +363,9 @@ impl Decode for BtreeIntermediate {
         // 16.2 says that the pointers start at offset 0x808 within the block.  But for V5 file
         // systems it looks to me like they really start at offset 0x820.
         ofs = match hdr.bb_magic {
-           XFS_BMAP_MAGIC => blocksize / 2 + 0x08,
-           XFS_BMAP_CRC_MAGIC =>  blocksize / 2 + 0x20,
-           _ => unreachable!()
+            XFS_BMAP_MAGIC => blocksize / 2 + 0x08,
+            XFS_BMAP_CRC_MAGIC => blocksize / 2 + 0x20,
+            _ => unreachable!(),
         };
         let mut ptrs = Vec::with_capacity(usize::from(hdr.bb_numrecs));
         for _ in 0..hdr.bb_numrecs {
@@ -365,7 +379,7 @@ impl Decode for BtreeIntermediate {
             hdr,
             keys,
             ptrs,
-            blocks
+            blocks,
         })
     }
 }
@@ -391,12 +405,8 @@ impl Decode for BtreeLeaf {
         let hdr: XfsBmbtLblock = Decode::decode(decoder)?;
         assert_eq!(hdr.bb_level, 0);
 
-        let bmx = Bmx::from((0..hdr.bb_numrecs).map(|_| {
-            Decode::decode(decoder).unwrap()
-        }));
+        let bmx = Bmx::from((0..hdr.bb_numrecs).map(|_| Decode::decode(decoder).unwrap()));
 
-        Ok(Self {
-            bmx
-        })
+        Ok(Self { bmx })
     }
 }

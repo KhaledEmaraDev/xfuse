@@ -40,16 +40,19 @@ use super::{
     sb::Sb,
 };
 
-
 #[derive(Debug)]
 pub struct AttrLeaf {
-    pub bmx: Bmx,
-    pub leaf: AttrLeafblock,
+    pub bmx:        Bmx,
+    pub leaf:       AttrLeafblock,
     pub total_size: i64,
 }
 
 impl Attr for AttrLeaf {
-    fn get_total_size<R: BufRead + Reader + Seek>(&mut self, _buf_reader: &mut R, _super_block: &Sb) -> u32 {
+    fn get_total_size<R: BufRead + Reader + Seek>(
+        &mut self,
+        _buf_reader: &mut R,
+        _super_block: &Sb,
+    ) -> u32 {
         if self.total_size != -1 {
             self.total_size.try_into().unwrap()
         } else {
@@ -58,7 +61,11 @@ impl Attr for AttrLeaf {
         }
     }
 
-    fn list<R: BufRead + Reader + Seek>(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8> {
+    fn list<R: BufRead + Reader + Seek>(
+        &mut self,
+        buf_reader: &mut R,
+        super_block: &Sb,
+    ) -> Vec<u8> {
         let mut list: Vec<u8> =
             Vec::with_capacity(self.get_total_size(buf_reader.by_ref(), super_block) as usize);
 
@@ -67,17 +74,23 @@ impl Attr for AttrLeaf {
         list
     }
 
-    fn get<R>(&mut self, buf_reader: &mut R, _super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, i32>
-        where R: BufRead + Reader + Seek
+    fn get<R>(
+        &mut self,
+        buf_reader: &mut R,
+        _super_block: &Sb,
+        name: &OsStr,
+    ) -> Result<Vec<u8>, i32>
+    where
+        R: BufRead + Reader + Seek,
     {
         let hash = hashname(name);
 
         let bmx = &self.bmx;
-        self.leaf.get(
-            buf_reader.by_ref(),
-            hash,
-            |block, _| bmx.map_dblock(block).expect("holes are not allowed in attr forks"),
-        ).map(Vec::from)
+        self.leaf
+            .get(buf_reader.by_ref(), hash, |block, _| {
+                bmx.map_dblock(block)
+                    .expect("holes are not allowed in attr forks")
+            })
+            .map(Vec::from)
     }
 }
-

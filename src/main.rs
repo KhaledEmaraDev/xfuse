@@ -27,24 +27,19 @@
  */
 mod libxfuse;
 
-use libxfuse::volume::Volume;
-
 use clap::{crate_version, Parser};
 use fuser::{mount2, MountOption};
+use libxfuse::volume::Volume;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Clone, Debug)]
 #[clap(version = crate_version!())]
 struct App {
     /// Mount options, comma delimited.
-    #[clap(
-        short = 'o',
-        long,
-        value_delimiter(',')
-    )]
-    options: Vec<String>,
-    device: String,
-    mountpoint: String
+    #[clap(short = 'o', long, value_delimiter(','))]
+    options:    Vec<String>,
+    device:     String,
+    mountpoint: String,
 }
 
 fn main() {
@@ -58,7 +53,7 @@ fn main() {
     let mut opts = vec![
         MountOption::FSName("fusefs".to_string()),
         MountOption::Subtype("xfs".to_string()),
-        MountOption::RO
+        MountOption::RO,
     ];
     // geteuid is always safe
     if unsafe { libc::geteuid() } == 0 {
@@ -82,9 +77,9 @@ fn main() {
             "dirsync" => MountOption::DirSync,
             "sync" => MountOption::Sync,
             "async" => MountOption::Async,
-            custom => MountOption::CUSTOM(custom.to_string())
+            custom => MountOption::CUSTOM(custom.to_string()),
         });
-    };
+    }
 
     let vol = Volume::from(&app.device);
 

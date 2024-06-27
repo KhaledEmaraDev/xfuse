@@ -33,12 +33,12 @@ use super::{
     bmbt_rec::Bmx,
     definitions::{XfsFileoff, XfsFsblock, XfsFsize},
     file::File,
-    volume::SUPERBLOCK
+    volume::SUPERBLOCK,
 };
 
 #[derive(Debug)]
 pub struct FileExtentList {
-    pub bmx: Bmx,
+    pub bmx:  Bmx,
     pub size: XfsFsize,
 }
 

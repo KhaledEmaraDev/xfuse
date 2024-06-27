@@ -31,21 +31,28 @@ use std::{
 };
 
 use bincode::{
-    Decode,
-    de::{Decoder, read::Reader},
+    de::{read::Reader, Decoder},
     error::DecodeError,
-    impl_borrow_decode
+    impl_borrow_decode,
+    Decode,
 };
 
 use super::{
     attr_leaf::AttrLeaf,
     attr_node::AttrNode,
     bmbt_rec::Bmx,
-    da_btree::{XfsDaBlkinfo, XfsDa3Blkinfo, XfsDa3Intnode},
-    definitions::{XFS_ATTR_LEAF_MAGIC, XFS_DA_NODE_MAGIC, XFS_ATTR3_LEAF_MAGIC, XFS_DA3_NODE_MAGIC, XfsDablk, XfsFsblock},
+    da_btree::{XfsDa3Blkinfo, XfsDa3Intnode, XfsDaBlkinfo},
+    definitions::{
+        XfsDablk,
+        XfsFsblock,
+        XFS_ATTR3_LEAF_MAGIC,
+        XFS_ATTR_LEAF_MAGIC,
+        XFS_DA3_NODE_MAGIC,
+        XFS_DA_NODE_MAGIC,
+    },
     sb::Sb,
     utils,
-    volume::SUPERBLOCK
+    volume::SUPERBLOCK,
 };
 
 #[allow(dead_code)]
@@ -83,7 +90,7 @@ pub struct AttrLeafMap {
 
 #[derive(Debug)]
 pub struct AttrLeafHdr {
-    pub forw: u32,
+    pub forw:  u32,
     pub count: u16,
 }
 
@@ -94,12 +101,12 @@ impl Decode for AttrLeafHdr {
             XFS_ATTR_LEAF_MAGIC => {
                 let info: XfsDaBlkinfo = Decode::decode(decoder)?;
                 info.forw
-            },
+            }
             XFS_ATTR3_LEAF_MAGIC => {
                 let info: XfsDa3Blkinfo = Decode::decode(decoder)?;
                 info.forw
-            },
-            _ => panic!("Unexpected magic value {:#x}", magic)
+            }
+            _ => panic!("Unexpected magic value {:#x}", magic),
         };
         let count = Decode::decode(decoder)?;
         let _usedbytes: u16 = Decode::decode(decoder)?;
@@ -111,7 +118,7 @@ impl Decode for AttrLeafHdr {
             let _pad2: u32 = Decode::decode(decoder)?;
         }
 
-        Ok(Self{forw, count})
+        Ok(Self { forw, count })
     }
 }
 impl_borrow_decode!(AttrLeafHdr);
@@ -120,8 +127,8 @@ impl_borrow_decode!(AttrLeafHdr);
 pub struct AttrLeafEntry {
     pub hashval: u32,
     pub nameidx: u16,
-    pub flags: u8,
-    _pad2: u8,
+    pub flags:   u8,
+    _pad2:       u8,
 }
 
 #[derive(Debug)]
@@ -137,14 +144,14 @@ impl Decode for AttrLeafNameLocal {
         let mut nameval = vec![0u8; usize::from(namelen) + usize::from(valuelen)];
         decoder.reader().read(&mut nameval[..])?;
 
-        Ok(Self{ namelen, nameval})
+        Ok(Self { namelen, nameval })
     }
 }
 
 #[derive(Debug)]
 pub enum AttrLeafName {
     Local(AttrLeafNameLocal),
-    Remote(AttrLeafNameRemote)
+    Remote(AttrLeafNameRemote),
 }
 
 impl AttrLeafName {
@@ -162,32 +169,25 @@ impl AttrLeafName {
         }
     }
 
-    fn value<F, R>(
-        &mut self,
-        buf_reader: &mut R,
-        map_dblock: F,
-    ) -> &[u8]
-        where R: BufRead + Reader + Seek,
-              F: Fn(XfsDablk, &mut R) -> XfsFsblock
+    fn value<F, R>(&mut self, buf_reader: &mut R, map_dblock: F) -> &[u8]
+    where
+        R: BufRead + Reader + Seek,
+        F: Fn(XfsDablk, &mut R) -> XfsFsblock,
     {
         match self {
-            AttrLeafName::Local(local) => {
-                &local.nameval[local.namelen as usize..]
-            },
-            AttrLeafName::Remote(remote) => {
-                remote.value(buf_reader.by_ref(), map_dblock)
-            }
+            AttrLeafName::Local(local) => &local.nameval[local.namelen as usize..],
+            AttrLeafName::Remote(remote) => remote.value(buf_reader.by_ref(), map_dblock),
         }
     }
 }
 
 #[derive(Debug)]
 pub struct AttrLeafblock {
-    pub hdr: AttrLeafHdr,
+    pub hdr:     AttrLeafHdr,
     // TODO: in-memory, combine AttrLeafEntry and AttrLeafName into a struct, so we'll only need a
     // single Vec
     pub entries: Vec<AttrLeafEntry>,
-    pub names: Vec<AttrLeafName>
+    pub names:   Vec<AttrLeafName>,
 }
 
 impl AttrLeafblock {
@@ -215,9 +215,12 @@ impl AttrLeafblock {
         hash: u32,
         map_logical_block_to_fs_block: F,
     ) -> Result<&[u8], i32> {
-        match self.entries.binary_search_by_key(&hash, |entry| entry.hashval) {
+        match self
+            .entries
+            .binary_search_by_key(&hash, |entry| entry.hashval)
+        {
             Ok(i) => Ok(self.names[i].value(buf_reader, map_logical_block_to_fs_block)),
-            Err(_) => Err(libc::ENOATTR)
+            Err(_) => Err(libc::ENOATTR),
         }
     }
 }
@@ -250,8 +253,10 @@ impl Decode for AttrLeafblock {
             }
         }
 
-        Ok(AttrLeafblock {hdr, entries,
-            names
+        Ok(AttrLeafblock {
+            hdr,
+            entries,
+            names,
         })
     }
 }
@@ -260,19 +265,16 @@ impl Decode for AttrLeafblock {
 pub struct AttrLeafNameRemote {
     pub valueblk: u32,
     pub valuelen: u32,
-    pub namelen: u8,
-    pub name: Vec<u8>,
-    pub value: Vec<u8>,
+    pub namelen:  u8,
+    pub name:     Vec<u8>,
+    pub value:    Vec<u8>,
 }
 
 impl AttrLeafNameRemote {
-    fn value<R, F>(
-        &mut self,
-        buf_reader: &mut R,
-        map_dblock: F,
-    ) -> &[u8]
-        where R: BufRead + Reader + Seek,
-              F: Fn(XfsDablk, &mut R) -> XfsFsblock
+    fn value<R, F>(&mut self, buf_reader: &mut R, map_dblock: F) -> &[u8]
+    where
+        R: BufRead + Reader + Seek,
+        F: Fn(XfsDablk, &mut R) -> XfsFsblock,
     {
         if self.value.len() < self.valuelen as usize {
             let sb = SUPERBLOCK.get().unwrap();
@@ -281,9 +283,10 @@ impl AttrLeafNameRemote {
             let mut valuelen: i64 = self.valuelen.into();
 
             while valuelen > 0 {
-                let blk_num =
-                    map_dblock(valueblk, buf_reader.by_ref());
-                buf_reader.seek(SeekFrom::Start(sb.fsb_to_offset(blk_num))).unwrap();
+                let blk_num = map_dblock(valueblk, buf_reader.by_ref());
+                buf_reader
+                    .seek(SeekFrom::Start(sb.fsb_to_offset(blk_num)))
+                    .unwrap();
                 let hdr: AttrRmtHdr = utils::decode_from(buf_reader.by_ref()).unwrap();
                 let oldlen = self.value.len();
                 self.value.resize(oldlen + hdr.rm_bytes as usize, 0);
@@ -305,39 +308,55 @@ impl Decode for AttrLeafNameRemote {
         decoder.reader().read(&mut name[..])?;
         let value = Default::default();
 
-        Ok(Self{ valueblk, valuelen, namelen, name, value})
+        Ok(Self {
+            valueblk,
+            valuelen,
+            namelen,
+            name,
+            value,
+        })
     }
 }
 
 #[derive(Debug, Decode)]
 struct AttrRmtHdr {
-    _rm_magic: u32,
+    _rm_magic:  u32,
     _rm_offset: u32,
-    rm_bytes: u32,
-    _rm_crc: u32,
-    _rm_uuid: utils::Uuid,
-    _rm_owner: u64,
-    _rm_blkno: u64,
-    _rm_lsn: u64,
+    rm_bytes:   u32,
+    _rm_crc:    u32,
+    _rm_uuid:   utils::Uuid,
+    _rm_owner:  u64,
+    _rm_blkno:  u64,
+    _rm_lsn:    u64,
 }
 
 #[enum_dispatch::enum_dispatch]
 pub trait Attr {
-    fn get_total_size<R: BufRead + Reader + Seek>(&mut self, buf_reader: &mut R, super_block: &Sb) -> u32;
+    fn get_total_size<R: BufRead + Reader + Seek>(
+        &mut self,
+        buf_reader: &mut R,
+        super_block: &Sb,
+    ) -> u32;
 
-    fn list<R: BufRead + Reader + Seek>(&mut self, buf_reader: &mut R, super_block: &Sb) -> Vec<u8>;
+    fn list<R: BufRead + Reader + Seek>(&mut self, buf_reader: &mut R, super_block: &Sb)
+        -> Vec<u8>;
 
-    fn get<R>(&mut self, buf_reader: &mut R, super_block: &Sb, name: &OsStr) -> Result<Vec<u8>, libc::c_int>
-        where R: BufRead + Reader + Seek;
+    fn get<R>(
+        &mut self,
+        buf_reader: &mut R,
+        super_block: &Sb,
+        name: &OsStr,
+    ) -> Result<Vec<u8>, libc::c_int>
+    where
+        R: BufRead + Reader + Seek;
 }
 
 /// Open an attribute block, whose type may be unknown until its contents are examined.
 pub fn open<R: Reader + BufRead + Seek>(
-        buf_reader: &mut R,
-        superblock: &Sb,
-        bmx: Bmx,
-    ) -> Attributes
-{
+    buf_reader: &mut R,
+    superblock: &Sb,
+    bmx: Bmx,
+) -> Attributes {
     if let Some(rec) = bmx.first() {
         let ofs = superblock.fsb_to_offset(rec.br_startblock);
         buf_reader.seek(SeekFrom::Start(ofs)).unwrap();
@@ -355,14 +374,16 @@ pub fn open<R: Reader + BufRead + Seek>(
                     leaf,
                     total_size: -1,
                 })
-            },
+            }
             XFS_DA_NODE_MAGIC | XFS_DA3_NODE_MAGIC => {
                 let node: XfsDa3Intnode = utils::decode(&raw).unwrap().0;
                 Attributes::Node(AttrNode::new(bmx, node))
-            },
+            }
             magic => {
-                panic!("bad magic!  expected either {:#x} or {:#x} but found {:#x}",
-                       XFS_ATTR3_LEAF_MAGIC, XFS_DA3_NODE_MAGIC, magic);
+                panic!(
+                    "bad magic!  expected either {:#x} or {:#x} but found {:#x}",
+                    XFS_ATTR3_LEAF_MAGIC, XFS_DA3_NODE_MAGIC, magic
+                );
             }
         }
     } else {
@@ -376,5 +397,5 @@ pub enum Attributes {
     Sf(crate::libxfuse::attr_shortform::AttrShortform),
     Leaf(AttrLeaf),
     Node(AttrNode),
-    Btree(crate::libxfuse::attr_bptree::AttrBtree)
+    Btree(crate::libxfuse::attr_bptree::AttrBtree),
 }

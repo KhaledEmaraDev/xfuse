@@ -26,14 +26,10 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-use bincode::{
-    Decode,
-    de::Decoder,
-    error::DecodeError
-};
+use bincode::{de::Decoder, error::DecodeError, Decode};
 use num_derive::FromPrimitive;
-use super::definitions::*;
-use super::volume::SUPERBLOCK;
+
+use super::{definitions::*, volume::SUPERBLOCK};
 
 #[derive(Debug, FromPrimitive, Clone)]
 pub enum XfsExntst {
@@ -44,12 +40,12 @@ pub enum XfsExntst {
 
 #[derive(Debug, Clone, Copy)]
 pub struct BmbtRec {
-    pub br_startoff: XfsFileoff,
+    pub br_startoff:   XfsFileoff,
     pub br_startblock: XfsFsblock,
     pub br_blockcount: XfsFilblks,
     /// If set, indicates that the extent has been preallocated but has not yet been written
     /// (unwritten extent)
-    pub br_flag: bool
+    pub br_flag:       bool,
 }
 
 impl Decode for BmbtRec {
@@ -69,7 +65,7 @@ impl Decode for BmbtRec {
             br_startoff,
             br_startblock,
             br_blockcount,
-            br_flag
+            br_flag,
         })
     }
 }
@@ -80,11 +76,16 @@ pub struct Bmx(Vec<BmbtRec>);
 
 impl Bmx {
     pub fn new<'a, I>(bmx: I) -> Self
-        where I: IntoIterator<Item=&'a BmbtRec>
+    where
+        I: IntoIterator<Item = &'a BmbtRec>,
     {
         // Filter out preallocated but unwritten extents.  This makes the lseek implementation much
         // easier than if we try to consider the br_flag field in the lseek method itself.
-        let bmx = bmx.into_iter().filter(|rec| !rec.br_flag).cloned().collect();
+        let bmx = bmx
+            .into_iter()
+            .filter(|rec| !rec.br_flag)
+            .cloned()
+            .collect();
         Self(bmx)
     }
 
@@ -95,19 +96,23 @@ impl Bmx {
         match self.0.partition_point(|entry| entry.br_startoff <= dblock) {
             0 => {
                 // A hole at the beginning of the file
-                let len = self.0.first()
-                    .map(|b| b.br_startoff - dblock);
+                let len = self.0.first().map(|b| b.br_startoff - dblock);
                 (None, len)
-            },
+            }
             i => {
                 let entry = &self.0[i - 1];
                 let skip = dblock - entry.br_startoff;
                 if entry.br_startoff + entry.br_blockcount > dblock {
                     assert!(!entry.br_flag);
-                    (Some(entry.br_startblock + skip), Some(entry.br_blockcount - skip))
+                    (
+                        Some(entry.br_startblock + skip),
+                        Some(entry.br_blockcount - skip),
+                    )
                 } else {
                     // It's a hole
-                    let len = self.0.get(i)
+                    let len = self
+                        .0
+                        .get(i)
                         .map(|e| e.br_startoff - entry.br_startoff - skip);
                     (None, len)
                 }
@@ -133,7 +138,7 @@ impl Bmx {
                         .map(|b| b.br_startoff << sb.sb_blocklog)
                         .ok_or(libc::ENXIO)
                 }
-            },
+            }
             i => {
                 let cur_entry = &self.0[i - 1];
                 let br_end = cur_entry.br_startoff + cur_entry.br_blockcount;
@@ -163,10 +168,8 @@ impl Bmx {
                         Ok(offset)
                     } else {
                         match self.0.get(i) {
-                            Some(next_entry) => {
-                                Ok(next_entry.br_startoff << sb.sb_blocklog)
-                            },
-                            None => Err(libc::ENXIO)
+                            Some(next_entry) => Ok(next_entry.br_startoff << sb.sb_blocklog),
+                            None => Err(libc::ENXIO),
                         }
                     }
                 }
@@ -186,7 +189,7 @@ impl Bmx {
     }
 }
 
-impl<I: IntoIterator<Item=BmbtRec>> From<I> for Bmx {
+impl<I: IntoIterator<Item = BmbtRec>> From<I> for Bmx {
     // The same as Bmx::new, but with an owned iterator
     fn from(i: I) -> Self {
         // Filter out preallocated but unwritten extents.  This makes the lseek implementation much
@@ -204,26 +207,25 @@ mod tests {
     fn map_dblock() {
         let bmx = Bmx::new(&[
             BmbtRec {
-                br_startoff: 0,
+                br_startoff:   0,
                 br_startblock: 20,
                 br_blockcount: 2,
-                br_flag: false
+                br_flag:       false,
             },
             BmbtRec {
-                br_startoff: 2,
+                br_startoff:   2,
                 br_startblock: 30,
                 br_blockcount: 3,
-                br_flag: false
+                br_flag:       false,
             },
             BmbtRec {
-                br_startoff: 5,
+                br_startoff:   5,
                 br_startblock: 40,
                 br_blockcount: 2,
-                br_flag: false
+                br_flag:       false,
             },
         ]);
 
         assert_eq!(bmx.map_dblock(6), Some(41));
     }
 }
-

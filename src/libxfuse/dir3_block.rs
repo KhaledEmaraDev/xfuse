@@ -27,23 +27,25 @@
  */
 use std::{
     convert::TryInto,
+    ffi::{OsStr, OsString},
     io::{BufRead, Seek, SeekFrom},
 };
 
-use super::definitions::*;
-use std::ffi::{OsStr, OsString};
-use super::da_btree::hashname;
-use super::dir3::{Dir2LeafEntry, Dir3, Dir2DataHdr, Dir2DataEntry, Dir2DataUnused, Dir3DataHdr};
-use super::sb::Sb;
-use super::utils::{FileKind, decode, get_file_type};
-
-use bincode::{Decode, de::read::Reader};
+use bincode::{de::read::Reader, Decode};
 use fuser::FileType;
 use libc::{c_int, ENOENT};
 
+use super::{
+    da_btree::hashname,
+    definitions::*,
+    dir3::{Dir2DataEntry, Dir2DataHdr, Dir2DataUnused, Dir2LeafEntry, Dir3, Dir3DataHdr},
+    sb::Sb,
+    utils::{decode, get_file_type, FileKind},
+};
+
 #[derive(Debug, Decode)]
 pub struct Dir2BlockTail {
-    count: u32,
+    count:  u32,
     _stale: u32,
 }
 
@@ -54,16 +56,17 @@ impl Dir2BlockTail {
 
 #[derive(Debug)]
 pub struct Dir2BlockDisk {
-    pub leaf: Vec<Dir2LeafEntry>,
-    tail: Dir2BlockTail,
-    raw: Vec<u8>,
+    pub leaf:    Vec<Dir2LeafEntry>,
+    tail:        Dir2BlockTail,
+    raw:         Vec<u8>,
     /// Start of directory entries within the directory block
     data_offset: usize,
 }
 
 impl Dir2BlockDisk {
     pub fn new<T>(buf_reader: &mut T, offset: u64, size: u32) -> Dir2BlockDisk
-        where T: BufRead + Seek
+    where
+        T: BufRead + Seek,
     {
         buf_reader.seek(SeekFrom::Start(offset)).unwrap();
         let mut raw = vec![0u8; size as usize];
@@ -75,13 +78,13 @@ impl Dir2BlockDisk {
                 let hdr: Dir2DataHdr = decode(&raw[..]).unwrap().0;
                 assert_eq!(hdr.magic, XFS_DIR2_BLOCK_MAGIC);
                 Dir2DataHdr::SIZE as usize
-            },
+            }
             XFS_DIR3_BLOCK_MAGIC => {
                 let hdr: Dir3DataHdr = decode(&raw[..]).unwrap().0;
                 assert_eq!(hdr.hdr.magic, XFS_DIR3_BLOCK_MAGIC);
                 Dir3DataHdr::SIZE as usize
-            },
-            _ => panic!("Unknown magic number for block directory {:#x}", magic)
+            }
+            _ => panic!("Unknown magic number for block directory {:#x}", magic),
         };
 
         let tail_offset = (size as usize) - Dir2BlockTail::SIZE;
@@ -95,7 +98,12 @@ impl Dir2BlockDisk {
             leaf_offset += Dir2LeafEntry::SIZE;
         }
 
-        Dir2BlockDisk { leaf, tail, raw, data_offset }
+        Dir2BlockDisk {
+            leaf,
+            tail,
+            raw,
+            data_offset,
+        }
     }
 
     /// get the length of the raw data region
@@ -108,8 +116,8 @@ impl Dir2BlockDisk {
 
 #[derive(Debug)]
 pub struct Dir2Block {
-    ents: Vec<Dir2LeafEntry>,
-    raw: Box<[u8]>,
+    ents:        Vec<Dir2LeafEntry>,
+    raw:         Box<[u8]>,
     /// Start of directory entries within the directory block
     data_offset: usize,
 }
@@ -131,18 +139,19 @@ impl Dir2Block {
         raw.truncate(data_len as usize);
 
         Dir2Block {
-            raw: raw.into(),
-            ents: dir_disk.leaf,
-            data_offset: dir_disk.data_offset
+            raw:         raw.into(),
+            ents:        dir_disk.leaf,
+            data_offset: dir_disk.data_offset,
         }
     }
 
-    fn get_addresses(&self, hash: XfsDahash) -> impl Iterator<Item=usize> + '_
-    {
+    fn get_addresses(&self, hash: XfsDahash) -> impl Iterator<Item = usize> + '_ {
         let i = self.ents.partition_point(|ent| ent.hashval < hash);
         let l = self.ents.len();
         let j = (i..l).find(|x| self.ents[*x].hashval > hash).unwrap_or(l);
-        self.ents[i..j].iter().map(|ent| (ent.address << 3) as usize)
+        self.ents[i..j]
+            .iter()
+            .map(|ent| (ent.address << 3) as usize)
     }
 }
 
@@ -183,18 +192,17 @@ impl Dir3 for Dir2Block {
         while offset < self.raw.len() {
             let freetag: u16 = decode(&self.raw[offset..]).unwrap().0;
             if freetag == 0xffff {
-                let (_, length) = decode::<Dir2DataUnused>(&self.raw[offset..])
-                    .unwrap();
+                let (_, length) = decode::<Dir2DataUnused>(&self.raw[offset..]).unwrap();
                 offset += length;
             } else if !next {
                 let length = Dir2DataEntry::get_length(sb, &self.raw[offset..]);
                 offset += length as usize;
                 next = true;
             } else {
-                let (entry, _l)= decode::<Dir2DataEntry >(&self.raw[offset..]).unwrap();
+                let (entry, _l) = decode::<Dir2DataEntry>(&self.raw[offset..]).unwrap();
                 let kind = match entry.ftype {
                     Some(ftype) => Some(get_file_type(FileKind::Type(ftype))?),
-                    None => None
+                    None => None,
                 };
                 let name = entry.name;
                 let entry_offset = entry.tag as u64;

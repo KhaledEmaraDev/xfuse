@@ -25,36 +25,33 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use std::ffi::{OsStr, OsString};
-use std::ops::Range;
-
-use super::da_btree::{XfsDaBlkinfo, XfsDa3Blkinfo, hashname, XfsDa3Intnode};
-use super::definitions::*;
-use super::utils::{FileKind, decode, get_file_type};
-use super::volume::SUPERBLOCK;
+use std::{
+    cell::{Ref, RefCell},
+    collections::{btree_map::Entry, BTreeMap},
+    ffi::{OsStr, OsString},
+    io::{BufRead, Seek, SeekFrom},
+    ops::{Deref, Range},
+};
 
 use bincode::{
+    de::{read::Reader, Decoder},
+    error::DecodeError,
     Decode,
-    de::Decoder,
-    error::DecodeError
 };
 use fuser::FileType;
 use libc::c_int;
 use tracing::error;
 
-use std::{
-    cell::{Ref, RefCell},
-    collections::{BTreeMap, btree_map::Entry},
-    io::{BufRead, Seek, SeekFrom},
-    ops::Deref
+use super::{
+    bmbt_rec::Bmx,
+    btree::{BmbtKey, BmdrBlock, Btree, BtreeRoot, XfsBmbtPtr},
+    da_btree::{hashname, XfsDa3Blkinfo, XfsDa3Intnode, XfsDaBlkinfo},
+    definitions::*,
+    dir3::{Dir2DataEntry, Dir2DataHdr, Dir2DataUnused, Dir3, Dir3DataHdr, XfsDir2Dataptr},
+    sb::Sb,
+    utils::{decode, get_file_type, FileKind},
+    volume::SUPERBLOCK,
 };
-
-use bincode::de::read::Reader;
-
-use super::btree::{BmbtKey, BmdrBlock, Btree, BtreeRoot, XfsBmbtPtr};
-use super::bmbt_rec::Bmx;
-use super::dir3::{XfsDir2Dataptr, Dir3, Dir2DataEntry, Dir2DataHdr, Dir3DataHdr, Dir2DataUnused};
-use super::sb::Sb;
 
 /// All of the different ways that a directory can store its data fork.
 // TODO: combine this code with file_extent_list and file_btree
@@ -68,11 +65,12 @@ enum Dfork {
 
 impl Dfork {
     fn lseek<R>(&self, buf_reader: &mut R, offset: u64, whence: i32) -> Result<u64, i32>
-        where R: BufRead + Reader + Seek
+    where
+        R: BufRead + Reader + Seek,
     {
         match self {
             Dfork::Bmx(bmx) => bmx.lseek(offset, whence),
-            Dfork::Btree(btree_root) => btree_root.lseek(buf_reader, offset, whence)
+            Dfork::Btree(btree_root) => btree_root.lseek(buf_reader, offset, whence),
         }
     }
 
@@ -83,24 +81,27 @@ impl Dfork {
     ) -> Result<XfsFsblock, i32> {
         match self {
             Dfork::Bmx(bmx) => bmx.map_dblock(dblock).ok_or(libc::ENOENT),
-            Dfork::Btree(root) => root.map_block(buf_reader, dblock.into())?.0.ok_or(libc::ENOENT)
+            Dfork::Btree(root) => root
+                .map_block(buf_reader, dblock.into())?
+                .0
+                .ok_or(libc::ENOENT),
         }
     }
 }
 
 #[derive(Debug, Decode)]
 struct Dir2LeafHdr {
-    info: XfsDaBlkinfo,
+    info:      XfsDaBlkinfo,
     pub count: u16,
-    _stale: u16,
+    _stale:    u16,
 }
 
 #[derive(Debug, Decode)]
 struct Dir3LeafHdr {
-    pub info: XfsDa3Blkinfo,
+    pub info:  XfsDa3Blkinfo,
     pub count: u16,
-    _stale: u16,
-    _pad: u32,
+    _stale:    u16,
+    _pad:      u32,
 }
 
 #[derive(Clone, Copy, Debug, Decode, Default)]
@@ -111,7 +112,7 @@ struct Dir2LeafEntry {
 
 #[derive(Debug)]
 struct Dir2LeafNDisk {
-    forw: u32,
+    forw:     u32,
     pub ents: Vec<Dir2LeafEntry>,
 }
 
@@ -132,12 +133,12 @@ impl Decode for Dir2LeafNDisk {
             XFS_DIR2_LEAF1_MAGIC | XFS_DIR2_LEAFN_MAGIC => {
                 let hdr: Dir2LeafHdr = Decode::decode(decoder)?;
                 (hdr.count, hdr.info.forw)
-            },
+            }
             XFS_DIR3_LEAF1_MAGIC | XFS_DIR3_LEAFN_MAGIC => {
                 let hdr: Dir3LeafHdr = Decode::decode(decoder)?;
                 (hdr.count, hdr.info.forw)
             }
-            _ => panic!("Unexpected magic {:#x}", magic)
+            _ => panic!("Unexpected magic {:#x}", magic),
         };
         let mut ents = Vec::<Dir2LeafEntry>::new();
         for _i in 0..count {
@@ -168,16 +169,20 @@ impl Leaf {
         let mut decoder = bincode::de::DecoderImpl::new(reader, config);
         match magic {
             XFS_DA_NODE_MAGIC | XFS_DA3_NODE_MAGIC => {
-                let leaf_btree = XfsDa3Intnode::decode(&mut decoder).map_err(|_| libc::EIO).unwrap();
-                assert!(leaf_btree.magic == XFS_DA3_NODE_MAGIC || leaf_btree.magic == XFS_DA_NODE_MAGIC);
+                let leaf_btree = XfsDa3Intnode::decode(&mut decoder)
+                    .map_err(|_| libc::EIO)
+                    .unwrap();
+                assert!(
+                    leaf_btree.magic == XFS_DA3_NODE_MAGIC || leaf_btree.magic == XFS_DA_NODE_MAGIC
+                );
                 Self::Btree(leaf_btree)
-            },
+            }
             XFS_DIR2_LEAFN_MAGIC | XFS_DIR3_LEAFN_MAGIC => {
                 Self::LeafN(Dir2LeafNDisk::decode(&mut decoder).unwrap())
-            },
+            }
             XFS_DIR2_LEAF1_MAGIC | XFS_DIR3_LEAF1_MAGIC => {
                 Self::LeafN(Dir2LeafNDisk::decode(&mut decoder).unwrap())
-            },
+            }
             magic => panic!("Bad magic in Leaf block! {:#x}", magic),
         }
     }
@@ -189,18 +194,19 @@ impl Leaf {
         dir: &Dir2Lf,
         hash: u32,
     ) -> Result<Dir2LeafNDisk, i32>
-        where R: BufRead + Reader + Seek,
-
+    where
+        R: BufRead + Reader + Seek,
     {
         match self {
             Leaf::LeafN(leafn) => Ok(leafn),
             Leaf::Btree(btree) => {
-                let dablk: XfsDablk = btree.lookup(buf_reader.by_ref(), sb, hash,
-                    |block, br| dir.dfork.map_dblock(br, block).unwrap()
-                )?;
+                let dablk: XfsDablk =
+                    btree.lookup(buf_reader.by_ref(), sb, hash, |block, br| {
+                        dir.dfork.map_dblock(br, block).unwrap()
+                    })?;
                 let raw = dir.read_dblock(buf_reader.by_ref(), sb, dablk)?;
                 Ok(decode(&raw).unwrap().0)
-            },
+            }
         }
     }
 }
@@ -208,16 +214,19 @@ impl Leaf {
 /// Iterates through all dirents with a given hash, for NodeLike directories
 #[derive(Debug)]
 struct NodeLikeAddressIterator<'a, R: Reader + BufRead + Seek + 'a> {
-    dir: &'a Dir2Lf,
-    hash: XfsDahash,
-    leaf: Dir2LeafNDisk,
+    dir:        &'a Dir2Lf,
+    hash:       XfsDahash,
+    leaf:       Dir2LeafNDisk,
     leaf_range: Range<usize>,
-    brrc: &'a RefCell<&'a mut R>,
+    brrc:       &'a RefCell<&'a mut R>,
 }
 
 impl<'a, R: Reader + BufRead + Seek + 'a> NodeLikeAddressIterator<'a, R> {
-    pub fn new(dir: &'a Dir2Lf, brrc: &'a RefCell<&'a mut R>, hash: XfsDahash) -> Result<Self, i32>
-    {
+    pub fn new(
+        dir: &'a Dir2Lf,
+        brrc: &'a RefCell<&'a mut R>,
+        hash: XfsDahash,
+    ) -> Result<Self, i32> {
         let sb = SUPERBLOCK.get().unwrap();
         let dblock = sb.get_dir3_leaf_offset();
         let mut buf_reader = brrc.borrow_mut();
@@ -229,7 +238,13 @@ impl<'a, R: Reader + BufRead + Seek + 'a> NodeLikeAddressIterator<'a, R> {
 
         let leaf_range = leaf.get_address_range(hash);
 
-        Ok(Self{dir, hash, leaf, leaf_range, brrc})
+        Ok(Self {
+            dir,
+            hash,
+            leaf,
+            leaf_range,
+            brrc,
+        })
     }
 }
 
@@ -239,7 +254,13 @@ impl<'a, R: Reader + BufRead + Seek + 'a> Iterator for NodeLikeAddressIterator<'
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if self.leaf_range.is_empty() {
-                if self.leaf.ents.last().map(|e| e.hashval == self.hash).unwrap_or(false) {
+                if self
+                    .leaf
+                    .ents
+                    .last()
+                    .map(|e| e.hashval == self.hash)
+                    .unwrap_or(false)
+                {
                     // There was a probably hash collision in the directory.  This happens
                     // frequently, since the hash is only 32 bits.  Tragically, the colliding
                     // entries were located in different leaf blocks.
@@ -265,7 +286,7 @@ impl<'a, R: Reader + BufRead + Seek + 'a> Iterator for NodeLikeAddressIterator<'
                 self.leaf_range.start += 1;
                 let ent = self.leaf.ents[i];
                 debug_assert_eq!(ent.hashval, self.hash);
-                return Some(ent.address << 3)
+                return Some(ent.address << 3);
             }
         }
     }
@@ -288,23 +309,23 @@ impl Dir2Lf {
     pub fn from_bmx(bmx: Bmx) -> Self {
         let dfork = Dfork::Bmx(bmx);
         let blocks = Default::default();
-        Dir2Lf{dfork, blocks}
+        Dir2Lf { dfork, blocks }
     }
 
-    pub fn from_btree(
-        bmbt: BmdrBlock,
-        keys: Vec<BmbtKey>,
-        pointers: Vec<XfsBmbtPtr>,
-    ) -> Self {
+    pub fn from_btree(bmbt: BmdrBlock, keys: Vec<BmbtKey>, pointers: Vec<XfsBmbtPtr>) -> Self {
         let root = BtreeRoot::new(bmbt, keys, pointers);
         let dfork = Dfork::Btree(root);
         let blocks = Default::default();
-        Dir2Lf{dfork, blocks}
+        Dir2Lf { dfork, blocks }
     }
 
-    fn get_addresses<'a, R>(&'a self, buf_reader: &'a RefCell<&'a mut R>, hash: XfsDahash)
-        -> Box<dyn Iterator<Item=XfsDir2Dataptr> + 'a>
-            where R: Reader + BufRead + Seek + 'a
+    fn get_addresses<'a, R>(
+        &'a self,
+        buf_reader: &'a RefCell<&'a mut R>,
+        hash: XfsDahash,
+    ) -> Box<dyn Iterator<Item = XfsDir2Dataptr> + 'a>
+    where
+        R: Reader + BufRead + Seek + 'a,
     {
         if let Ok(ai) = NodeLikeAddressIterator::new(self, buf_reader, hash) {
             Box::new(ai)
@@ -313,9 +334,14 @@ impl Dir2Lf {
         }
     }
 
-    fn read_dblock<'a, R>(&'a self, mut buf_reader: R, sb: &Sb, dblock: XfsDablk)
-        -> Result<impl Deref<Target=[u8]> + 'a, i32>
-        where R: Reader + BufRead + Seek
+    fn read_dblock<'a, R>(
+        &'a self,
+        mut buf_reader: R,
+        sb: &Sb,
+        dblock: XfsDablk,
+    ) -> Result<impl Deref<Target = [u8]> + 'a, i32>
+    where
+        R: Reader + BufRead + Seek,
     {
         let mut cache_guard = self.blocks.borrow_mut();
         let entry = cache_guard.entry(dblock);
@@ -332,9 +358,14 @@ impl Dir2Lf {
 
     // NB: this code could be combined with File::read_sectors.  However, the latter must contend
     // with much larger extents, and with reads of partial sectors.
-    fn read_fsblock<R>(&self, mut buf_reader: R, sb: &Sb, fsblock: XfsFsblock)
-        -> Result<Vec<u8>, i32>
-        where R: Reader + BufRead + Seek
+    fn read_fsblock<R>(
+        &self,
+        mut buf_reader: R,
+        sb: &Sb,
+        fsblock: XfsFsblock,
+    ) -> Result<Vec<u8>, i32>
+    where
+        R: Reader + BufRead + Seek,
     {
         let dblksize: usize = 1 << (sb.sb_blocklog + sb.sb_dirblklog);
 
@@ -358,7 +389,8 @@ impl Dir3 for Dir2Lf {
 
         let brrc = RefCell::new(buf_reader);
         for address in self.get_addresses(&brrc, hash) {
-            let blk_offset = (address & ((1u32 << (sb.sb_dirblklog + sb.sb_blocklog)) - 1)) as usize;
+            let blk_offset =
+                (address & ((1u32 << (sb.sb_dirblklog + sb.sb_blocklog)) - 1)) as usize;
             let dblock = address >> sb.sb_blocklog & !((1u32 << sb.sb_dirblklog) - 1);
             let mut guard = brrc.borrow_mut();
             let raw = self.read_dblock(guard.by_ref(), sb, dblock)?;
@@ -383,8 +415,10 @@ impl Dir3 for Dir2Lf {
 
         loop {
             // Skip any holes in the directory
-            let newoffset = self.dfork.lseek(buf_reader.by_ref(), offset, libc::SEEK_DATA)
-                .map_err(|e| if e == libc::ENXIO {libc::ENOENT} else {e})?;
+            let newoffset = self
+                .dfork
+                .lseek(buf_reader.by_ref(), offset, libc::SEEK_DATA)
+                .map_err(|e| if e == libc::ENXIO { libc::ENOENT } else { e })?;
             if newoffset >= u64::from(sb.get_dir3_leaf_offset()) << sb.sb_blocklog {
                 return Err(libc::ENOENT);
             }
@@ -395,7 +429,9 @@ impl Dir3 for Dir2Lf {
             // Offset of this directory block within the directory
             let doffset = offset - dir_block_offset;
 
-            let dblock = (offset >> sb.sb_blocklog & !((1u64 << sb.sb_dirblklog) - 1)).try_into().unwrap();
+            let dblock = (offset >> sb.sb_blocklog & !((1u64 << sb.sb_dirblklog) - 1))
+                .try_into()
+                .unwrap();
             let raw = self.read_dblock(buf_reader.by_ref(), sb, dblock)?;
 
             let mut blk_offset = if offset & dblkmask > 0 {
@@ -405,14 +441,13 @@ impl Dir3 for Dir2Lf {
                 match magic {
                     XFS_DIR2_BLOCK_MAGIC | XFS_DIR2_DATA_MAGIC => Dir2DataHdr::SIZE as usize,
                     XFS_DIR3_BLOCK_MAGIC | XFS_DIR3_DATA_MAGIC => Dir3DataHdr::SIZE as usize,
-                    _ => panic!("Unknown magic number for block directory {:#x}", magic)
+                    _ => panic!("Unknown magic number for block directory {:#x}", magic),
                 }
             };
             while blk_offset < raw.len() {
                 let freetag: u16 = decode(&raw[blk_offset..]).unwrap().0;
                 if freetag == 0xffff {
-                    let (_, length) = decode::<Dir2DataUnused>(&raw[blk_offset..])
-                        .unwrap();
+                    let (_, length) = decode::<Dir2DataUnused>(&raw[blk_offset..]).unwrap();
                     offset += length as u64;
                     blk_offset += length;
                 } else if !next {
@@ -421,10 +456,10 @@ impl Dir3 for Dir2Lf {
                     offset += length as u64;
                     next = true;
                 } else {
-                    let (entry, _l)= decode::<Dir2DataEntry >(&raw[blk_offset..]).unwrap();
+                    let (entry, _l) = decode::<Dir2DataEntry>(&raw[blk_offset..]).unwrap();
                     let kind = match entry.ftype {
                         Some(ftype) => Some(get_file_type(FileKind::Type(ftype))?),
-                        None => None
+                        None => None,
                     };
                     let name = entry.name;
                     let entry_offset = doffset + entry.tag as u64;

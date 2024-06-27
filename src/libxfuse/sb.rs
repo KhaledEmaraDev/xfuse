@@ -27,12 +27,11 @@
  */
 use std::io::{prelude::*, SeekFrom};
 
-use super::definitions::*;
-use super::utils::Uuid;
-
 use bitflags::bitflags;
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use crc::{Crc, CRC_32_ISCSI};
+
+use super::{definitions::*, utils::Uuid};
 
 #[allow(dead_code)]
 mod constants {
@@ -95,9 +94,11 @@ impl SbFeatures2 {
     pub const fn attr2(&self) -> bool {
         self.contains(SbFeatures2::Attr2)
     }
+
     pub const fn crc(&self) -> bool {
         self.contains(SbFeatures2::Crc)
     }
+
     pub const fn ftype(&self) -> bool {
         self.contains(SbFeatures2::Ftype)
     }
@@ -120,18 +121,23 @@ impl SbFeaturesIncompat {
     pub const fn ftype(&self) -> bool {
         self.contains(SbFeaturesIncompat::Ftype)
     }
+
     pub const fn sparse_inodes(&self) -> bool {
         self.contains(SbFeaturesIncompat::SpInodes)
     }
+
     pub const fn meta_uuid(&self) -> bool {
         self.contains(SbFeaturesIncompat::MetaUuid)
     }
+
     pub const fn bigtime(&self) -> bool {
         self.contains(SbFeaturesIncompat::Bigtime)
     }
+
     pub const fn needs_repair(&self) -> bool {
         self.contains(SbFeaturesIncompat::NeedsRepair)
     }
+
     pub const fn large_extent_counters(&self) -> bool {
         self.contains(SbFeaturesIncompat::NrExt64)
     }
@@ -143,40 +149,39 @@ bitflags! {
     pub struct SbFeaturesLogIncompat: u32 {}
 }
 
-
 #[derive(Clone, Copy, Debug)]
 pub struct Sb {
     // sb_magicnum: u32,
-    pub sb_blocksize: u32,
-    pub sb_dblocks: XfsRfsblock,
+    pub sb_blocksize:     u32,
+    pub sb_dblocks:       XfsRfsblock,
     // sb_rblocks: XfsRfsblock,
     // sb_rextents: XfsRtblock,
-    pub sb_uuid: Uuid,
+    pub sb_uuid:          Uuid,
     // sb_logstart: XfsFsblock,
-    pub sb_rootino: XfsIno,
+    pub sb_rootino:       XfsIno,
     // sb_rbmino: XfsIno,
     // sb_rsumino: XfsIno,
     // sb_rextsize: XfsAgblock,
-    pub sb_agblocks: XfsAgblock,
-    pub sb_agcount: XfsAgnumber,
+    pub sb_agblocks:      XfsAgblock,
+    pub sb_agcount:       XfsAgnumber,
     // sb_rbmblocks: XfsExtlen,
-    pub sb_logblocks: XfsExtlen,
-    sb_versionnum: u16,
+    pub sb_logblocks:     XfsExtlen,
+    sb_versionnum:        u16,
     // sb_sectsize: u16,
-    sb_inodesize: u16,
+    sb_inodesize:         u16,
     // sb_inopblock: u16,
     // sb_fname: [u8; 12],
-    pub sb_blocklog: u8,
+    pub sb_blocklog:      u8,
     // sb_sectlog: u8,
-    pub sb_inodelog: u8,
-    pub sb_inopblog: u8,
-    pub sb_agblklog: u8,
+    pub sb_inodelog:      u8,
+    pub sb_inopblog:      u8,
+    pub sb_agblklog:      u8,
     // sb_rextslog: u8,
     // sb_inprogress: u8,
     // sb_imax_pct: u8,
-    pub sb_icount: u64,
-    pub sb_ifree: u64,
-    pub sb_fdblocks: u64,
+    pub sb_icount:        u64,
+    pub sb_ifree:         u64,
+    pub sb_fdblocks:      u64,
     // sb_frextents: u64,
     // sb_uquotino: XfsIno,
     // sb_gquotino: XfsIno,
@@ -186,11 +191,11 @@ pub struct Sb {
     // sb_inoalignmt: XfsExtlen,
     // sb_unit: u32,
     // sb_width: u32,
-    pub sb_dirblklog: u8,
+    pub sb_dirblklog:     u8,
     // sb_logsectlog: u8,
     // sb_logsectsize: u16,
     // sb_logsunit: u32,
-    sb_features2: SbFeatures2,
+    sb_features2:         SbFeatures2,
     // sb_bad_features2: u32,
     // sb_features_compat: u32,
     // sb_features_ro_compat: u32,
@@ -254,7 +259,8 @@ impl Sb {
         let _sb_logsectlog = buf_reader.read_u8().unwrap();
         let _sb_logsectsize = buf_reader.read_u16::<BigEndian>().unwrap();
         let _sb_logsunit = buf_reader.read_u32::<BigEndian>().unwrap();
-        let sb_features2 = SbFeatures2::from_bits(buf_reader.read_u32::<BigEndian>().unwrap()).unwrap();
+        let sb_features2 =
+            SbFeatures2::from_bits(buf_reader.read_u32::<BigEndian>().unwrap()).unwrap();
         let _sb_bad_features2 = buf_reader.read_u32::<BigEndian>().unwrap();
 
         /* Version 5 superblock features */
@@ -262,14 +268,15 @@ impl Sb {
         let _sb_features_ro_compat = buf_reader.read_u32::<BigEndian>().unwrap();
         let incompat_raw = buf_reader.read_u32::<BigEndian>().unwrap();
         let sb_features_incompat = SbFeaturesIncompat::from_bits(incompat_raw)
-            .unwrap_or_else(||
-                panic!("Unknown value in sb_features_incompat: {:?}", incompat_raw)
-            );
+            .unwrap_or_else(|| panic!("Unknown value in sb_features_incompat: {:?}", incompat_raw));
         let log_incompat_raw = buf_reader.read_u32::<BigEndian>().unwrap();
         let _sb_features_log_incompat = SbFeaturesLogIncompat::from_bits(log_incompat_raw)
-            .unwrap_or_else(||
-                panic!("Unknown value in sb_features_log_incompat: {:?}", log_incompat_raw)
-            );
+            .unwrap_or_else(|| {
+                panic!(
+                    "Unknown value in sb_features_log_incompat: {:?}",
+                    log_incompat_raw
+                )
+            });
 
         buf_reader.seek(SeekFrom::Start(0)).unwrap();
 
@@ -287,9 +294,11 @@ impl Sb {
         buf_reader.read_exact(&mut buf_acrc).unwrap();
         digest.update(&buf_acrc);
 
-
-        if ![4,5].contains(&(sb_versionnum & 0xF)) {
-            panic!("Unsupported filesystem version number {}", sb_versionnum & 0xF);
+        if ![4, 5].contains(&(sb_versionnum & 0xF)) {
+            panic!(
+                "Unsupported filesystem version number {}",
+                sb_versionnum & 0xF
+            );
         }
         if !sb_features2.attr2() {
             panic!("Version 1 extended attributes are not supported");
@@ -329,7 +338,7 @@ impl Sb {
             sb_fdblocks,
             sb_dirblklog,
             sb_features2,
-            sb_features_incompat
+            sb_features_incompat,
         }
     }
 
@@ -345,7 +354,6 @@ impl Sb {
 
     /// Given a file system block number, calculate its disk address in units of 512B blocks
     fn fsb_to_daddr(&self, fsbno: XfsFsblock) -> u64 {
-
         let blkbb_log = self.sb_blocklog - Self::BBSHIFT;
         let agno = fsbno >> self.sb_agblklog;
         let agbno = fsbno & ((1 << self.sb_agblklog) - 1);

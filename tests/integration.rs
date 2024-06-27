@@ -6,40 +6,40 @@ use std::{
         fd::AsRawFd,
         unix::{
             ffi::{OsStrExt, OsStringExt},
-            fs::{DirEntryExt, MetadataExt, FileExt, OpenOptionsExt}
+            fs::{DirEntryExt, FileExt, MetadataExt, OpenOptionsExt},
         },
     },
     path::{Path, PathBuf},
     process::{Child, Command},
+    thread::sleep,
     time::Duration,
-    thread::sleep
 };
 
 use assert_cmd::cargo::CommandCargoExt;
 use function_name::named;
-use nix::{errno::Errno, unistd::{AccessFlags, Whence, access}};
+use nix::{
+    errno::Errno,
+    unistd::{access, AccessFlags, Whence},
+};
 use rstest::{fixture, rstest};
 use rstest_reuse::{self, apply, template};
 use tempfile::{tempdir, TempDir};
 
 mod util;
-use util::{GOLDEN1K, GOLDEN4K, GOLDENPREALLOCATED, GOLDENV4, GOLDEN_NOFTYPE,
-    waitfor};
+use util::{waitfor, GOLDEN1K, GOLDEN4K, GOLDENPREALLOCATED, GOLDENV4, GOLDEN_NOFTYPE};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 struct ExpectedXattr {
-    name: OsString,
-    value: OsString
+    name:  OsString,
+    value: OsString,
 }
 
 /// Return an iterator over the extended attributes that ought to be present in each file, sorted
 /// in order by name.
-fn expected_xattrs_per_file(f: &str) -> impl Iterator<Item=ExpectedXattr> {
-    let locals = (0..local_attrs_per_file(f)).map(|i| {
-        ExpectedXattr {
-            name: OsString::from(format!("user.attr.{:06}", i)),
-            value: OsString::from(format!("value.{:06}", i))
-        }
+fn expected_xattrs_per_file(f: &str) -> impl Iterator<Item = ExpectedXattr> {
+    let locals = (0..local_attrs_per_file(f)).map(|i| ExpectedXattr {
+        name:  OsString::from(format!("user.attr.{:06}", i)),
+        value: OsString::from(format!("value.{:06}", i)),
     });
     let remotes = (0..remote_attrs_per_file(f)).map(|i| {
         ExpectedXattr {
@@ -59,7 +59,7 @@ fn local_attrs_per_file(f: &str) -> usize {
         "xattrs/btree2.5" => 0,
         "xattrs/btree3" => 0,
         "btree2.with-xattrs" => 1,
-        _ => unimplemented!()
+        _ => unimplemented!(),
     }
 }
 
@@ -72,7 +72,7 @@ fn remote_attrs_per_file(f: &str) -> usize {
         "xattrs/btree2.5" => 256,
         "xattrs/btree3" => 512,
         "btree2.with-xattrs" => 0,
-        _ => unimplemented!()
+        _ => unimplemented!(),
     }
 }
 
@@ -93,7 +93,7 @@ fn ents_per_dir_longnames(path: &Path, d: &str) -> usize {
         ("xfsv4.img", "sparse_leaf") => 4,
         ("xfsv4.img", "sparse_btree") => 10,
         ("xfs_noftype.img", "block") => 4,
-        x => panic!("{:?} not implemented", x)
+        x => panic!("{:?} not implemented", x),
     }
 }
 
@@ -108,19 +108,20 @@ fn ents_per_dir_shortnames(path: &Path, d: &str) -> usize {
         ("xfs4096.img", "all_name_lengths") => 255,
         ("xfsv4.img", "leaf") => 128,
         ("xfsv4.img", "node") => 512,
-        _ => unimplemented!()
+        _ => unimplemented!(),
     }
 }
 
 struct Harness {
-    d: TempDir,
+    d:     TempDir,
     child: Child,
-    path: PathBuf
+    path:  PathBuf,
 }
 
 fn harness(img: &Path) -> Harness {
     let d = tempdir().unwrap();
-    let child = Command::cargo_bin("xfs-fuse").unwrap()
+    let child = Command::cargo_bin("xfs-fuse")
+        .unwrap()
         .arg(img)
         .arg(d.path())
         .spawn()
@@ -129,12 +130,13 @@ fn harness(img: &Path) -> Harness {
     waitfor(Duration::from_secs(5), || {
         let s = nix::sys::statfs::statfs(d.path()).unwrap();
         s.filesystem_type_name() == "fusefs.xfs"
-    }).unwrap();
+    })
+    .unwrap();
 
     Harness {
         d,
         child,
-        path: img.to_owned()
+        path: img.to_owned(),
     }
 }
 
@@ -167,9 +169,7 @@ impl Drop for Harness {
     #[allow(clippy::if_same_then_else)]
     fn drop(&mut self) {
         loop {
-            let cmd = Command::new("umount")
-                .arg(self.d.path())
-                .output();
+            let cmd = Command::new("umount").arg(self.d.path()).output();
             match cmd {
                 Err(e) => {
                     eprintln!("Executing umount failed: {}", e);
@@ -178,15 +178,12 @@ impl Drop for Harness {
                         return;
                     }
                     panic!("Executing umount failed");
-                },
+                }
                 Ok(output) => {
-                    let errmsg = OsString::from_vec(output.stderr)
-                        .into_string()
-                        .unwrap();
+                    let errmsg = OsString::from_vec(output.stderr).into_string().unwrap();
                     if output.status.success() {
                         break;
-                    } else if errmsg.contains("not a file system root directory")
-                    {
+                    } else if errmsg.contains("not a file system root directory") {
                         // The daemon probably crashed.
                         break;
                     } else if errmsg.contains("Device busy") {
@@ -234,7 +231,7 @@ fn all_dir_types_longnames(h: fn() -> Harness, d: &str) {}
 #[case::block(harness4k, "block")]
 #[case::leaf(harness4k, "leaf")]
 #[case::v4_sf(harnessv4, "sf")]
-#[case::v4_leaf(harnessv4, "leaf")]     // TODO check in xfs_db.  Might not be a leaf dir.
+#[case::v4_leaf(harnessv4, "leaf")] // TODO check in xfs_db.  Might not be a leaf dir.
 #[case::v4_node(harnessv4, "node")]
 #[case::noftype_sf(harness_noftype, "sf")]
 fn all_dir_types_shortnames(h: fn() -> Harness, d: &str) {}
@@ -299,15 +296,16 @@ mod dev {
     use super::*;
 
     struct MdHarness {
-        _md: mdconfig::Md,
-        d: TempDir,
-        child: Child
+        _md:   mdconfig::Md,
+        d:     TempDir,
+        child: Child,
     }
 
     fn mdharness(image: &Path) -> MdHarness {
         let md = mdconfig::Builder::vnode(image).create().unwrap();
         let d = tempdir().unwrap();
-        let child = Command::cargo_bin("xfs-fuse").unwrap()
+        let child = Command::cargo_bin("xfs-fuse")
+            .unwrap()
             .arg(md.path())
             .arg(d.path())
             .spawn()
@@ -316,20 +314,15 @@ mod dev {
         waitfor(Duration::from_secs(5), || {
             let s = nix::sys::statfs::statfs(d.path()).unwrap();
             s.filesystem_type_name() == "fusefs.xfs"
-        }).unwrap();
+        })
+        .unwrap();
 
-        MdHarness {
-            _md: md,
-            d,
-            child
-        }
+        MdHarness { _md: md, d, child }
     }
 
     impl Drop for MdHarness {
         fn drop(&mut self) {
-            let _ = Command::new("umount")
-                .arg(self.d.path())
-                .output();
+            let _ = Command::new("umount").arg(self.d.path()).output();
             let _ = self.child.wait();
         }
     }
@@ -346,8 +339,7 @@ mod dev {
         require_root!();
         let h = mdharness(image);
 
-        let walker = walkdir::WalkDir::new(h.d.path())
-            .into_iter();
+        let walker = walkdir::WalkDir::new(h.d.path()).into_iter();
         for entry in walker {
             let entry = entry.unwrap();
             let _ = entry.metadata().unwrap();
@@ -394,7 +386,8 @@ mod dev {
         let mut f = fs::OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_DIRECT)
-            .open(path).unwrap();
+            .open(path)
+            .unwrap();
 
         // Verify contents
         let mut ofs = 0;
@@ -402,7 +395,7 @@ mod dev {
             let mut buf = [0; BUFSIZE];
             if let Err(e) = f.read_exact(&mut buf[..]) {
                 if e.kind() == ErrorKind::UnexpectedEof {
-                    break
+                    break;
                 } else {
                     panic!("read: {:?}", e);
                 }
@@ -414,7 +407,6 @@ mod dev {
         }
         assert_eq!(ofs, size);
     }
-
 }
 
 // TODO: xattr test on V4 file system
@@ -460,11 +452,14 @@ mod getextattr {
                 ns,
                 cattrname.as_ptr(),
                 v.as_mut_ptr().cast(),
-                v.capacity()
+                v.capacity(),
             )
         };
         assert!(r < 0);
-        assert_eq!(libc::ENOATTR, io::Error::last_os_error().raw_os_error().unwrap());
+        assert_eq!(
+            libc::ENOATTR,
+            io::Error::last_os_error().raw_os_error().unwrap()
+        );
     }
 
     /// Try to get the size of an extended attribute that doesn't exist.
@@ -485,16 +480,13 @@ mod getextattr {
         let attrname = OsStr::new("user.nonexistent");
         let cattrname = CString::new(attrname.as_bytes()).unwrap();
         let r = unsafe {
-            libc::extattr_get_file(
-                cpath.as_ptr(),
-                ns,
-                cattrname.as_ptr(),
-                ptr::null_mut(),
-                0
-            )
+            libc::extattr_get_file(cpath.as_ptr(), ns, cattrname.as_ptr(), ptr::null_mut(), 0)
         };
         assert!(r < 0);
-        assert_eq!(libc::ENOATTR, io::Error::last_os_error().raw_os_error().unwrap());
+        assert_eq!(
+            libc::ENOATTR,
+            io::Error::last_os_error().raw_os_error().unwrap()
+        );
     }
 }
 
@@ -520,13 +512,7 @@ fn getextattr_size(#[case] h: fn() -> Harness, #[case] d: &str) {
         let attrname = OsStr::new(s.as_str());
         let cattrname = CString::new(attrname.as_bytes()).unwrap();
         let r = unsafe {
-            libc::extattr_get_file(
-                cpath.as_ptr(),
-                ns,
-                cattrname.as_ptr(),
-                ptr::null_mut(),
-                0
-            )
+            libc::extattr_get_file(cpath.as_ptr(), ns, cattrname.as_ptr(), ptr::null_mut(), 0)
         };
         if let Ok(r) = usize::try_from(r) {
             assert_eq!(expected_len, r);
@@ -574,9 +560,12 @@ mod lookup {
 
         let amode = AccessFlags::F_OK;
         for i in 1..=255 {
-            let p = harness4k.d.path().join("all_name_lengths").join(format!("{:0width$}", i, width=i));
-            access(p.as_path(), amode)
-                .unwrap_or_else(|_| panic!("Lookup failed: {}", p.display()));
+            let p = harness4k.d.path().join("all_name_lengths").join(format!(
+                "{:0width$}",
+                i,
+                width = i
+            ));
+            access(p.as_path(), amode).unwrap_or_else(|_| panic!("Lookup failed: {}", p.display()));
         }
     }
 
@@ -586,23 +575,22 @@ mod lookup {
     fn hash_collisions_block(harness4k: Harness) {
         require_fusefs!();
 
-        let filenames = [".", "..",
-                "210001", "2a0004", "310009", "81000a",
-		"210004", "2a0001", "3a0009", "81000d",
-		"210005", "2a0000", "3a0008", "81000e",
-		"210011", "2a0014", "310019", "81001a",
-		"210014", "2a0011", "3a0019", "81001d",
-		"210015", "2a0010", "3a0018", "81001e",
-		"210021", "2a0024", "310029", "81002a",
-		"210024", "2a0021", "3a0029", "81002d",
-		"210025", "2a0020", "3a0028", "81002e",
-		"210031", "2a0034", "310039", "81003a",
+        let filenames = [
+            ".", "..", "210001", "2a0004", "310009", "81000a", "210004", "2a0001", "3a0009",
+            "81000d", "210005", "2a0000", "3a0008", "81000e", "210011", "2a0014", "310019",
+            "81001a", "210014", "2a0011", "3a0019", "81001d", "210015", "2a0010", "3a0018",
+            "81001e", "210021", "2a0024", "310029", "81002a", "210024", "2a0021", "3a0029",
+            "81002d", "210025", "2a0020", "3a0028", "81002e", "210031", "2a0034", "310039",
+            "81003a",
         ];
         let amode = AccessFlags::F_OK;
         for filename in &filenames {
-            let p = harness4k.d.path().join("block-with-hash-collisions").join(filename);
-            access(p.as_path(), amode)
-                .unwrap_or_else(|_| panic!("Lookup failed: {}", p.display()));
+            let p = harness4k
+                .d
+                .path()
+                .join("block-with-hash-collisions")
+                .join(filename);
+            access(p.as_path(), amode).unwrap_or_else(|_| panic!("Lookup failed: {}", p.display()));
         }
     }
 
@@ -618,8 +606,7 @@ mod lookup {
         let amode = AccessFlags::F_OK;
         for i in 0..ents_per_dir_longnames(harness.path.as_path(), d) {
             let p = harness.d.path().join(format!("{d}/frame__________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________{i:08}"));
-            access(p.as_path(), amode)
-                .unwrap_or_else(|_| panic!("Lookup failed: {}", p.display()));
+            access(p.as_path(), amode).unwrap_or_else(|_| panic!("Lookup failed: {}", p.display()));
         }
     }
 
@@ -633,8 +620,7 @@ mod lookup {
         let amode = AccessFlags::F_OK;
         for i in 0..ents_per_dir_shortnames(harness.path.as_path(), d) {
             let p = harness.d.path().join(format!("{d}/frame{i:06}"));
-            access(p.as_path(), amode)
-                .unwrap_or_else(|_| panic!("Lookup failed: {}", p.display()));
+            access(p.as_path(), amode).unwrap_or_else(|_| panic!("Lookup failed: {}", p.display()));
         }
     }
 
@@ -705,7 +691,7 @@ mod lseek {
     enum Offset {
         FromStart(libc::off_t),
         Eof,
-        BeyondEof
+        BeyondEof,
     }
 
     #[template]
@@ -718,35 +704,51 @@ mod lseek {
     #[case::beyond_eof_hole(Whence::SeekHole, Offset::BeyondEof, Err(Errno::ENXIO))]
     /// Seek for data
     #[case::data_at_start(Whence::SeekData, Offset::FromStart(0), Ok(Offset::FromStart(4096)))]
-    #[case::data_in_middle(Whence::SeekData, Offset::FromStart(8192), Ok(Offset::FromStart(12288)))]
+    #[case::data_in_middle(
+        Whence::SeekData,
+        Offset::FromStart(8192),
+        Ok(Offset::FromStart(12288))
+    )]
     /// Seek for a hole
     #[case::hole_in_middle(Whence::SeekHole, Offset::FromStart(4096), Ok(Offset::FromStart(8192)))]
     /// Try to seek to a data region, but we're already there.
-    #[case::data_in_data_at_start(Whence::SeekData, Offset::FromStart(4096), Ok(Offset::FromStart(4096)))]
-    #[case::data_in_data_in_middle(Whence::SeekData, Offset::FromStart(12288), Ok(Offset::FromStart(12288)))]
+    #[case::data_in_data_at_start(
+        Whence::SeekData,
+        Offset::FromStart(4096),
+        Ok(Offset::FromStart(4096))
+    )]
+    #[case::data_in_data_in_middle(
+        Whence::SeekData,
+        Offset::FromStart(12288),
+        Ok(Offset::FromStart(12288))
+    )]
     /// Try to seek to a hole, but it's only data until EOF
     #[case::data_until_eof(Whence::SeekHole, Offset::FromStart(12288), Ok(Offset::Eof))]
     /// Try to seek to a hole, but we're already there.
     #[case::hole_in_hole_at_start(Whence::SeekHole, Offset::FromStart(0), Ok(Offset::FromStart(0)))]
-    #[case::hole_in_hole_in_middle(Whence::SeekHole, Offset::FromStart(8192), Ok(Offset::FromStart(8192)))]
+    #[case::hole_in_hole_in_middle(
+        Whence::SeekHole,
+        Offset::FromStart(8192),
+        Ok(Offset::FromStart(8192))
+    )]
     /// Searching from a negative offset always returns EINVAL
     #[case::negative_offset(Whence::SeekHole, Offset::FromStart(-1), Err(Errno::EINVAL))]
     fn all_scenarios(
         #[case] whence: Whence,
         #[case] ofs: Offset,
-        #[case] expected: nix::Result<Offset>)
-    {}
+        #[case] expected: nix::Result<Offset>,
+    ) {
+    }
 
     #[named]
     #[apply(all_scenarios)]
     fn scenarios(
         harness4k: Harness,
-        #[values("sparse.extents.txt", "sparse.btree.txt")]
-        path: &str,
+        #[values("sparse.extents.txt", "sparse.btree.txt")] path: &str,
         whence: Whence,
         ofs: Offset,
-        expected: nix::Result<Offset>)
-    {
+        expected: nix::Result<Offset>,
+    ) {
         require_fusefs!();
 
         let p = harness4k.d.path().join("files").join(path);
@@ -773,7 +775,10 @@ mod lseek {
 
         let p = harness4k.d.path().join("files/sparse.fully.txt");
         let f = fs::File::open(p).unwrap();
-        assert_eq!(Err(Errno::ENXIO), nix::unistd::lseek(f.as_raw_fd(), 0, Whence::SeekData));
+        assert_eq!(
+            Err(Errno::ENXIO),
+            nix::unistd::lseek(f.as_raw_fd(), 0, Whence::SeekData)
+        );
     }
 
     /// Try to seek to a data region, but it's only hole untiL EOF
@@ -786,7 +791,10 @@ mod lseek {
 
         let p = harness4k.d.path().join("files").join(fname);
         let f = fs::File::open(p).unwrap();
-        assert_eq!(Err(Errno::ENXIO), nix::unistd::lseek(f.as_raw_fd(), offset, Whence::SeekData));
+        assert_eq!(
+            Err(Errno::ENXIO),
+            nix::unistd::lseek(f.as_raw_fd(), offset, Whence::SeekData)
+        );
     }
 
     #[named]
@@ -829,10 +837,16 @@ mod lseek {
         let f = fs::File::open(p).unwrap();
 
         // The unwritten extent should not count as a data region
-        assert_eq!(Err(Errno::ENXIO), nix::unistd::lseek(f.as_raw_fd(), 0, Whence::SeekData));
+        assert_eq!(
+            Err(Errno::ENXIO),
+            nix::unistd::lseek(f.as_raw_fd(), 0, Whence::SeekData)
+        );
 
         // The unwritten extent should count as a hole
-        assert_eq!(Ok(0), nix::unistd::lseek(f.as_raw_fd(), 0, Whence::SeekHole));
+        assert_eq!(
+            Ok(0),
+            nix::unistd::lseek(f.as_raw_fd(), 0, Whence::SeekHole)
+        );
     }
 }
 
@@ -867,12 +881,7 @@ mod lsextattr {
         let mut v = Vec::<u8>::with_capacity(1024);
 
         let r = unsafe {
-            libc::extattr_list_file(
-                cpath.as_ptr(),
-                ns,
-                v.as_mut_ptr().cast(),
-                v.capacity()
-            )
+            libc::extattr_list_file(cpath.as_ptr(), ns, v.as_mut_ptr().cast(), v.capacity())
         };
         if let Ok(r) = usize::try_from(r) {
             assert_eq!(0, r);
@@ -891,14 +900,7 @@ mod lsextattr {
         let p = harness4k.d.path().join("files/hello.txt");
         let cpath = CString::new(p.as_os_str().as_bytes()).unwrap();
 
-        let r = unsafe {
-            libc::extattr_list_file(
-                cpath.as_ptr(),
-                ns,
-                ptr::null_mut(),
-                0
-            )
-        };
+        let r = unsafe { libc::extattr_list_file(cpath.as_ptr(), ns, ptr::null_mut(), 0) };
         if let Ok(r) = usize::try_from(r) {
             assert_eq!(0, r);
         } else {
@@ -920,19 +922,14 @@ mod lsextattr {
         let harness = h();
         let ns = libc::EXTATTR_NAMESPACE_USER;
         let p = harness.d.path().join(d);
-        let expected_len: usize = expected_xattrs_per_file(d).map(|attr| {
-            attr.name.len() /* -5 because "user." is not included*/ - 5 /* +1 for NUL */ + 1
-        }).sum();
+        let expected_len: usize = expected_xattrs_per_file(d)
+            .map(|attr| {
+                attr.name.len() /* -5 because "user." is not included*/ - 5 /* +1 for NUL */ + 1
+            })
+            .sum();
         let cpath = CString::new(p.as_os_str().as_bytes()).unwrap();
 
-        let r = unsafe {
-            libc::extattr_list_file(
-                cpath.as_ptr(),
-                ns,
-                ptr::null_mut(),
-                0
-            )
-        };
+        let r = unsafe { libc::extattr_list_file(cpath.as_ptr(), ns, ptr::null_mut(), 0) };
         if let Ok(r) = usize::try_from(r) {
             assert_eq!(expected_len, r);
         } else {
@@ -1076,7 +1073,7 @@ mod read {
             let mut buf = [0; BUFSIZE];
             if let Err(e) = f.read_exact(&mut buf[..]) {
                 if e.kind() == ErrorKind::UnexpectedEof {
-                    break
+                    break;
                 } else {
                     panic!("read: {:?}", e);
                 }
@@ -1172,7 +1169,11 @@ mod read {
         const FLEN: u64 = 8388608;
         const BUFLEN: usize = 1 << 12;
 
-        let path = harness_preallocated.d.path().join("files").join("preallocated");
+        let path = harness_preallocated
+            .d
+            .path()
+            .join("files")
+            .join("preallocated");
         let mut f = fs::File::open(path).unwrap();
 
         // First verify the length
@@ -1198,18 +1199,22 @@ mod readdir {
 
         let d = "all_name_lengths";
         let dpath = harness4k.d.path().join(d);
-        let ents = std::fs::read_dir(dpath)
-            .unwrap();
+        let ents = std::fs::read_dir(dpath).unwrap();
         let mut count = 0;
         for (i, rent) in ents.into_iter().enumerate() {
             let ent = rent.unwrap();
-            let expected_name = format!("{:0width$}", i + 1, width=i + 1);
+            let expected_name = format!("{:0width$}", i + 1, width = i + 1);
             assert_eq!(ent.file_name(), OsStr::new(&expected_name));
             assert!(ent.file_type().unwrap().is_file());
             let md = ent.metadata().unwrap();
-            assert_eq!(ent.ino(), md.ino(),
-                "inode mismatch for {}: readdir returned {} but lookup returned {}", expected_name,
-                ent.ino(), md.ino());
+            assert_eq!(
+                ent.ino(),
+                md.ino(),
+                "inode mismatch for {}: readdir returned {} but lookup returned {}",
+                expected_name,
+                ent.ino(),
+                md.ino()
+            );
             // The other metadata fields are checked in a separate test case.
             count += 1;
         }
@@ -1223,16 +1228,20 @@ mod readdir {
         require_fusefs!();
 
         let dpath = harness4k.d.path().join("block-with-hash-collisions");
-        let ents = std::fs::read_dir(dpath)
-            .unwrap();
+        let ents = std::fs::read_dir(dpath).unwrap();
         let mut count = 0;
         for rent in ents {
             let ent = rent.unwrap();
             assert!(ent.file_type().unwrap().is_file());
             let md = ent.metadata().unwrap();
-            assert_eq!(ent.ino(), md.ino(),
+            assert_eq!(
+                ent.ino(),
+                md.ino(),
                 "inode mismatch for {}: readdir returned {} but lookup returned {}",
-                ent.file_name().to_string_lossy(), ent.ino(), md.ino());
+                ent.file_name().to_string_lossy(),
+                ent.ino(),
+                md.ino()
+            );
             count += 1;
         }
         assert_eq!(count, 40);
@@ -1248,8 +1257,7 @@ mod readdir {
 
         let harness = h();
         let dpath = harness.d.path().join(d);
-        let ents = std::fs::read_dir(dpath)
-            .unwrap();
+        let ents = std::fs::read_dir(dpath).unwrap();
         let mut count = 0;
         for (i, rent) in ents.enumerate() {
             let ent = rent.unwrap();
@@ -1257,7 +1265,14 @@ mod readdir {
             assert_eq!(ent.file_name(), OsStr::new(&expected_name));
             assert!(ent.file_type().unwrap().is_file());
             let md = ent.metadata().unwrap();
-            assert_eq!(ent.ino(), md.ino(), "inode mismatch for {}: readdir returned {} but lookup returned {}", expected_name, ent.ino(), md.ino());
+            assert_eq!(
+                ent.ino(),
+                md.ino(),
+                "inode mismatch for {}: readdir returned {} but lookup returned {}",
+                expected_name,
+                ent.ino(),
+                md.ino()
+            );
             // The other metadata fields are checked in a separate test case.
             count += 1;
         }
@@ -1272,8 +1287,7 @@ mod readdir {
 
         let harness = h();
         let dpath = harness.d.path().join(d);
-        let ents = std::fs::read_dir(dpath)
-            .unwrap();
+        let ents = std::fs::read_dir(dpath).unwrap();
         let mut count = 0;
         for (i, rent) in ents.enumerate() {
             let ent = rent.unwrap();
@@ -1344,11 +1358,10 @@ mod readdir {
 #[case::sf("sf", "dest")]
 #[case::extent("max", "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDE")]
 fn readlink(
-    #[values(harness4k, harnessv4)]
-    h: fn() -> Harness,
+    #[values(harness4k, harnessv4)] h: fn() -> Harness,
     #[case] linkname: &str,
-    #[case] destname: &str)
-{
+    #[case] destname: &str,
+) {
     require_fusefs!();
 
     let harness = h();
@@ -1379,13 +1392,13 @@ mod stat {
         let stat = nix::sys::stat::stat(&path).unwrap();
 
         assert_eq!(stat.st_mtime, 401526123);
-        assert_eq!(stat.st_mtime_nsec, 0);  // mkimg.sh can't set nsec
+        assert_eq!(stat.st_mtime_nsec, 0); // mkimg.sh can't set nsec
         assert_eq!(stat.st_atime, 1332497106);
-        assert_eq!(stat.st_atime_nsec, 0);  // mkimg.sh can't set nsec
+        assert_eq!(stat.st_atime_nsec, 0); // mkimg.sh can't set nsec
+
         // mkimg.sh doesn't have a way to set ctime.  So just check that it's
         // greater than mtime.
-        assert!(stat.st_ctime > stat.st_mtime || 
-                stat.st_ctime_nsec > stat.st_mtime_nsec);
+        assert!(stat.st_ctime > stat.st_mtime || stat.st_ctime_nsec > stat.st_mtime_nsec);
         assert_eq!(stat.st_ino, st_ino);
         assert_eq!(stat.st_size, 14);
         assert_eq!(stat.st_blksize, 4096);
@@ -1419,7 +1432,7 @@ mod stat {
         require_fusefs!();
 
         let path = harness4k.d.path().join("files").join(filename);
-        
+
         let stat = nix::sys::stat::stat(&path).unwrap();
         assert_eq!(stat.st_mode & libc::S_IFMT, devtype);
     }
@@ -1429,15 +1442,13 @@ mod stat {
     #[rstest]
     #[case::sf("sf", 65698)]
     #[case::extent("max", 65699)]
-    fn symlink(harness4k: Harness, #[case] linkname: &str, #[case] ino: libc::ino_t)
-    {
+    fn symlink(harness4k: Harness, #[case] linkname: &str, #[case] ino: libc::ino_t) {
         require_fusefs!();
 
         let path = harness4k.d.path().join("links").join(linkname);
 
         let flags = nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW;
-        let stat = nix::sys::stat::fstatat(libc::AT_FDCWD, &path,
-                                           flags).unwrap();
+        let stat = nix::sys::stat::fstatat(libc::AT_FDCWD, &path, flags).unwrap();
         assert_eq!(1, stat.st_nlink, "AT_SYMLINK_NOFOLLOW was ignored");
         assert_eq!(ino, stat.st_ino);
     }
@@ -1455,7 +1466,10 @@ fn statfs(harness4k: Harness) {
 
     // Linux's calculation for blocks available and free is complicated and the
     // docs indicate that it's approximate.  So don't assert on the exact value.
-    assert_eq!(sfs.blocks_available(), i64::try_from(sfs.blocks_free()).unwrap());
+    assert_eq!(
+        sfs.blocks_available(),
+        i64::try_from(sfs.blocks_free()).unwrap()
+    );
 
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
@@ -1481,7 +1495,7 @@ fn statvfs(harness4k: Harness) {
     assert!(svfs.flags().contains(nix::sys::statvfs::FsFlags::ST_RDONLY));
     assert_eq!(svfs.fragment_size(), 4096);
     assert_eq!(svfs.blocks(), 23208);
-    
+
     // Linux's calculation for f_files is very confusing and not supported by
     // the XFS documentation.  I think it may be wrong.  So don't assert on it
     // here.

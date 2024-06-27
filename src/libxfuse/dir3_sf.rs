@@ -25,9 +25,19 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use std::ffi::{OsStr, OsString};
-use std::io::{BufRead, Seek};
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::{
+    ffi::{OsStr, OsString},
+    io::{BufRead, Seek},
+    os::unix::ffi::{OsStrExt, OsStringExt},
+};
+
+use bincode::{
+    de::{read::Reader, Decoder},
+    error::DecodeError,
+    Decode,
+};
+use fuser::FileType;
+use libc::{c_int, ENOENT};
 
 use super::{
     definitions::*,
@@ -37,21 +47,13 @@ use super::{
     volume::SUPERBLOCK,
 };
 
-use bincode::{
-    Decode,
-    de::{Decoder, read::Reader},
-    error::DecodeError
-};
-use fuser::FileType;
-use libc::{c_int, ENOENT};
-
 // pub type XfsDir2SfOff = [u8; 2];
 
 #[derive(Debug, Clone)]
 pub struct Dir2SfHdr {
-    pub count: u8,
+    pub count:   u8,
     pub i8count: u8,
-    pub parent: XfsIno,
+    pub parent:  XfsIno,
 }
 
 impl Decode for Dir2SfHdr {
@@ -73,9 +75,9 @@ impl Decode for Dir2SfHdr {
 
 #[derive(Debug, Clone)]
 struct Dir2SfEntry32 {
-    offset: u16,
-    name: OsString,
-    ftype: Option<u8>,
+    offset:  u16,
+    name:    OsString,
+    ftype:   Option<u8>,
     inumber: u32,
 }
 
@@ -104,22 +106,20 @@ impl Decode for Dir2SfEntry32 {
 
 #[derive(Debug, Clone)]
 struct Dir2SfEntry64 {
-    offset: u16,
-    name: OsString,
-    ftype: Option<u8>,
+    offset:  u16,
+    name:    OsString,
+    ftype:   Option<u8>,
     inumber: XfsIno,
 }
 
 impl Dir2SfEntry64 {
-    pub fn new(name: &[u8], ftype: u8, offset: u16, inumber: XfsIno)
-        -> Self
-    {
+    pub fn new(name: &[u8], ftype: u8, offset: u16, inumber: XfsIno) -> Self {
         let name = OsStr::from_bytes(name).to_owned();
         Self {
             offset,
             name,
             ftype: Some(ftype),
-            inumber
+            inumber,
         }
     }
 }
@@ -153,9 +153,9 @@ impl Decode for Dir2SfEntry64 {
 impl From<Dir2SfEntry32> for Dir2SfEntry64 {
     fn from(e32: Dir2SfEntry32) -> Self {
         Self {
-            offset: e32.offset,
-            name: e32.name,
-            ftype: e32.ftype,
+            offset:  e32.offset,
+            name:    e32.name,
+            ftype:   e32.ftype,
             inumber: e32.inumber.into(),
         }
     }
@@ -233,7 +233,7 @@ impl Dir3 for Dir2Sf {
 
             let kind = match entry.ftype {
                 Some(ftype) => Some(get_file_type(FileKind::Type(ftype))?),
-                None => None
+                None => None,
             };
 
             let name = entry.name.to_owned();
