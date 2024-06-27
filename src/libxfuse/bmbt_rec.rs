@@ -75,6 +75,7 @@ impl Decode for BmbtRec {
 }
 
 /// An ordered list of [`BmbtRec`].
+// TODO: consider wrapping a borrowed slice instead of a vec.
 #[derive(Debug, Clone)]
 pub struct Bmx(pub Vec<BmbtRec>);
 

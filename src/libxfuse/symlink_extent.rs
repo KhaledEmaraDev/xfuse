@@ -31,10 +31,9 @@ use std::{
 };
 
 use bincode::{Decode, de::read::Reader};
-use byteorder::ReadBytesExt;
 
 use super::{
-    bmbt_rec::BmbtRec, 
+    bmbt_rec::Bmx, 
     definitions::XFS_SYMLINK_MAGIC,
     sb::Sb,
     utils::{Uuid, decode_from}
@@ -58,27 +57,55 @@ pub struct SymlinkExtents;
 impl SymlinkExtents {
     pub fn get_target<T: BufRead + Reader + Seek>(
         buf_reader: &mut T,
-        bmx: &[BmbtRec],
+        bmx: &Bmx,
         superblock: &Sb,
     ) -> CString {
         let mut data = Vec::<u8>::with_capacity(1024);
 
-        for bmbt_rec in bmx.iter() {
-            buf_reader.seek(SeekFrom::Start(superblock.fsb_to_offset(bmbt_rec.br_startblock)))
-                .unwrap();
-
-            let hdr: DsymlinkHdr = decode_from(buf_reader.by_ref()).unwrap();
-            assert_eq!(XFS_SYMLINK_MAGIC, hdr.sl_magic);
-
-            buf_reader
-                .seek(SeekFrom::Current(hdr.sl_offset as i64))
-                .unwrap();
-
-            for _i in 0..hdr.sl_bytes {
-                data.push(buf_reader.read_u8().unwrap());
+        let mut dblock = 0;
+        loop {
+            let (ofsb, oblocks) = bmx.get_extent(dblock);
+            if ofsb.is_none() {
+                break;
             }
+            let fsb = ofsb.unwrap();
+            let blocks = oblocks.unwrap();
+            buf_reader.seek(SeekFrom::Start(superblock.fsb_to_offset(fsb))).unwrap();
+
+            let bytes = match superblock.version() {
+                5 => {
+                    let hdr: DsymlinkHdr = decode_from(buf_reader.by_ref()).unwrap();
+                    assert_eq!(XFS_SYMLINK_MAGIC, hdr.sl_magic);
+
+                    buf_reader
+                        .seek(SeekFrom::Current(hdr.sl_offset as i64))
+                        .unwrap();
+                    hdr.sl_bytes as usize
+                },
+                4 => {
+                    // Version 4 file systems do not have the DsymlinkHdr
+                    (blocks as usize) << superblock.sb_blocklog
+                },
+                _ => unimplemented!()
+            };
+
+            let oldlen = data.len();
+            data.resize(oldlen + bytes, 0);
+            buf_reader.read_exact(&mut data[oldlen..]).unwrap();
+            dblock += blocks;
         }
 
-        CString::new(data).unwrap()
+        match CString::new(data) {
+            Ok(s) => s,
+            Err(ne) => {
+                // A V4 file system does not store the length of the symlink target, so we must
+                // infer it by the presence of a NUL byte.
+                debug_assert_eq!(superblock.version(), 4);
+                let p = ne.nul_position();
+                let mut v = ne.into_vec();
+                v.truncate(p);
+                CString::new(v).unwrap()
+            }
+        }
     }
 }

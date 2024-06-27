@@ -161,7 +161,7 @@ pub struct Sb {
     pub sb_agcount: XfsAgnumber,
     // sb_rbmblocks: XfsExtlen,
     pub sb_logblocks: XfsExtlen,
-    // sb_versionnum: u16,
+    sb_versionnum: u16,
     // sb_sectsize: u16,
     sb_inodesize: u16,
     // sb_inopblock: u16,
@@ -318,6 +318,7 @@ impl Sb {
             sb_agblocks,
             sb_agcount,
             sb_logblocks,
+            sb_versionnum,
             sb_inodesize,
             sb_blocklog,
             sb_inodelog,
@@ -361,5 +362,10 @@ impl Sb {
         // Though it isn't documented, it seems that the ftype bit was originally part of the
         // sb_features2 field, and then later moved to the sb_features_incompat field.
         self.sb_features2.ftype() || self.sb_features_incompat.ftype()
+    }
+
+    /// Return the file system version (usually 4 or 5)
+    pub fn version(&self) -> u16 {
+        self.sb_versionnum & 0xF
     }
 }
