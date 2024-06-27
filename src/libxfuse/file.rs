@@ -27,7 +27,6 @@
  */
 use std::{
     cmp::min,
-    convert::TryFrom,
     io::{BufRead, Seek, SeekFrom}
 };
 

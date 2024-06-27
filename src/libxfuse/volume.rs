@@ -26,7 +26,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 use std::collections::HashMap;
-use std::convert::{TryFrom, TryInto};
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{BufReader, Read};

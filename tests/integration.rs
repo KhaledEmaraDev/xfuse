@@ -1,5 +1,4 @@
 use std::{
-    convert::TryFrom,
     ffi::{OsStr, OsString},
     fs,
     io::{self, ErrorKind, Read},
@@ -506,7 +505,7 @@ mod getextattr {
 #[named]
 #[apply(all_xattr_fork_types)]
 fn getextattr_size(#[case] h: fn() -> Harness, #[case] d: &str) {
-    use std::{convert::TryFrom, ffi::CString, ptr};
+    use std::{ffi::CString, ptr};
 
     require_fusefs!();
 
@@ -859,7 +858,7 @@ mod lsextattr {
     #[named]
     #[rstest]
     fn empty(harness4k: Harness) {
-        use std::{convert::TryFrom, ffi::CString};
+        use std::ffi::CString;
         require_fusefs!();
 
         let ns = libc::EXTATTR_NAMESPACE_USER;
@@ -885,7 +884,7 @@ mod lsextattr {
     #[named]
     #[rstest]
     fn empty_size(harness4k: Harness) {
-        use std::{convert::TryFrom, ffi::CString, ptr};
+        use std::{ffi::CString, ptr};
         require_fusefs!();
 
         let ns = libc::EXTATTR_NAMESPACE_USER;
@@ -915,7 +914,7 @@ mod lsextattr {
     #[named]
     #[apply(all_xattr_fork_types)]
     fn size(#[case] h: fn() -> Harness, #[case] d: &str) {
-        use std::{convert::TryFrom, ffi::CString, ptr};
+        use std::{ffi::CString, ptr};
         require_fusefs!();
 
         let harness = h();
