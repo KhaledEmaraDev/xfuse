@@ -30,6 +30,7 @@ mod attr_bptree;
 mod attr_leaf;
 mod attr_node;
 mod attr_shortform;
+mod block_reader;
 mod bmbt_rec;
 mod btree;
 mod da_btree;

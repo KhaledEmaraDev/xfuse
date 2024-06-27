@@ -334,6 +334,9 @@ mod dev {
     #[rstest]
     #[case(GOLDEN4K.as_path())]
     #[case(GOLDEN1K.as_path())]
+    #[case(GOLDENV4.as_path())]
+    #[case(GOLDEN_NOFTYPE.as_path())]
+    #[case(GOLDENPREALLOCATED.as_path())]
     fn metadata(#[case] image: &Path) {
         require_fusefs!();
         require_root!();
