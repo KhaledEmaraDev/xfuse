@@ -7,6 +7,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Eliminated sectorsize-unaligned reads on V4 file systems that use 256B inodes.
+  ([#160](https://github.com/KhaledEmaraDev/xfuse/issues/160))
+
 - Fixed reading long symlinks (more than about 150 bytes) on V4 file systems.
   ([#156](https://github.com/KhaledEmaraDev/xfuse/issues/156))
 

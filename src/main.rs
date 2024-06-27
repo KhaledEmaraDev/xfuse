@@ -25,12 +25,14 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-mod libxfuse;
+use std::path::PathBuf;
 
 use clap::{crate_version, Parser};
 use fuser::{mount2, MountOption};
 use libxfuse::volume::Volume;
 use tracing_subscriber::EnvFilter;
+
+mod libxfuse;
 
 #[derive(Parser, Clone, Debug)]
 #[clap(version = crate_version!())]
@@ -38,7 +40,7 @@ struct App {
     /// Mount options, comma delimited.
     #[clap(short = 'o', long, value_delimiter(','))]
     options:    Vec<String>,
-    device:     String,
+    device:     PathBuf,
     mountpoint: String,
 }
 

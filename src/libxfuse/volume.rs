@@ -28,9 +28,9 @@
 use std::{
     collections::HashMap,
     ffi::OsStr,
-    fs::File,
-    io::{BufReader, Read},
+    io::Read,
     os::unix::ffi::OsStrExt,
+    path::Path,
     sync::OnceLock,
     time::Duration,
 };
@@ -59,7 +59,14 @@ use fuser::{
 use libc::ERANGE;
 use tracing::warn;
 
-use super::{attr::Attr, definitions::XfsIno, dinode::Dinode, dir3::Dir3, sb::Sb};
+use super::{
+    attr::Attr,
+    block_reader::BlockReader,
+    definitions::XfsIno,
+    dinode::Dinode,
+    dir3::Dir3,
+    sb::Sb,
+};
 
 /// We must store the Superblock in a global variable.  This is unfortunate, and limits us to only
 /// opening one disk image at a time, but it's necessary in order to use information from the
@@ -74,7 +81,7 @@ struct OpenInode {
 
 #[derive(Debug)]
 pub struct Volume {
-    pub device: File,
+    pub device: BlockReader,
     pub sb:     Sb,
     open_files: HashMap<u64, OpenInode>,
     no_open:    bool,
@@ -86,14 +93,13 @@ impl Volume {
     // of time, since nothing will ever change.
     const TTL: Duration = Duration::from_secs(u64::MAX);
 
-    pub fn from(device_name: &str) -> Volume {
-        let device = File::open(device_name).unwrap();
-        let mut buf_reader = BufReader::with_capacity(4096, &device);
+    pub fn from(device_name: &Path) -> Volume {
+        let mut device = BlockReader::open(device_name).unwrap();
 
-        let superblock = Sb::from(buf_reader.by_ref());
+        let superblock = Sb::from(device.by_ref());
         SUPERBLOCK.set(superblock).unwrap();
 
-        let root_inode = Dinode::from(buf_reader.by_ref(), &superblock, superblock.sb_rootino);
+        let root_inode = Dinode::from(device.by_ref(), &superblock, superblock.sb_rootino);
         let mut open_files = HashMap::new();
         // Prepopulate the root inode into the cache, since fusefs never sends a lookup for it.
         open_files.insert(
@@ -114,14 +120,14 @@ impl Volume {
     }
 
     fn open_inode(&mut self, ino: u64) -> &mut OpenInode {
-        let f = &self.device;
         let sb = &self.sb;
         self.open_files
             .entry(ino)
             .and_modify(|e| e.count += 1)
             .or_insert_with(|| {
+                self.device.set_bufsize(sb.inode_size());
                 let dinode = Dinode::from(
-                    BufReader::with_capacity(sb.inode_size(), f).by_ref(),
+                    self.device.by_ref(),
                     sb,
                     if ino == FUSE_ROOT_ID {
                         sb.sb_rootino
@@ -138,9 +144,9 @@ impl Filesystem for Volume {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         let parent_oi = &mut self.open_files.get_mut(&parent).unwrap();
         let dirsize = self.sb.sb_blocksize << self.sb.sb_dirblklog;
-        let mut buf_reader = BufReader::with_capacity(dirsize as usize, &self.device);
-        let dir = parent_oi.dinode.get_dir(buf_reader.by_ref(), &self.sb);
-        match dir.lookup(buf_reader.by_ref(), &self.sb, name) {
+        self.device.set_bufsize(dirsize as usize);
+        let dir = parent_oi.dinode.get_dir(self.device.by_ref(), &self.sb);
+        match dir.lookup(self.device.by_ref(), &self.sb, name) {
             Ok(ino) => {
                 let oi = self.open_inode(ino);
                 match oi.dinode.di_core.stat(ino) {
@@ -173,14 +179,13 @@ impl Filesystem for Volume {
         };
 
         let oi = &self.open_files.get(&ino).unwrap();
-        let mut buf_reader = BufReader::with_capacity(self.sb.sb_blocksize as usize, &self.device);
-        let file = oi.dinode.get_file(buf_reader.by_ref());
+        let file = oi.dinode.get_file(self.device.by_ref());
         if offset > file.size() {
             reply.error(libc::ENXIO);
             return;
         }
 
-        match file.lseek(buf_reader.by_ref(), uoffset, whence) {
+        match file.lseek(self.device.by_ref(), uoffset, whence) {
             Ok(ofs) => reply.offset(i64::try_from(ofs).unwrap()),
             Err(e) => reply.error(e),
         }
@@ -232,13 +237,13 @@ impl Filesystem for Volume {
     }
 
     fn readlink(&mut self, _req: &Request, ino: u64, reply: fuser::ReplyData) {
-        let mut buf_reader = BufReader::with_capacity(self.sb.sb_blocksize as usize, &self.device);
+        self.device.set_bufsize(self.sb.sb_blocksize as usize);
         reply.data(
             self.open_files
                 .get(&ino)
                 .expect("readlink before lookup")
                 .dinode
-                .get_link_data(buf_reader.by_ref(), &self.sb)
+                .get_link_data(self.device.by_ref(), &self.sb)
                 .as_bytes(),
         );
     }
@@ -263,11 +268,11 @@ impl Filesystem for Volume {
         reply: fuser::ReplyData,
     ) {
         let oi = &self.open_files.get(&ino).unwrap();
-        let mut buf_reader = BufReader::with_capacity(self.sb.sb_blocksize as usize, &self.device);
+        self.device.set_bufsize(self.sb.sb_blocksize as usize);
 
-        let file = oi.dinode.get_file(buf_reader.by_ref());
+        let file = oi.dinode.get_file(self.device.by_ref());
 
-        match file.read(buf_reader.by_ref(), offset, size) {
+        match file.read(self.device.by_ref(), offset, size) {
             Ok((v, ignore)) => reply.data(&v[ignore..]),
             Err(e) => reply.error(e),
         }
@@ -290,14 +295,14 @@ impl Filesystem for Volume {
         mut reply: ReplyDirectory,
     ) {
         let dirsize = self.sb.sb_blocksize << self.sb.sb_dirblklog;
-        let mut buf_reader = BufReader::with_capacity(dirsize as usize, &self.device);
+        self.device.set_bufsize(dirsize as usize);
         let oi = &mut self.open_files.get_mut(&ino).unwrap();
 
-        let dir = oi.dinode.get_dir(buf_reader.by_ref(), &self.sb);
+        let dir = oi.dinode.get_dir(self.device.by_ref(), &self.sb);
 
         let mut off = offset;
         loop {
-            let res = dir.next(buf_reader.by_ref(), &self.sb, off);
+            let res = dir.next(self.device.by_ref(), &self.sb, off);
             match res {
                 Ok((ino, offset, kind, name)) => {
                     // FUSE requires the file system's root directory to have a
@@ -314,9 +319,9 @@ impl Filesystem for Volume {
                             // every entry returned by readdir.  In such cases, this code will read
                             // the inode twice.  The best solution is for everybody to use the
                             // ftype option in their XFS format.
-                            let f = &self.device;
+                            self.device.set_bufsize(self.sb.inode_size());
                             let dinode = Dinode::from(
-                                BufReader::with_capacity(self.sb.inode_size(), f).by_ref(),
+                                self.device.by_ref(),
                                 &self.sb,
                                 if ino == FUSE_ROOT_ID {
                                     self.sb.sb_rootino
@@ -368,9 +373,9 @@ impl Filesystem for Volume {
         let name = OsStr::from_bytes(nameparts.next().unwrap());
 
         let oi = &mut self.open_files.get_mut(&ino).unwrap();
-        let mut buf_reader = BufReader::with_capacity(self.sb.sb_blocksize as usize, &self.device);
-        match oi.dinode.get_attrs(buf_reader.by_ref(), &self.sb) {
-            Some(attrs) => match attrs.get(buf_reader.by_ref(), &self.sb, name) {
+        self.device.set_bufsize(self.sb.sb_blocksize as usize);
+        match oi.dinode.get_attrs(self.device.by_ref(), &self.sb) {
+            Some(attrs) => match attrs.get(self.device.by_ref(), &self.sb, name) {
                 Ok(value) => {
                     let len: u32 = value.len().try_into().unwrap();
                     if size == 0 {
@@ -394,10 +399,10 @@ impl Filesystem for Volume {
             .open_files
             .get_mut(&ino)
             .expect("listxattr before lookup");
-        let mut buf_reader = BufReader::with_capacity(self.sb.sb_blocksize as usize, &self.device);
-        match oi.dinode.get_attrs(buf_reader.by_ref(), &self.sb) {
+        self.device.set_bufsize(self.sb.sb_blocksize as usize);
+        match oi.dinode.get_attrs(self.device.by_ref(), &self.sb) {
             Some(ref mut attrs) => {
-                let attrs_size = attrs.get_total_size(buf_reader.by_ref(), &self.sb);
+                let attrs_size = attrs.get_total_size(self.device.by_ref(), &self.sb);
 
                 if size == 0 {
                     reply.size(attrs_size);
@@ -409,7 +414,7 @@ impl Filesystem for Volume {
                     return;
                 }
 
-                let list = attrs.list(buf_reader.by_ref(), &self.sb);
+                let list = attrs.list(self.device.by_ref(), &self.sb);
                 // Assert that we calculated the list size correctly.  This assertion is only
                 // safe since we're a read-only file system.
                 assert_eq!(

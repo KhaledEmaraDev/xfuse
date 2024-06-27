@@ -1225,6 +1225,7 @@ dependencies = [
  "bincode",
  "bitflags 2.4.0",
  "byteorder",
+ "cfg-if",
  "clap",
  "crc",
  "enum_dispatch",
