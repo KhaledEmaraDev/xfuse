@@ -8,6 +8,7 @@ authors = ["Khaled Emara <mail@khaledemara.dev>"]
 repository = "https://github.com/KhaledEmaraDev/xfuse"
 license = "BSD-2-Clause"
 categories = ["filesystem"]
+keywords = ["xfs", "fuse", "filesystem"]
 exclude = [
   "/.gitignore",
   "/.cirrus.yml",
