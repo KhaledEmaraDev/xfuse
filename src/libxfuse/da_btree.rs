@@ -43,12 +43,6 @@ use byteorder::{BigEndian, ReadBytesExt};
 
 use super::{definitions::*, sb::Sb, utils, utils::Uuid, volume::SUPERBLOCK};
 
-macro_rules! rol32 {
-    ($x:expr, $y:expr) => {
-        ((($x) << ($y)) | (($x) >> (32 - ($y))))
-    };
-}
-
 pub fn hashname(name: &OsStr) -> XfsDahash {
     let name = name.as_bytes();
     let mut namelen = name.len();
@@ -60,7 +54,7 @@ pub fn hashname(name: &OsStr) -> XfsDahash {
             ^ ((name[i + 1] as u32) << 14)
             ^ ((name[i + 2] as u32) << 7)
             ^ (name[i + 3] as u32)
-            ^ rol32!(hash, 7 * 4);
+            ^ hash.rotate_left(7 * 4);
 
         namelen -= 4;
         i += 4;
@@ -71,10 +65,10 @@ pub fn hashname(name: &OsStr) -> XfsDahash {
             ((name[i] as u32) << 14)
                 ^ ((name[i + 1] as u32) << 7)
                 ^ (name[i + 2] as u32)
-                ^ rol32!(hash, 7 * 3)
+                ^ hash.rotate_left(7 * 3)
         }
-        2 => ((name[i] as u32) << 7) ^ (name[i + 1] as u32) ^ rol32!(hash, 7 * 2),
-        1 => (name[i] as u32) ^ rol32!(hash, 7),
+        2 => ((name[i] as u32) << 7) ^ (name[i + 1] as u32) ^ hash.rotate_left(7 * 2),
+        1 => (name[i] as u32) ^ hash.rotate_left(7),
         _ => hash,
     }
 }
