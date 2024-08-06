@@ -122,17 +122,19 @@ impl SbFeaturesIncompat {
         self.contains(SbFeaturesIncompat::Ftype)
     }
 
-    pub const fn sparse_inodes(&self) -> bool {
-        self.contains(SbFeaturesIncompat::SpInodes)
-    }
+    // AFAICT, read-only implementations don't need to care.
+    //pub const fn sparse_inodes(&self) -> bool {
+    //    self.contains(SbFeaturesIncompat::SpInodes)
+    //}
 
     pub const fn meta_uuid(&self) -> bool {
         self.contains(SbFeaturesIncompat::MetaUuid)
     }
 
-    pub const fn bigtime(&self) -> bool {
-        self.contains(SbFeaturesIncompat::Bigtime)
-    }
+    // This is redundant with information in DinodeCore.di_flags22
+    //pub const fn bigtime(&self) -> bool {
+    //    self.contains(SbFeaturesIncompat::Bigtime)
+    //}
 
     pub const fn needs_repair(&self) -> bool {
         self.contains(SbFeaturesIncompat::NeedsRepair)

@@ -84,7 +84,7 @@ mod constants {
     pub const XFS_DIFLAG_NODEFRAG: u16 = 1 << 13;
     pub const XFS_DIFLAG_FILESTREAMS: u16 = 1 << 14;
 
-    pub const XFS_DIFLAG2_BITTIME: u64 = 1 << 3;
+    pub const XFS_DIFLAG2_BIGTIME: u64 = 1 << 3;
 }
 
 #[derive(Debug)]
@@ -216,7 +216,7 @@ impl DinodeCore {
     }
 
     fn timestamp(&self, ts: &XfsTimestamp) -> SystemTime {
-        if self.di_version >= 3 && (self.di_flags2 & constants::XFS_DIFLAG2_BITTIME != 0) {
+        if self.di_version >= 3 && (self.di_flags2 & constants::XFS_DIFLAG2_BIGTIME != 0) {
             // XXX this could be made a const if the Rust const_trait_impl
             // feature stabilizes.
             let classic_epoch: SystemTime = UNIX_EPOCH - Duration::from_secs(i32::MAX as u64 + 1);
