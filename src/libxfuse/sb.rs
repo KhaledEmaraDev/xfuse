@@ -229,7 +229,7 @@ impl Sb {
         let _sb_rbmblocks = buf_reader.read_u32::<BigEndian>().unwrap();
         let sb_logblocks = buf_reader.read_u32::<BigEndian>().unwrap();
         let sb_versionnum = buf_reader.read_u16::<BigEndian>().unwrap();
-        let _sb_sectsize = buf_reader.read_u16::<BigEndian>().unwrap();
+        let sb_sectsize = buf_reader.read_u16::<BigEndian>().unwrap();
         let sb_inodesize = buf_reader.read_u16::<BigEndian>().unwrap();
         let _sb_inopblock = buf_reader.read_u16::<BigEndian>().unwrap();
 
@@ -292,7 +292,7 @@ impl Sb {
 
         let sb_crc = buf_reader.read_u32::<LittleEndian>().unwrap();
 
-        let mut buf_acrc = [0u8; 284];
+        let mut buf_acrc = vec![0u8; usize::from(sb_sectsize) - 228];
         buf_reader.read_exact(&mut buf_acrc).unwrap();
         digest.update(&buf_acrc);
 

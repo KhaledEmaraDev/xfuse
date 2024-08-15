@@ -26,7 +26,7 @@ use rstest_reuse::{self, apply, template};
 use tempfile::{tempdir, TempDir};
 
 mod util;
-use util::{waitfor, GOLDEN1K, GOLDEN4K, GOLDENPREALLOCATED, GOLDENV4, GOLDEN_NOFTYPE};
+use util::{waitfor, GOLDEN1K, GOLDEN4K, GOLDEN4KN, GOLDENPREALLOCATED, GOLDENV4, GOLDEN_NOFTYPE};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 struct ExpectedXattr {
@@ -59,6 +59,7 @@ fn local_attrs_per_file(f: &str) -> usize {
         "xattrs/btree2.5" => 0,
         "xattrs/btree3" => 0,
         "btree2.with-xattrs" => 1,
+        "xattrs/extents4" => 0,
         _ => unimplemented!(),
     }
 }
@@ -72,6 +73,7 @@ fn remote_attrs_per_file(f: &str) -> usize {
         "xattrs/btree2.5" => 256,
         "xattrs/btree3" => 512,
         "btree2.with-xattrs" => 0,
+        "xattrs/extents4" => 16,
         _ => unimplemented!(),
     }
 }
@@ -93,6 +95,9 @@ fn ents_per_dir_longnames(path: &Path, d: &str) -> usize {
         ("xfsv4.img", "sparse_leaf") => 4,
         ("xfsv4.img", "sparse_btree") => 10,
         ("xfs_noftype.img", "block") => 4,
+        ("xfs_4kn.img", "block") => 4,
+        ("xfs_4kn.img", "leaf") => 16,
+        ("xfs_4kn.img", "node") => 512,
         x => panic!("{:?} not implemented", x),
     }
 }
@@ -148,6 +153,11 @@ fn harness1k() -> Harness {
 #[fixture]
 fn harness4k() -> Harness {
     harness(GOLDEN4K.as_path())
+}
+
+#[fixture]
+fn harness4kn() -> Harness {
+    harness(GOLDEN4KN.as_path())
 }
 
 #[fixture]
@@ -222,6 +232,9 @@ impl Drop for Harness {
 #[case::sparse_leaf(harnessv4, "sparse_leaf")]
 #[case::sparse_btree(harnessv4, "sparse_btree")]
 #[case::noftype_block(harness_noftype, "block")]
+#[case::fourkn_block(harness4kn, "block")]
+#[case::fourkn_leaf(harness4kn, "leaf")]
+#[case::fourkn_node(harness4kn, "node")]
 fn all_dir_types_longnames(h: fn() -> Harness, d: &str) {}
 
 // All directory types that have short file names
@@ -234,6 +247,7 @@ fn all_dir_types_longnames(h: fn() -> Harness, d: &str) {}
 #[case::v4_leaf(harnessv4, "leaf")] // TODO check in xfs_db.  Might not be a leaf dir.
 #[case::v4_node(harnessv4, "node")]
 #[case::noftype_sf(harness_noftype, "sf")]
+#[case::fourkn_sf(harness4kn, "sf")]
 fn all_dir_types_shortnames(h: fn() -> Harness, d: &str) {}
 
 #[template]
@@ -246,6 +260,8 @@ fn all_dir_types_shortnames(h: fn() -> Harness, d: &str) {}
 #[case::btree2_with_xattrs(harness1k, "btree2.with-xattrs")]
 #[case::v4_local(harnessv4, "xattrs/local")]
 #[case::v4_extents(harnessv4, "xattrs/extents")]
+#[case::four4kn_local(harness4kn, "xattrs/local")]
+#[case::four4kn_extents(harness4kn, "xattrs/extents4")]
 fn all_xattr_fork_types(h: fn() -> Harness, d: &str) {}
 
 #[template]
@@ -301,8 +317,11 @@ mod dev {
         child: Child,
     }
 
-    fn mdharness(image: &Path) -> MdHarness {
-        let md = mdconfig::Builder::vnode(image).create().unwrap();
+    fn mdharness(image: &Path, sectorsize: u32) -> MdHarness {
+        let md = mdconfig::Builder::vnode(image)
+            .sectorsize(sectorsize)
+            .create()
+            .unwrap();
         let d = tempdir().unwrap();
         let child = Command::cargo_bin("xfs-fuse")
             .unwrap()
@@ -332,15 +351,16 @@ mod dev {
     // TODO: Read all data as well as metadata
     #[named]
     #[rstest]
-    #[case(GOLDEN4K.as_path())]
-    #[case(GOLDEN1K.as_path())]
-    #[case(GOLDENV4.as_path())]
-    #[case(GOLDEN_NOFTYPE.as_path())]
-    #[case(GOLDENPREALLOCATED.as_path())]
-    fn metadata(#[case] image: &Path) {
+    #[case::fourk(GOLDEN4K.as_path(), 512)]
+    #[case::fourkn(GOLDEN4KN.as_path(), 4096)]
+    #[case::onek(GOLDEN1K.as_path(), 512)]
+    #[case::v4(GOLDENV4.as_path(), 512)]
+    #[case::no_ftype(GOLDEN_NOFTYPE.as_path(), 512)]
+    #[case::preallocated(GOLDENPREALLOCATED.as_path(), 512)]
+    fn metadata(#[case] image: &Path, #[case] sectorsize: u32) {
         require_fusefs!();
         require_root!();
-        let h = mdharness(image);
+        let h = mdharness(image, sectorsize);
 
         let walker = walkdir::WalkDir::new(h.d.path()).into_iter();
         for entry in walker {
@@ -358,15 +378,20 @@ mod dev {
 
     #[named]
     #[rstest]
-    #[case::large_extent(GOLDEN4K.as_path(), "large_extent.txt", 8448)]
-    #[case::partial_extent(GOLDEN4K.as_path(), "partial_extent.txt", 8448)]
-    #[case::single_extent(GOLDEN4K.as_path(), "single_extent.txt", 4096)]
-    #[case::four_extents(GOLDEN4K.as_path(), "four_extents.txt", 16384)]
-    #[case::two_height_btree(GOLDEN4K.as_path(), "btree2.txt", 65536)]
-    fn data(#[case] image: &Path, #[case] file: &str, #[case] size: usize) {
+    #[case::large_extent(GOLDEN4K.as_path(), 512, "large_extent.txt", 8448)]
+    #[case::partial_extent(GOLDEN4K.as_path(), 512, "partial_extent.txt", 8448)]
+    #[case::single_extent(GOLDEN4K.as_path(), 512, "single_extent.txt", 4096)]
+    #[case::four_extents(GOLDEN4K.as_path(), 512, "four_extents.txt", 16384)]
+    #[case::two_height_btree(GOLDEN4K.as_path(), 512, "btree2.txt", 65536)]
+    fn data(
+        #[case] image: &Path,
+        #[case] sectorsize: u32,
+        #[case] file: &str,
+        #[case] size: usize,
+    ) {
         require_fusefs!();
         require_root!();
-        let h = mdharness(image);
+        let h = mdharness(image, sectorsize);
 
         let path = h.d.path().join("files").join(file);
         let mut buf = vec![0; size];
@@ -377,12 +402,17 @@ mod dev {
     /// read a whole file 128 bytes at a time, using direct_io to bypass the cache
     #[named]
     #[rstest]
-    #[case::single_extent(GOLDEN4K.as_path(), "single_extent.txt", 4096)]
-    #[case::four_extents(GOLDEN4K.as_path(), "four_extents.txt", 16384)]
-    fn o_direct(#[case] image: &Path, #[case] filename: &str, #[case] size: usize) {
+    #[case::single_extent(GOLDEN4K.as_path(), 512, "single_extent.txt", 4096)]
+    #[case::four_extents(GOLDEN4K.as_path(), 512, "four_extents.txt", 16384)]
+    fn o_direct(
+        #[case] image: &Path,
+        #[case] sectorsize: u32,
+        #[case] filename: &str,
+        #[case] size: usize,
+    ) {
         require_fusefs!();
         require_root!();
-        let h = mdharness(image);
+        let h = mdharness(image, sectorsize);
 
         const BUFSIZE: usize = 16;
         let path = h.d.path().join("files").join(filename);
@@ -546,6 +576,7 @@ fn hardlink(harness4k: Harness) {
 #[case::fourk(harness4k)]
 #[case::onek(harness1k)]
 #[case::v4(harnessv4)]
+#[case::fourkn(harness4kn)]
 fn mount(#[case] h: fn() -> Harness) {
     require_fusefs!();
 
@@ -652,6 +683,10 @@ mod lookup {
     #[case::v4_node(harnessv4, "node")]
     #[case::noftype_sf(harness_noftype, "sf")]
     #[case::noftype_block(harness_noftype, "block")]
+    #[case::fourkn_sf(harness4kn, "sf")]
+    #[case::fourkn_block(harness4kn, "block")]
+    #[case::fourkn_leaf(harness4kn, "leaf")]
+    #[case::fourkn_node(harness4kn, "node")]
     fn dots(#[case] h: fn() -> Harness, #[case] d: &str) {
         require_fusefs!();
 
@@ -1332,6 +1367,10 @@ mod readdir {
     #[case::v4_node(harnessv4, "node")]
     #[case::noftype_sf(harness_noftype, "sf")]
     #[case::noftype_block(harness_noftype, "block")]
+    #[case::fourkn_sf(harness4kn, "sf")]
+    #[case::fourkn_block(harness4kn, "block")]
+    #[case::fourkn_leaf(harness4kn, "leaf")]
+    #[case::fourkn_node(harness4kn, "node")]
     fn dots(#[case] h: fn() -> Harness, #[case] d: &str) {
         use nix::{dir::Dir, fcntl::OFlag, sys::stat::Mode};
         require_fusefs!();

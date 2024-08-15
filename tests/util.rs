@@ -97,6 +97,7 @@ fn prepare_image(filename: &str) -> PathBuf {
 lazy_static! {
     pub static ref GOLDEN1K: PathBuf = prepare_image("xfs1024.img");
     pub static ref GOLDEN4K: PathBuf = prepare_image("xfs4096.img");
+    pub static ref GOLDEN4KN: PathBuf = prepare_image("xfs_4kn.img");
     pub static ref GOLDENPREALLOCATED: PathBuf = prepare_image("xfs_preallocated.img");
     pub static ref GOLDENV4: PathBuf = prepare_image("xfsv4.img");
     pub static ref GOLDEN_NOFTYPE: PathBuf = prepare_image("xfs_noftype.img");
