@@ -14,7 +14,8 @@ exclude = [
   "/.cirrus.yml",
   "/resources",
   "/scripts",
-  "/tests"
+  "/tests",
+  "/benches"
 ]
 
 [dependencies]
