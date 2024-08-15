@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] - ReleaseDate
+
+### Fixed
+
+- Fixed mounting images that use sectorsize (not to be confused with blocksize)
+  greater than 512B.
+  ([#165](https://github.com/KhaledEmaraDev/xfuse/issues/165))
+
 ## [0.4.3] - 2024-06-27
 
 ### Fixed

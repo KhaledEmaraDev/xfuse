@@ -448,8 +448,33 @@ mkfs_noftype() {
 	zstd -f resources/xfs_noftype.img
 }
 
+mkfs_4kn() {
+	# Create an XFS image that uses 4KiB sector size
+	rm -f resources/xfs_4kn.img
+	truncate -s 64m resources/xfs_4kn.img
+	mkfs.xfs --unsupported -s size=4096 -f resources/xfs_4kn.img
+	MNTDIR=`mktemp -d`
+	mount -t xfs resources/xfs_4kn.img $MNTDIR
+
+	# With this sectorsize, it would take a truly enormous directory to
+	# require a btree.  So don't bother to create one.
+	mkfiles ${MNTDIR}/sf 2
+	mkfiles2 ${MNTDIR}/block 4
+	mkfiles2 ${MNTDIR}/leaf 16
+	mkfiles2 ${MNTDIR}/node 512
+
+	mkdir ${MNTDIR}/xattrs
+	mkattrs ${MNTDIR}/xattrs/local 4 0
+	mkattrs2 ${MNTDIR}/xattrs/extents4 16
+
+	umount ${MNTDIR}
+	rmdir $MNTDIR
+	zstd -f resources/xfs_4kn.img
+}
+
 mkfs_4096
 mkfs_512
 mkfs_v4
 mkfs_preallocated
 mkfs_noftype
+mkfs_4kn
