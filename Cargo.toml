@@ -26,7 +26,7 @@ cfg-if = "1.0"
 crc = "2.0.0"
 enum_dispatch = "0.3.12"
 fuser = { version = "0.13.0", features = ["abi-7-31"] }
-libc = "0.2.97"
+libc = "0.2.154"
 nix = { version = "0.27.0", features = [ "ioctl" ] }
 num-derive = "0.4.2"
 num-traits = "0.2.14"
@@ -43,7 +43,7 @@ path = "benches/read-amplification.rs"
 harness = false
 
 [dependencies.clap]
-version = "4"
+version = "4.1"
 default-features = false
 features=  [ "cargo", "color", "derive", "std", "suggestions", "wrap_help" ,"usage"]
 
@@ -62,5 +62,5 @@ rstest_reuse = "0.6.0"
 nix = { version = "0.27.0", features = [ "dir", "fs", "user" ] }
 sysctl = "0.5"
 tempfile = "3.0"
-walkdir = "2.0"
+walkdir = "2.3"
 xattr = "1.0"

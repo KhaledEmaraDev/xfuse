@@ -41,6 +41,12 @@ task:
     -   pkg install -y ca_root_nss cargo-audit
     -   cargo audit
     - fi
+  minver_script:
+    - . $HOME/.cargo/env
+    - if [ "$VERSION" = "nightly" ]; then 
+    -   cargo update -Zdirect-minimal-versions
+    -   cargo check --all-targets
+    - fi
   fmt_script:
     - . $HOME/.cargo/env
     - if [ "$VERSION" = "nightly" ]; then
