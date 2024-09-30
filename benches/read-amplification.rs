@@ -303,12 +303,7 @@ fn main() {
             let cmd = Command::new("umount").arg(d.path()).output();
             match cmd {
                 Err(e) => {
-                    eprintln!("Executing umount failed: {}", e);
-                    if std::thread::panicking() {
-                        // Can't double panic
-                        return;
-                    }
-                    panic!("Executing umount failed");
+                    panic!("Executing umount failed: {}", e);
                 }
                 Ok(output) => {
                     let errmsg = OsString::from_vec(output.stderr).into_string().unwrap();
@@ -320,11 +315,6 @@ fn main() {
                     } else if errmsg.contains("Device busy") {
                         println!("{}", errmsg);
                     } else {
-                        if std::thread::panicking() {
-                            // Can't double panic
-                            println!("{}", errmsg);
-                            return;
-                        }
                         panic!("{}", errmsg);
                     }
                 }
