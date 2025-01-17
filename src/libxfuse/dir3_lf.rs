@@ -391,7 +391,7 @@ impl Dir3 for Dir2Lf {
         for address in self.get_addresses(&brrc, hash) {
             let blk_offset =
                 (address & ((1u32 << (sb.sb_dirblklog + sb.sb_blocklog)) - 1)) as usize;
-            let dblock = address >> sb.sb_blocklog & !((1u32 << sb.sb_dirblklog) - 1);
+            let dblock = (address >> sb.sb_blocklog) & !((1u32 << sb.sb_dirblklog) - 1);
             let mut guard = brrc.borrow_mut();
             let raw = self.read_dblock(guard.by_ref(), sb, dblock)?;
             let entry: Dir2DataEntry = decode(&raw[blk_offset..]).unwrap().0;
@@ -429,7 +429,7 @@ impl Dir3 for Dir2Lf {
             // Offset of this directory block within the directory
             let doffset = offset - dir_block_offset;
 
-            let dblock = (offset >> sb.sb_blocklog & !((1u64 << sb.sb_dirblklog) - 1))
+            let dblock = ((offset >> sb.sb_blocklog) & !((1u64 << sb.sb_dirblklog) - 1))
                 .try_into()
                 .unwrap();
             let raw = self.read_dblock(buf_reader.by_ref(), sb, dblock)?;
