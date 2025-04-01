@@ -6,7 +6,7 @@ task:
   env:
     HOME: /tmp # cargo cache needs it
   freebsd_instance:
-    image: freebsd-13-3-release-amd64
+    image: freebsd-13-5-release-amd64
   matrix:
     - name: FreeBSD stable
       env:
