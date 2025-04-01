@@ -16,9 +16,8 @@ use function_name::named;
 use tempfile::tempdir;
 use xattr::FileExt;
 
-mod util {
-    include!("../tests/util.rs");
-}
+#[path = "../tests/util.rs"]
+mod util;
 use util::{waitfor, GOLDEN1K, GOLDEN4K};
 
 pub struct Gnop {
