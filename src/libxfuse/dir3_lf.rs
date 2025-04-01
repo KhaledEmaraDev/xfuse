@@ -126,7 +126,7 @@ impl Dir2LeafNDisk {
     }
 }
 
-impl Decode for Dir2LeafNDisk {
+impl<Context> Decode<Context> for Dir2LeafNDisk {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let magic: u16 = decode(&decoder.reader().peek_read(10).unwrap()[8..])?.0;
         let (count, forw) = match magic {
@@ -166,7 +166,7 @@ impl Leaf {
             .with_big_endian()
             .with_fixed_int_encoding();
         let reader = bincode::de::read::SliceReader::new(raw);
-        let mut decoder = bincode::de::DecoderImpl::new(reader, config);
+        let mut decoder = bincode::de::DecoderImpl::new(reader, config, ());
         match magic {
             XFS_DA_NODE_MAGIC | XFS_DA3_NODE_MAGIC => {
                 let leaf_btree = XfsDa3Intnode::decode(&mut decoder)

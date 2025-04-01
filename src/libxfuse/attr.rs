@@ -94,7 +94,7 @@ pub struct AttrLeafHdr {
     pub count: u16,
 }
 
-impl Decode for AttrLeafHdr {
+impl<Ctx> Decode<Ctx> for AttrLeafHdr {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let magic: u16 = utils::decode(&decoder.reader().peek_read(10).unwrap()[8..])?.0;
         let forw = match magic {
@@ -137,7 +137,7 @@ pub struct AttrLeafNameLocal {
     pub nameval: Vec<u8>,
 }
 
-impl Decode for AttrLeafNameLocal {
+impl<Ctx> Decode<Ctx> for AttrLeafNameLocal {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let valuelen: u16 = Decode::decode(decoder)?;
         let namelen: u8 = Decode::decode(decoder)?;
@@ -225,7 +225,7 @@ impl AttrLeafblock {
     }
 }
 
-impl Decode for AttrLeafblock {
+impl<Ctx> Decode<Ctx> for AttrLeafblock {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let blocksize = SUPERBLOCK.get().unwrap().sb_blocksize as usize;
         let mut raw = vec![0u8; blocksize];
@@ -233,7 +233,7 @@ impl Decode for AttrLeafblock {
 
         let config = decoder.config();
         let sl = bincode::de::read::SliceReader::new(&raw);
-        let mut sldecoder = bincode::de::DecoderImpl::new(sl, *config);
+        let mut sldecoder = bincode::de::DecoderImpl::new(sl, *config, ());
         let hdr: AttrLeafHdr = Decode::decode(&mut sldecoder)?;
 
         let mut entries = Vec::<AttrLeafEntry>::with_capacity(hdr.count.into());
@@ -299,7 +299,7 @@ impl AttrLeafNameRemote {
     }
 }
 
-impl Decode for AttrLeafNameRemote {
+impl<Ctx> Decode<Ctx> for AttrLeafNameRemote {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let valueblk = Decode::decode(decoder)?;
         let valuelen = Decode::decode(decoder)?;

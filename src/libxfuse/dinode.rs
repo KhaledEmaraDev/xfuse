@@ -111,7 +111,7 @@ impl Dinode {
             .with_big_endian()
             .with_fixed_int_encoding();
         let reader = bincode::de::read::SliceReader::new(&raw[..]);
-        let mut decoder = bincode::de::DecoderImpl::new(reader, config);
+        let mut decoder = bincode::de::DecoderImpl::new(reader, config, ());
 
         let di_core = DinodeCore::decode(&mut decoder).unwrap();
 
@@ -215,7 +215,7 @@ impl Dinode {
                 .with_big_endian()
                 .with_fixed_int_encoding();
             let reader = bincode::de::read::SliceReader::new(&raw[attr_fork_ofs..]);
-            let mut decoder = bincode::de::DecoderImpl::new(reader, config);
+            let mut decoder = bincode::de::DecoderImpl::new(reader, config, ());
 
             match di_core.di_aformat {
                 XfsDinodeFmt::Local => {

@@ -94,7 +94,7 @@ pub struct XfsDa3Blkinfo {
     // _owner: u64
 }
 
-impl Decode for XfsDa3Blkinfo {
+impl<Ctx> Decode<Ctx> for XfsDa3Blkinfo {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let forw = Decode::decode(decoder)?;
         let _back: u32 = Decode::decode(decoder)?;
@@ -127,7 +127,7 @@ struct XfsDa3NodeHdr {
     // _pad32: u32
 }
 
-impl Decode for XfsDa3NodeHdr {
+impl<Ctx> Decode<Ctx> for XfsDa3NodeHdr {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let info: XfsDa3Blkinfo = Decode::decode(decoder)?;
         if info.magic != XFS_DA3_NODE_MAGIC {
@@ -265,7 +265,7 @@ impl XfsDa3Intnode {
     }
 }
 
-impl Decode for XfsDa3Intnode {
+impl<Ctx> Decode<Ctx> for XfsDa3Intnode {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let magic: u16 = utils::decode(&decoder.reader().peek_read(10).unwrap()[8..])?.0;
         let (count, level) = match magic {

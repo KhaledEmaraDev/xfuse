@@ -73,7 +73,7 @@ impl Uuid {
     }
 }
 
-impl bincode::Decode for Uuid {
+impl<Ctx> bincode::Decode<Ctx> for Uuid {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         <[u8; 16]>::decode(decoder).map(|v| Uuid(uuid::Uuid::from_bytes(v)))
     }
@@ -119,7 +119,7 @@ pub fn get_file_type(kind: FileKind) -> Result<FileType, c_int> {
 /// Decode a Bincode structure from a byte slice.
 pub fn decode<T>(bytes: &[u8]) -> Result<(T, usize), DecodeError>
 where
-    T: Decode,
+    T: Decode<()>,
 {
     let config = bincode::config::standard()
         .with_big_endian()
@@ -130,7 +130,7 @@ where
 /// Decode a Bincode structure from a Reader
 pub fn decode_from<T, R>(r: R) -> Result<T, DecodeError>
 where
-    T: Decode,
+    T: Decode<()>,
     R: Reader,
 {
     let config = bincode::config::standard()

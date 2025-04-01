@@ -63,8 +63,8 @@ pub struct BtreeBlockHdr<T: PrimInt + Unsigned> {
     //_bb_pad: u32,
 }
 
-impl<T: Decode + PrimInt + Unsigned> Decode for BtreeBlockHdr<T> {
-    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+impl<T: Decode<Ctx> + PrimInt + Unsigned, Ctx> Decode<Ctx> for BtreeBlockHdr<T> {
+    fn decode<D: Decoder<Context = Ctx>>(decoder: &mut D) -> Result<Self, DecodeError> {
         let bb_magic: u32 = Decode::decode(decoder)?;
         let bb_level = Decode::decode(decoder)?;
         let bb_numrecs = Decode::decode(decoder)?;
@@ -344,7 +344,7 @@ impl BtreePriv for BtreeIntermediate {
 
 impl Btree for BtreeIntermediate {}
 
-impl Decode for BtreeIntermediate {
+impl<Ctx> Decode<Ctx> for BtreeIntermediate {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let blocksize = SUPERBLOCK.get().unwrap().sb_blocksize as usize;
         let mut raw = vec![0u8; blocksize];
@@ -400,7 +400,7 @@ impl BtreeLeaf {
     }
 }
 
-impl Decode for BtreeLeaf {
+impl<Ctx> Decode<Ctx> for BtreeLeaf {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let hdr: XfsBmbtLblock = Decode::decode(decoder)?;
         assert_eq!(hdr.bb_level, 0);

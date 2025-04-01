@@ -131,7 +131,7 @@ impl Dir2DataEntry {
     }
 }
 
-impl Decode for Dir2DataEntry {
+impl<Ctx> Decode<Ctx> for Dir2DataEntry {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let inumber = Decode::decode(decoder)?;
         let sb = SUPERBLOCK.get().unwrap();
@@ -173,7 +173,7 @@ pub struct Dir2DataUnused {
     _tag:     XfsDir2DataOff,
 }
 
-impl Decode for Dir2DataUnused {
+impl<Ctx> Decode<Ctx> for Dir2DataUnused {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let _freetag = Decode::decode(decoder)?;
         let length = Decode::decode(decoder)?;

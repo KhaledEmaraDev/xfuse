@@ -3,11 +3,10 @@ use std::{
     fs,
     path::PathBuf,
     process::Command,
+    sync::LazyLock,
     thread::sleep,
     time::{Duration, Instant},
 };
-
-use lazy_static::lazy_static;
 
 /// Skip a test.
 // Copied from nix.  Sure would be nice if the test harness knew about "skipped"
@@ -94,14 +93,17 @@ fn prepare_image(filename: &str) -> PathBuf {
     img
 }
 
-lazy_static! {
-    pub static ref GOLDEN1K: PathBuf = prepare_image("xfs1024.img");
-    pub static ref GOLDEN4K: PathBuf = prepare_image("xfs4096.img");
-    pub static ref GOLDEN4KN: PathBuf = prepare_image("xfs_4kn.img");
-    pub static ref GOLDENPREALLOCATED: PathBuf = prepare_image("xfs_preallocated.img");
-    pub static ref GOLDENV4: PathBuf = prepare_image("xfsv4.img");
-    pub static ref GOLDEN_NOFTYPE: PathBuf = prepare_image("xfs_noftype.img");
-}
+pub static GOLDEN1K: LazyLock<PathBuf> = LazyLock::new(|| prepare_image("xfs1024.img"));
+pub static GOLDEN4K: LazyLock<PathBuf> = LazyLock::new(|| prepare_image("xfs4096.img"));
+#[allow(unused)] // Not used by benches
+pub static GOLDEN4KN: LazyLock<PathBuf> = LazyLock::new(|| prepare_image("xfs_4kn.img"));
+#[allow(unused)] // Not used by benches
+pub static GOLDENPREALLOCATED: LazyLock<PathBuf> =
+    LazyLock::new(|| prepare_image("xfs_preallocated.img"));
+#[allow(unused)] // Not used by benches
+pub static GOLDENV4: LazyLock<PathBuf> = LazyLock::new(|| prepare_image("xfsv4.img"));
+#[allow(unused)] // Not used by benches
+pub static GOLDEN_NOFTYPE: LazyLock<PathBuf> = LazyLock::new(|| prepare_image("xfs_noftype.img"));
 
 #[derive(Clone, Copy, Debug)]
 pub struct WaitForError;
