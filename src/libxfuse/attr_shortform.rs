@@ -56,7 +56,7 @@ pub struct AttrSfEntry {
     pub nameval: Vec<u8>,
 }
 
-impl Decode for AttrSfEntry {
+impl<Ctx> Decode<Ctx> for AttrSfEntry {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let namelen: u8 = Decode::decode(decoder)?;
         let valuelen: u8 = Decode::decode(decoder)?;
@@ -79,7 +79,7 @@ pub struct AttrShortform {
     pub total_size: u32,
 }
 
-impl Decode for AttrShortform {
+impl<Ctx> Decode<Ctx> for AttrShortform {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let hdr: AttrSfHdr = Decode::decode(decoder)?;
 

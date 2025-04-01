@@ -48,7 +48,7 @@ pub struct BmbtRec {
     pub br_flag:       bool,
 }
 
-impl Decode for BmbtRec {
+impl<Ctx> Decode<Ctx> for BmbtRec {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let br: u128 = Decode::decode(decoder)?;
 

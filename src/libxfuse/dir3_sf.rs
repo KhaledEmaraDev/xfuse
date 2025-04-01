@@ -56,14 +56,14 @@ pub struct Dir2SfHdr {
     pub parent:  XfsIno,
 }
 
-impl Decode for Dir2SfHdr {
-    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+impl<Ctx> Decode<Ctx> for Dir2SfHdr {
+    fn decode<D: Decoder<Context = Ctx>>(decoder: &mut D) -> Result<Self, DecodeError> {
         let count = Decode::decode(decoder)?;
         let i8count = Decode::decode(decoder)?;
         let parent = if i8count > 0 {
-            <u64 as Decode>::decode(decoder)?
+            <u64 as Decode<Ctx>>::decode(decoder)?
         } else {
-            <u32 as Decode>::decode(decoder)?.into()
+            <u32 as Decode<Ctx>>::decode(decoder)?.into()
         };
         Ok(Dir2SfHdr {
             count,
@@ -81,7 +81,7 @@ struct Dir2SfEntry32 {
     inumber: u32,
 }
 
-impl Decode for Dir2SfEntry32 {
+impl<Ctx> Decode<Ctx> for Dir2SfEntry32 {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let sb = SUPERBLOCK.get().unwrap();
         let namelen: u8 = Decode::decode(decoder)?;
@@ -124,7 +124,7 @@ impl Dir2SfEntry64 {
     }
 }
 
-impl Decode for Dir2SfEntry64 {
+impl<Ctx> Decode<Ctx> for Dir2SfEntry64 {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let sb = SUPERBLOCK.get().unwrap();
         let namelen: u8 = Decode::decode(decoder)?;
@@ -174,7 +174,7 @@ impl Dir2Sf {
     }
 }
 
-impl Decode for Dir2Sf {
+impl<Ctx> Decode<Ctx> for Dir2Sf {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let hdr: Dir2SfHdr = Decode::decode(decoder)?;
 

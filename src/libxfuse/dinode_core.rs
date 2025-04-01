@@ -52,7 +52,7 @@ pub enum XfsDinodeFmt {
     Rmap,
 }
 
-impl bincode::Decode for XfsDinodeFmt {
+impl<Ctx> bincode::Decode<Ctx> for XfsDinodeFmt {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let discriminant: u8 = Decode::decode(decoder)?;
         Ok(XfsDinodeFmt::from_u8(discriminant).expect("Unknown dinode fmt"))
@@ -231,7 +231,7 @@ impl DinodeCore {
     }
 }
 
-impl Decode for DinodeCore {
+impl<Ctx> Decode<Ctx> for DinodeCore {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let mut di_flags2 = 0;
         let mut di_crtime: XfsTimestamp = Default::default();
