@@ -341,7 +341,28 @@ mod dev {
 
     impl Drop for MdHarness {
         fn drop(&mut self) {
-            let _ = Command::new("umount").arg(self.d.path()).output();
+            loop {
+                let cmd = Command::new("umount").arg(self.d.path()).output();
+                match cmd {
+                    Err(e) => {
+                        panic!("Executing umount failed: {}", e);
+                    }
+                    Ok(output) => {
+                        let errmsg = OsString::from_vec(output.stderr).into_string().unwrap();
+                        if output.status.success() {
+                            break;
+                        } else if errmsg.contains("not a file system root directory") {
+                            // The daemon probably crashed.
+                            break;
+                        } else if errmsg.contains("Device busy") {
+                            println!("{}", errmsg);
+                        } else {
+                            panic!("{}", errmsg);
+                        }
+                    }
+                }
+                sleep(Duration::from_millis(50));
+            }
             let _ = self.child.wait();
         }
     }
