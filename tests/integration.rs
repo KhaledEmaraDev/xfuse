@@ -15,7 +15,7 @@ use std::{
     time::Duration,
 };
 
-use assert_cmd::cargo::CommandCargoExt;
+use assert_cmd::cargo::cargo_bin;
 use function_name::named;
 use nix::{
     errno::Errno,
@@ -125,8 +125,7 @@ struct Harness {
 
 fn harness(img: &Path) -> Harness {
     let d = tempdir().unwrap();
-    let child = Command::cargo_bin("xfs-fuse")
-        .unwrap()
+    let child = Command::new(cargo_bin!("xfs-fuse"))
         .arg(img)
         .arg(d.path())
         .spawn()
@@ -323,8 +322,7 @@ mod dev {
             .create()
             .unwrap();
         let d = tempdir().unwrap();
-        let child = Command::cargo_bin("xfs-fuse")
-            .unwrap()
+        let child = Command::new(cargo_bin!("xfs-fuse"))
             .arg(md.path())
             .arg(d.path())
             .spawn()
