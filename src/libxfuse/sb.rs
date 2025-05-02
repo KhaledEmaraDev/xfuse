@@ -270,14 +270,11 @@ impl Sb {
         let _sb_features_ro_compat = buf_reader.read_u32::<BigEndian>().unwrap();
         let incompat_raw = buf_reader.read_u32::<BigEndian>().unwrap();
         let sb_features_incompat = SbFeaturesIncompat::from_bits(incompat_raw)
-            .unwrap_or_else(|| panic!("Unknown value in sb_features_incompat: {:?}", incompat_raw));
+            .unwrap_or_else(|| panic!("Unknown value in sb_features_incompat: {incompat_raw:?}"));
         let log_incompat_raw = buf_reader.read_u32::<BigEndian>().unwrap();
         let _sb_features_log_incompat = SbFeaturesLogIncompat::from_bits(log_incompat_raw)
             .unwrap_or_else(|| {
-                panic!(
-                    "Unknown value in sb_features_log_incompat: {:?}",
-                    log_incompat_raw
-                )
+                panic!("Unknown value in sb_features_log_incompat: {log_incompat_raw:?}")
             });
 
         buf_reader.seek(SeekFrom::Start(0)).unwrap();

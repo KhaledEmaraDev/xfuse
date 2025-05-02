@@ -82,7 +82,7 @@ impl<T: Decode<Ctx> + PrimInt + Unsigned, Ctx> Decode<Ctx> for BtreeBlockHdr<T> 
                 let _bb_crc: u32 = Decode::decode(decoder)?;
                 let _bb_pad: u32 = Decode::decode(decoder)?;
             }
-            _ => panic!("Unexpected magic value {:#x}", bb_magic),
+            _ => panic!("Unexpected magic value {bb_magic:#x}"),
         };
         Ok(BtreeBlockHdr {
             bb_magic,

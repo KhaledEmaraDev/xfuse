@@ -56,16 +56,12 @@ pub trait File<R: BufRead + Reader + Seek> {
         debug_assert_eq!(
             offset & ((1i64 << sb.sb_blocklog) - 1),
             0,
-            "fusefs did a non-sector-size aligned read.  offset={:?} size={:?}",
-            offset,
-            size
+            "fusefs did a non-sector-size aligned read.  offset={offset:?} size={size:?}"
         );
         debug_assert_eq!(
             size & ((1usize << sb.sb_blocklog) - 1),
             0,
-            "fusefs did a non-sector-size aligned read.  offset={:?} size={:?}",
-            offset,
-            size
+            "fusefs did a non-sector-size aligned read.  offset={offset:?} size={size:?}"
         );
 
         let mut data = Vec::<u8>::with_capacity(size);

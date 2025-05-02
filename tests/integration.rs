@@ -38,13 +38,13 @@ struct ExpectedXattr {
 /// in order by name.
 fn expected_xattrs_per_file(f: &str) -> impl Iterator<Item = ExpectedXattr> {
     let locals = (0..local_attrs_per_file(f)).map(|i| ExpectedXattr {
-        name:  OsString::from(format!("user.attr.{:06}", i)),
-        value: OsString::from(format!("value.{:06}", i)),
+        name:  OsString::from(format!("user.attr.{i:06}")),
+        value: OsString::from(format!("value.{i:06}")),
     });
     let remotes = (0..remote_attrs_per_file(f)).map(|i| {
         ExpectedXattr {
-            name: OsString::from(format!("user.remote_attr.{:06}", i)),
-            value: OsString::from(format!("_______________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________.{:06}", i))
+            name: OsString::from(format!("user.remote_attr.{i:06}")),
+            value: OsString::from(format!("_______________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________.{i:06}"))
         }
     });
     locals.chain(remotes)
@@ -98,7 +98,7 @@ fn ents_per_dir_longnames(path: &Path, d: &str) -> usize {
         ("xfs_4kn.img", "block") => 4,
         ("xfs_4kn.img", "leaf") => 16,
         ("xfs_4kn.img", "node") => 512,
-        x => panic!("{:?} not implemented", x),
+        x => panic!("{x:?} not implemented"),
     }
 }
 
@@ -181,7 +181,7 @@ impl Drop for Harness {
             let cmd = Command::new("umount").arg(self.d.path()).output();
             match cmd {
                 Err(e) => {
-                    eprintln!("Executing umount failed: {}", e);
+                    eprintln!("Executing umount failed: {e}");
                     if std::thread::panicking() {
                         // Can't double panic
                         return;
@@ -196,14 +196,14 @@ impl Drop for Harness {
                         // The daemon probably crashed.
                         break;
                     } else if errmsg.contains("Device busy") {
-                        println!("{}", errmsg);
+                        println!("{errmsg}");
                     } else {
                         if std::thread::panicking() {
                             // Can't double panic
-                            println!("{}", errmsg);
+                            println!("{errmsg}");
                             return;
                         }
-                        panic!("{}", errmsg);
+                        panic!("{errmsg}");
                     }
                 }
             }
@@ -343,7 +343,7 @@ mod dev {
                 let cmd = Command::new("umount").arg(self.d.path()).output();
                 match cmd {
                     Err(e) => {
-                        panic!("Executing umount failed: {}", e);
+                        panic!("Executing umount failed: {e}");
                     }
                     Ok(output) => {
                         let errmsg = OsString::from_vec(output.stderr).into_string().unwrap();
@@ -353,9 +353,9 @@ mod dev {
                             // The daemon probably crashed.
                             break;
                         } else if errmsg.contains("Device busy") {
-                            println!("{}", errmsg);
+                            println!("{errmsg}");
                         } else {
-                            panic!("{}", errmsg);
+                            panic!("{errmsg}");
                         }
                     }
                 }
@@ -449,10 +449,10 @@ mod dev {
                 if e.kind() == ErrorKind::UnexpectedEof {
                     break;
                 } else {
-                    panic!("read: {:?}", e);
+                    panic!("read: {e:?}");
                 }
             } else {
-                let expected = format!("{:016x}", ofs);
+                let expected = format!("{ofs:016x}");
                 assert_eq!(&buf[..], expected.as_bytes());
                 ofs += BUFSIZE;
             }
@@ -560,7 +560,7 @@ fn getextattr_size(#[case] h: fn() -> Harness, #[case] d: &str) {
     let cpath = CString::new(p.as_os_str().as_bytes()).unwrap();
 
     for i in 0..local_attrs_per_file(d) {
-        let s = format!("attr.{:06}", i);
+        let s = format!("attr.{i:06}");
         let attrname = OsStr::new(s.as_str());
         let cattrname = CString::new(attrname.as_bytes()).unwrap();
         let r = unsafe {
@@ -613,11 +613,11 @@ mod lookup {
 
         let amode = AccessFlags::F_OK;
         for i in 1..=255 {
-            let p = harness4k.d.path().join("all_name_lengths").join(format!(
-                "{:0width$}",
-                i,
-                width = i
-            ));
+            let p = harness4k
+                .d
+                .path()
+                .join("all_name_lengths")
+                .join(format!("{i:0i$}"));
             access(p.as_path(), amode).unwrap_or_else(|_| panic!("Lookup failed: {}", p.display()));
         }
     }
@@ -1104,7 +1104,7 @@ mod read {
         // Verify contents
         let mut ofs = 0;
         while ofs < size {
-            let expected = format!("{:016x}", ofs);
+            let expected = format!("{ofs:016x}");
             assert_eq!(&buf[ofs..ofs + 16], expected.as_bytes());
             ofs += 16;
         }
@@ -1132,10 +1132,10 @@ mod read {
                 if e.kind() == ErrorKind::UnexpectedEof {
                     break;
                 } else {
-                    panic!("read: {:?}", e);
+                    panic!("read: {e:?}");
                 }
             } else {
-                let expected = format!("{:016x}", ofs);
+                let expected = format!("{ofs:016x}");
                 assert_eq!(&buf[..], expected.as_bytes());
                 ofs += BUFSIZE;
             }
@@ -1179,7 +1179,7 @@ mod read {
             f.read_exact(&mut buf[..]).unwrap();
             let mut ofs = 4096;
             while ofs < 8192 {
-                let expected = format!("{:016x}", ofs);
+                let expected = format!("{ofs:016x}");
                 let bofs = ofs - 4096;
                 assert_eq!(&buf[bofs..bofs + BUFSIZE], expected.as_bytes());
                 ofs += BUFSIZE;
@@ -1203,7 +1203,7 @@ mod read {
         f.read_exact(&mut buf[..]).unwrap();
         let mut ofs = 0;
         while ofs < offset {
-            let expected = format!("{:016x}", ofs);
+            let expected = format!("{ofs:016x}");
             assert_eq!(&buf[ofs..ofs + BUFSIZE], expected.as_bytes());
             ofs += BUFSIZE;
         }
@@ -1348,7 +1348,7 @@ mod readdir {
         let mut count = 0;
         for (i, rent) in ents.enumerate() {
             let ent = rent.unwrap();
-            let expected_name = format!("frame{:06}", i);
+            let expected_name = format!("frame{i:06}");
             assert_eq!(ent.file_name(), OsStr::new(&expected_name));
             assert!(ent.file_type().unwrap().is_file());
             let md = ent.metadata().unwrap();

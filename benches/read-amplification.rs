@@ -302,7 +302,7 @@ fn main() {
             let cmd = Command::new("umount").arg(d.path()).output();
             match cmd {
                 Err(e) => {
-                    panic!("Executing umount failed: {}", e);
+                    panic!("Executing umount failed: {e}");
                 }
                 Ok(output) => {
                     let errmsg = OsString::from_vec(output.stderr).into_string().unwrap();
@@ -312,9 +312,9 @@ fn main() {
                         // The daemon probably crashed.
                         break;
                     } else if errmsg.contains("Device busy") {
-                        println!("{}", errmsg);
+                        println!("{errmsg}");
                     } else {
-                        panic!("{}", errmsg);
+                        panic!("{errmsg}");
                     }
                 }
             }
