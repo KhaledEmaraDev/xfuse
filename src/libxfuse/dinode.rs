@@ -205,7 +205,7 @@ impl Dinode {
             S_IFCHR => di_u = Some(DiU::Chr),
             S_IFIFO => di_u = Some(DiU::Fifo),
             S_IFSOCK => di_u = Some(DiU::Socket),
-            x => panic!("Inode type ({:#o}) not yet supported.", x),
+            x => panic!("Inode type ({x:#o}) not yet supported."),
         }
 
         let di_a: Option<DiA>;

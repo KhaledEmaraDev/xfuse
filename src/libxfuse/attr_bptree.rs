@@ -97,7 +97,7 @@ impl AttrBtreeBlock0 {
                 AttrBtreeBlock0::Node(XfsDa3Intnode::from(buf_reader))
             }
             XFS_ATTR_LEAF_MAGIC | XFS_ATTR3_LEAF_MAGIC => AttrBtreeBlock0::Leaf,
-            _ => panic!("Unexpected magic value {:#x}", magic),
+            _ => panic!("Unexpected magic value {magic:#x}"),
         }
     }
 }

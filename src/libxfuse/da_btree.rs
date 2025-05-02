@@ -181,7 +181,7 @@ impl XfsDa3Intnode {
                 let hdr: XfsDa3NodeHdr = utils::decode_from(buf_reader.by_ref()).unwrap();
                 (hdr.count, hdr.level)
             }
-            _ => panic!("Bad magic in XfsDa3Intnode! {:#x}", magic),
+            _ => panic!("Bad magic in XfsDa3Intnode! {magic:#x}"),
         };
 
         let mut btree = Vec::<XfsDa3NodeEntry>::new();
@@ -277,7 +277,7 @@ impl<Ctx> Decode<Ctx> for XfsDa3Intnode {
                 let hdr: XfsDa3NodeHdr = Decode::decode(decoder)?;
                 (hdr.count, hdr.level)
             }
-            _ => panic!("Bad magic in XfsDa3Intnode! {:#x}", magic),
+            _ => panic!("Bad magic in XfsDa3Intnode! {magic:#x}"),
         };
         let mut btree = Vec::<XfsDa3NodeEntry>::new();
         for _i in 0..count {
@@ -305,7 +305,7 @@ fn hashname_collisions() {
     let mut allnames = HashMap::new();
     let mut collisions = 0;
     for i in 0u64.. {
-        let name = OsString::from(format!("{:x}", i));
+        let name = OsString::from(format!("{i:x}"));
         let hash = hashname(&name);
         if let Some(mut v) = allnames.insert(hash, vec![name.clone()]) {
             v.push(name);

@@ -138,7 +138,7 @@ impl<Context> Decode<Context> for Dir2LeafNDisk {
                 let hdr: Dir3LeafHdr = Decode::decode(decoder)?;
                 (hdr.count, hdr.info.forw)
             }
-            _ => panic!("Unexpected magic {:#x}", magic),
+            _ => panic!("Unexpected magic {magic:#x}"),
         };
         let mut ents = Vec::<Dir2LeafEntry>::new();
         for _i in 0..count {
@@ -183,7 +183,7 @@ impl Leaf {
             XFS_DIR2_LEAF1_MAGIC | XFS_DIR3_LEAF1_MAGIC => {
                 Self::LeafN(Dir2LeafNDisk::decode(&mut decoder).unwrap())
             }
-            magic => panic!("Bad magic in Leaf block! {:#x}", magic),
+            magic => panic!("Bad magic in Leaf block! {magic:#x}"),
         }
     }
 
@@ -441,7 +441,7 @@ impl Dir3 for Dir2Lf {
                 match magic {
                     XFS_DIR2_BLOCK_MAGIC | XFS_DIR2_DATA_MAGIC => Dir2DataHdr::SIZE as usize,
                     XFS_DIR3_BLOCK_MAGIC | XFS_DIR3_DATA_MAGIC => Dir3DataHdr::SIZE as usize,
-                    _ => panic!("Unknown magic number for block directory {:#x}", magic),
+                    _ => panic!("Unknown magic number for block directory {magic:#x}"),
                 }
             };
             while blk_offset < raw.len() {

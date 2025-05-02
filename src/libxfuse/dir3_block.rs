@@ -84,7 +84,7 @@ impl Dir2BlockDisk {
                 assert_eq!(hdr.hdr.magic, XFS_DIR3_BLOCK_MAGIC);
                 Dir3DataHdr::SIZE as usize
             }
-            _ => panic!("Unknown magic number for block directory {:#x}", magic),
+            _ => panic!("Unknown magic number for block directory {magic:#x}"),
         };
 
         let tail_offset = (size as usize) - Dir2BlockTail::SIZE;

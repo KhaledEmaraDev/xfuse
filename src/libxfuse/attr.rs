@@ -106,7 +106,7 @@ impl<Ctx> Decode<Ctx> for AttrLeafHdr {
                 let info: XfsDa3Blkinfo = Decode::decode(decoder)?;
                 info.forw
             }
-            _ => panic!("Unexpected magic value {:#x}", magic),
+            _ => panic!("Unexpected magic value {magic:#x}"),
         };
         let count = Decode::decode(decoder)?;
         let _usedbytes: u16 = Decode::decode(decoder)?;
@@ -381,8 +381,8 @@ pub fn open<R: Reader + BufRead + Seek>(
             }
             magic => {
                 panic!(
-                    "bad magic!  expected either {:#x} or {:#x} but found {:#x}",
-                    XFS_ATTR3_LEAF_MAGIC, XFS_DA3_NODE_MAGIC, magic
+                    "bad magic!  expected either {XFS_ATTR3_LEAF_MAGIC:#x} or \
+                     {XFS_DA3_NODE_MAGIC:#x} but found {magic:#x}"
                 );
             }
         }
