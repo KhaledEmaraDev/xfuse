@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] - ReleaseDate
+
+### Changed
+
+- By default, xfs-fuse now runs in the background, like most FUSE servers.
+  Legacy behavior (running in the foreground) can be achieved with `-f`.
+  ([#175](https://github.com/KhaledEmaraDev/xfuse/issues/175))
+
 ## [0.4.4] - 2024-08-15
 
 ### Fixed

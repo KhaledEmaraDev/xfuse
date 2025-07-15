@@ -27,7 +27,7 @@ crc = "2.0.0"
 enum_dispatch = "0.3.12"
 fuser = { version = "0.13.0", features = ["abi-7-31"] }
 libc = "0.2.154"
-nix = { version = "0.27.0", features = [ "ioctl" ] }
+nix = { version = "0.27.0", features = [ "ioctl", "process" ] }
 num-derive = "0.4.2"
 num-traits = "0.2.14"
 tracing = "0.1.37"
