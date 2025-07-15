@@ -30,6 +30,7 @@ use std::path::PathBuf;
 use clap::{crate_version, Parser};
 use fuser::{mount2, MountOption};
 use libxfuse::volume::Volume;
+use nix::unistd::daemon;
 use tracing_subscriber::EnvFilter;
 
 mod libxfuse;
@@ -42,6 +43,10 @@ struct App {
     options:    Vec<String>,
     device:     PathBuf,
     mountpoint: String,
+
+    /// Run in the foreground
+    #[arg(short)]
+    foreground: bool,
 }
 
 fn main() {
@@ -85,5 +90,8 @@ fn main() {
 
     let vol = Volume::from(&app.device);
 
+    if !app.foreground {
+        daemon(false, false).unwrap();
+    }
     mount2(vol, app.mountpoint, &opts[..]).unwrap();
 }

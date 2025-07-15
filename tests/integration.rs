@@ -126,6 +126,7 @@ struct Harness {
 fn harness(img: &Path) -> Harness {
     let d = tempdir().unwrap();
     let child = Command::new(cargo_bin!("xfs-fuse"))
+        .arg("-f")
         .arg(img)
         .arg(d.path())
         .spawn()
@@ -601,6 +602,37 @@ fn mount(#[case] h: fn() -> Harness) {
 
     let harness = h();
     drop(harness);
+}
+
+/// Mount a golden image and detach from the terminal
+#[named]
+#[test]
+fn daemonize() {
+    require_fusefs!();
+
+    let d = tempdir().unwrap();
+    let mut child = Command::new(cargo_bin!("xfs-fuse"))
+        .arg(GOLDEN1K.as_path())
+        .arg(d.path())
+        .spawn()
+        .unwrap();
+
+    waitfor(Duration::from_secs(5), || {
+        let s = nix::sys::statfs::statfs(d.path()).unwrap();
+        s.filesystem_type_name() == "fusefs.xfs"
+    })
+    .unwrap();
+
+    // Because we didn't use -f, we can wait on the child here
+    let _ = child.wait();
+
+    // And the file system should still be mounted
+    let s = nix::sys::statfs::statfs(d.path()).unwrap();
+    assert_eq!(s.filesystem_type_name(), "fusefs.xfs");
+
+    // Now clean up
+    let cmd = Command::new("umount").arg(d.path()).output();
+    assert!(cmd.unwrap().status.success());
 }
 
 mod lookup {

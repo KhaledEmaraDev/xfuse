@@ -1,4 +1,4 @@
-.Dd August 26, 2021
+.Dd July 15, 2025
 .Dt XFUSE 1
 .Os
 .Sh NAME
@@ -6,24 +6,30 @@
 .Nd Mount an XFS filesystem
 .Sh SYNOPSIS
 .Nm
-.Op Ar device
-.Op Ar mountpoint
+.Op Fl fhV
+.Op Fl o Ar options
+.Ar device
+.Ar mountpoint
 .Sh DESCRIPTION
 .Nm
-can be used to attach an XFS filesystem found on
+can be used to mount an XFS filesystem found on
 .Ar device
 to
-.Ar mountpoint
-in the unix filesystem tree.
+.Ar mountpoint .
 .Pp
 The options are as follows:
 .Bl -tag -width indent
-.It Ar device
-The device that carries the XFS filesystem data.
-.It Ar mountpoint
-The path in the current unix filesystem tree to attach
-.Ar device
-to.
+.It Fl f
+Run in the foreground instead of daemonizing.
+.It Fl o
+Pass various common options to the kernel.
+See
+.Xr mount_fusefs 8
+for the list.
+.It Fl h , -help
+Print usage information and exit.
+.It Fl V , -version
+Print the version and exit.
 .El
 .Pp
 .El

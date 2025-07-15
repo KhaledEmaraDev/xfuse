@@ -27,16 +27,8 @@
  */
 
 use bincode::{de::Decoder, error::DecodeError, Decode};
-use num_derive::FromPrimitive;
 
 use super::{definitions::*, volume::SUPERBLOCK};
-
-#[derive(Debug, FromPrimitive, Clone)]
-pub enum XfsExntst {
-    Norm,
-    Unwritten,
-    Invalid,
-}
 
 #[derive(Debug, Clone, Copy)]
 pub struct BmbtRec {
