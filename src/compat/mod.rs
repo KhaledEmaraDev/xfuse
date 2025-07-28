@@ -5,7 +5,6 @@
 mod daemon;
 #[cfg(target_os = "macos")]
 pub use daemon::daemon;
-
 // Use nix's daemon(3) wrapper on other platforms:
 #[cfg(not(target_os = "macos"))]
 pub use nix::unistd::daemon;
