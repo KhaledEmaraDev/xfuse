@@ -30,7 +30,7 @@ libc = "0.2.154"
 nix = { version = "0.27.0", features = [ "ioctl", "process" ] }
 num-derive = "0.4.2"
 num-traits = "0.2.14"
-tracing = "0.1.37"
+tracing = "0.1.41"
 uuid = "1.0"
 
 [[test]]
@@ -48,7 +48,7 @@ default-features = false
 features=  [ "cargo", "color", "derive", "std", "suggestions", "wrap_help" ,"usage"]
 
 [dependencies.tracing-subscriber]
-version = "0.3.17"
+version = "0.3.20"
 default-features = false
 features = [ "ansi", "env-filter", "fmt", "tracing-log" ]
 
