@@ -212,7 +212,7 @@ impl Filesystem for Volume {
         }
     }
 
-    fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
+    fn getattr(&mut self, _req: &Request, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
         let attr = self
             .open_files
             .get(&ino)
