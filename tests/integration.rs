@@ -1541,7 +1541,7 @@ mod stat {
         let path = harness4k.d.path().join("links").join(linkname);
 
         let flags = nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW;
-        let stat = nix::sys::stat::fstatat(libc::AT_FDCWD, &path, flags).unwrap();
+        let stat = nix::sys::stat::fstatat(None, &path, flags).unwrap();
         assert_eq!(1, stat.st_nlink, "AT_SYMLINK_NOFOLLOW was ignored");
         assert_eq!(ino, stat.st_ino);
     }
