@@ -5,15 +5,17 @@ cargo_cache:
 task:
   env:
     HOME: /tmp # cargo cache needs it
-  freebsd_instance:
-    image: freebsd-13-5-release-amd64
   matrix:
     - name: FreeBSD stable
       env:
         VERSION: 1.85.0
+      freebsd_instance:
+        image: freebsd-14-3-release-amd64-ufs
     - name: FreeBSD nightly
       env:
         VERSION: nightly
+      freebsd_instance:
+        image: freebsd-15-0-release-amd64-ufs
   setup_script:
     - pkg install -y fusefs-libs pkgconf
     - kldload fusefs
