@@ -11,7 +11,13 @@ use std::{
     time::Duration,
 };
 
-use assert_cmd::cargo::CommandCargoExt;
+// See https://github.com/assert-rs/assert_cmd/issues/258
+#[expect(
+    deprecated,
+    reason = "cargo_bin is deprecated, but cargo_bin! is not, and clippy does not differentiate \
+              between them."
+)]
+use assert_cmd::cargo::cargo_bin;
 use function_name::named;
 use tempfile::tempdir;
 use xattr::FileExt;
@@ -280,8 +286,7 @@ fn main() {
         let gnop = Gnop::new(md.path()).unwrap();
         let d = tempdir().unwrap();
 
-        let mut child = Command::cargo_bin("xfs-fuse")
-            .unwrap()
+        let mut child = Command::new(cargo_bin!("xfs-fuse"))
             .arg(gnop.as_path())
             .arg(d.path())
             .spawn()
