@@ -26,7 +26,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-use bincode::{de::Decoder, error::DecodeError, Decode};
+use bincode_next::{de::Decoder, error::DecodeError, Decode};
 
 use super::{definitions::*, volume::SUPERBLOCK};
 

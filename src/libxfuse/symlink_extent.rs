@@ -30,7 +30,7 @@ use std::{
     io::{BufRead, Seek, SeekFrom},
 };
 
-use bincode::{de::read::Reader, Decode};
+use bincode_next::{de::read::Reader, Decode};
 
 use super::{
     bmbt_rec::Bmx,

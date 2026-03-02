@@ -27,7 +27,7 @@
  */
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use bincode::{de::Decoder, error::DecodeError, impl_borrow_decode, Decode};
+use bincode_next::{de::Decoder, error::DecodeError, impl_borrow_decode, Decode};
 use fuser::FileAttr;
 use libc::c_int;
 use num_derive::FromPrimitive;
@@ -52,7 +52,7 @@ pub enum XfsDinodeFmt {
     Rmap,
 }
 
-impl<Ctx> bincode::Decode<Ctx> for XfsDinodeFmt {
+impl<Ctx> bincode_next::Decode<Ctx> for XfsDinodeFmt {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let discriminant: u8 = Decode::decode(decoder)?;
         Ok(XfsDinodeFmt::from_u8(discriminant).expect("Unknown dinode fmt"))

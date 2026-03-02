@@ -33,7 +33,7 @@ use std::{
     path::Path,
 };
 
-use bincode::{de::read::Reader, error::DecodeError};
+use bincode_next::{de::read::Reader, error::DecodeError};
 use cfg_if::cfg_if;
 
 #[cfg(target_os = "freebsd")]

@@ -27,7 +27,7 @@
  */
 use std::io::{BufRead, Seek};
 
-use bincode::de::read::Reader;
+use bincode_next::de::read::Reader;
 
 use super::{
     bmbt_rec::Bmx,

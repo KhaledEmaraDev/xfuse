@@ -31,7 +31,7 @@ use std::{
     os::unix::ffi::{OsStrExt, OsStringExt},
 };
 
-use bincode::{
+use bincode_next::{
     de::{read::Reader, Decoder},
     error::DecodeError,
     Decode,
@@ -197,7 +197,7 @@ impl<Ctx> Decode<Ctx> for Dir2Sf {
 }
 
 impl Dir3 for Dir2Sf {
-    fn lookup<R: bincode::de::read::Reader + BufRead + Seek>(
+    fn lookup<R: bincode_next::de::read::Reader + BufRead + Seek>(
         &self,
         _buf_reader: &mut R,
         _super_block: &Sb,
@@ -218,7 +218,7 @@ impl Dir3 for Dir2Sf {
         }
     }
 
-    fn next<R: bincode::de::read::Reader + BufRead + Seek>(
+    fn next<R: bincode_next::de::read::Reader + BufRead + Seek>(
         &self,
         _buf_reader: &mut R,
         _super_block: &Sb,

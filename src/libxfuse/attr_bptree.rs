@@ -33,7 +33,7 @@ use std::{
     io::{BufRead, Seek, SeekFrom},
 };
 
-use bincode::de::read::Reader;
+use bincode_next::de::read::Reader;
 
 use super::{
     attr::{Attr, AttrLeafblock},
@@ -114,7 +114,7 @@ pub struct AttrBtree {
 impl AttrBtree {
     pub fn new<R>(buf_reader: &mut R, sb: &Sb, btree: BtreeRoot) -> Self
     where
-        R: bincode::de::read::Reader + BufRead + Seek,
+        R: bincode_next::de::read::Reader + BufRead + Seek,
     {
         let fsblk = btree.map_block(buf_reader.by_ref(), 0).unwrap().0.unwrap();
         buf_reader
@@ -134,7 +134,7 @@ impl AttrBtree {
 
     // Attribute blocks always have the same size, so we don't need to return the extent length.
     // They also need to return a different errno.
-    fn map_dblock<R: bincode::de::read::Reader + BufRead + Seek>(
+    fn map_dblock<R: bincode_next::de::read::Reader + BufRead + Seek>(
         &self,
         buf_reader: &mut R,
         logical_block: XfsDablk,

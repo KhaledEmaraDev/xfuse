@@ -33,7 +33,7 @@ use std::{
     ops::{Deref, Range},
 };
 
-use bincode::{
+use bincode_next::{
     de::{read::Reader, Decoder},
     error::DecodeError,
     Decode,
@@ -162,11 +162,11 @@ enum Leaf {
 impl Leaf {
     fn open(raw: &[u8]) -> Self {
         let magic: u16 = decode(&raw[8..]).unwrap().0;
-        let config = bincode::config::standard()
+        let config = bincode_next::config::standard()
             .with_big_endian()
             .with_fixed_int_encoding();
-        let reader = bincode::de::read::SliceReader::new(raw);
-        let mut decoder = bincode::de::DecoderImpl::new(reader, config, ());
+        let reader = bincode_next::de::read::SliceReader::new(raw);
+        let mut decoder = bincode_next::de::DecoderImpl::new(reader, config, ());
         match magic {
             XFS_DA_NODE_MAGIC | XFS_DA3_NODE_MAGIC => {
                 let leaf_btree = XfsDa3Intnode::decode(&mut decoder)

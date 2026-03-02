@@ -32,7 +32,7 @@ use std::{
     marker::PhantomData,
 };
 
-use bincode::{
+use bincode_next::{
     de::{read::Reader, Decoder},
     error::DecodeError,
     Decode,
@@ -129,7 +129,7 @@ pub trait Btree: BtreePriv {
     /// Return the extent, if any, that contains the given block within the file.
     /// Return its starting position as an FSblock, and its length in file system block units.
     /// If a hole's length extents to EoF, return None for length.
-    fn map_block<R: bincode::de::read::Reader + BufRead + Seek>(
+    fn map_block<R: bincode_next::de::read::Reader + BufRead + Seek>(
         &self,
         buf_reader: &mut R,
         logical_block: XfsFileoff,

@@ -30,7 +30,7 @@ use std::{
     io::{BufRead, Seek, SeekFrom},
 };
 
-use bincode::{
+use bincode_next::{
     de::{read::Reader, Decoder},
     error::DecodeError,
     impl_borrow_decode,
@@ -232,8 +232,8 @@ impl<Ctx> Decode<Ctx> for AttrLeafblock {
         decoder.reader().read(&mut raw[..])?;
 
         let config = decoder.config();
-        let sl = bincode::de::read::SliceReader::new(&raw);
-        let mut sldecoder = bincode::de::DecoderImpl::new(sl, *config, ());
+        let sl = bincode_next::de::read::SliceReader::new(&raw);
+        let mut sldecoder = bincode_next::de::DecoderImpl::new(sl, *config, ());
         let hdr: AttrLeafHdr = Decode::decode(&mut sldecoder)?;
 
         let mut entries = Vec::<AttrLeafEntry>::with_capacity(hdr.count.into());
@@ -245,10 +245,10 @@ impl<Ctx> Decode<Ctx> for AttrLeafblock {
         for e in entries.iter() {
             let ofs = usize::from(e.nameidx);
             if e.flags & constants::XFS_ATTR_LOCAL != 0 {
-                let local = bincode::decode_from_slice(&raw[ofs..], *config)?.0;
+                let local = bincode_next::decode_from_slice(&raw[ofs..], *config)?.0;
                 names.push(AttrLeafName::Local(local));
             } else {
-                let remote = bincode::decode_from_slice(&raw[ofs..], *config)?.0;
+                let remote = bincode_next::decode_from_slice(&raw[ofs..], *config)?.0;
                 names.push(AttrLeafName::Remote(remote));
             }
         }
