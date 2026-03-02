@@ -31,7 +31,7 @@ use std::{
     io::{BufRead, Seek, SeekFrom},
 };
 
-use bincode::{de::read::Reader, Decode};
+use bincode_next::{de::read::Reader, Decode};
 use fuser::FileType;
 use libc::{c_int, ENOENT};
 

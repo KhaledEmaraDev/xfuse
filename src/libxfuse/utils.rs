@@ -25,7 +25,7 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use bincode::{
+use bincode_next::{
     de::{read::Reader, Decoder},
     error::DecodeError,
     impl_borrow_decode,
@@ -73,7 +73,7 @@ impl Uuid {
     }
 }
 
-impl<Ctx> bincode::Decode<Ctx> for Uuid {
+impl<Ctx> bincode_next::Decode<Ctx> for Uuid {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         <[u8; 16]>::decode(decoder).map(|v| Uuid(uuid::Uuid::from_bytes(v)))
     }
@@ -121,10 +121,10 @@ pub fn decode<T>(bytes: &[u8]) -> Result<(T, usize), DecodeError>
 where
     T: Decode<()>,
 {
-    let config = bincode::config::standard()
+    let config = bincode_next::config::standard()
         .with_big_endian()
         .with_fixed_int_encoding();
-    bincode::decode_from_slice(bytes, config)
+    bincode_next::decode_from_slice(bytes, config)
 }
 
 /// Decode a Bincode structure from a Reader
@@ -133,8 +133,8 @@ where
     T: Decode<()>,
     R: Reader,
 {
-    let config = bincode::config::standard()
+    let config = bincode_next::config::standard()
         .with_big_endian()
         .with_fixed_int_encoding();
-    bincode::decode_from_reader(r, config)
+    bincode_next::decode_from_reader(r, config)
 }

@@ -31,7 +31,7 @@ use std::{
     os::unix::ffi::OsStringExt,
 };
 
-use bincode::{
+use bincode_next::{
     de::{read::Reader, Decoder},
     error::DecodeError,
     Decode,

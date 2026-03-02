@@ -30,7 +30,7 @@ use std::{
     io::{BufRead, Seek, SeekFrom},
 };
 
-use bincode::{
+use bincode_next::{
     de::{read::Reader, Decoder},
     Decode,
 };
@@ -86,7 +86,7 @@ pub struct Dinode {
 }
 
 impl Dinode {
-    pub fn from<R: bincode::de::read::Reader + BufRead + Seek>(
+    pub fn from<R: bincode_next::de::read::Reader + BufRead + Seek>(
         buf_reader: &mut R,
         superblock: &Sb,
         inode_number: XfsIno,
@@ -107,11 +107,11 @@ impl Dinode {
         buf_reader.seek(SeekFrom::Start(off)).unwrap();
         let mut raw = vec![0u8; superblock.inode_size()];
         buf_reader.read_exact(&mut raw).unwrap();
-        let config = bincode::config::standard()
+        let config = bincode_next::config::standard()
             .with_big_endian()
             .with_fixed_int_encoding();
-        let reader = bincode::de::read::SliceReader::new(&raw[..]);
-        let mut decoder = bincode::de::DecoderImpl::new(reader, config, ());
+        let reader = bincode_next::de::read::SliceReader::new(&raw[..]);
+        let mut decoder = bincode_next::de::DecoderImpl::new(reader, config, ());
 
         let di_core = DinodeCore::decode(&mut decoder).unwrap();
 
@@ -211,11 +211,11 @@ impl Dinode {
         let di_a: Option<DiA>;
         if di_core.di_forkoff != 0 {
             let attr_fork_ofs = di_core.literal_area_offset() + di_core.di_forkoff as usize * 8;
-            let config = bincode::config::standard()
+            let config = bincode_next::config::standard()
                 .with_big_endian()
                 .with_fixed_int_encoding();
-            let reader = bincode::de::read::SliceReader::new(&raw[attr_fork_ofs..]);
-            let mut decoder = bincode::de::DecoderImpl::new(reader, config, ());
+            let reader = bincode_next::de::read::SliceReader::new(&raw[attr_fork_ofs..]);
+            let mut decoder = bincode_next::de::DecoderImpl::new(reader, config, ());
 
             match di_core.di_aformat {
                 XfsDinodeFmt::Local => {
@@ -263,7 +263,7 @@ impl Dinode {
         }
     }
 
-    pub fn get_dir<R: bincode::de::read::Reader + BufRead + Seek>(
+    pub fn get_dir<R: bincode_next::de::read::Reader + BufRead + Seek>(
         &mut self,
         buf_reader: &mut R,
         sb: &Sb,
@@ -297,7 +297,7 @@ impl Dinode {
         self.directory.as_ref().unwrap()
     }
 
-    pub fn get_file<R: bincode::de::read::Reader + BufRead + Seek>(
+    pub fn get_file<R: bincode_next::de::read::Reader + BufRead + Seek>(
         &self,
         _buf_reader: &mut R,
     ) -> Box<dyn File<R>> {

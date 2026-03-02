@@ -33,7 +33,7 @@ use std::{
     io::{BufRead, Seek, SeekFrom},
 };
 
-use bincode::de::read::Reader;
+use bincode_next::de::read::Reader;
 
 use super::{
     attr::{Attr, AttrLeafblock},
