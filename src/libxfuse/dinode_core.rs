@@ -169,13 +169,13 @@ impl DinodeCore {
         // about where the pointers are located.  They appear to be halfway between the start of
         // the attribute fork and the end of the inode, modulo some rounding.
         let mut already = BmdrBlock::SIZE + bb_numrecs as usize * BmbtKey::SIZE;
-        if already % 8 > 0 {
+        if !already.is_multiple_of(8) {
             already += 8 - already % 8
         }
         let mut attr_fork_ofs = self.literal_area_offset() + self.di_forkoff as usize * 8;
         attr_fork_ofs -= attr_fork_ofs % 8;
         let mut ptr_ofs = (inode_size - attr_fork_ofs) / 2 + attr_fork_ofs;
-        if ptr_ofs % 8 > 0 {
+        if !ptr_ofs.is_multiple_of(8) {
             ptr_ofs += 8 - ptr_ofs % 8
         }
         ptr_ofs - attr_fork_ofs - already

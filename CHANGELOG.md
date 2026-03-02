@@ -5,8 +5,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased] - ReleaseDate
 
+### Fixed
+
 - Switch from `bincode` to `bincode-next`, as the former is no longer
-  maintained.
+  maintained.  This also raises MSRV to 1.90.0.
   ([#180](https://github.com/KhaledEmaraDev/xfuse/issues/180))
 
 ## [0.5.1] - 2025-09-24
