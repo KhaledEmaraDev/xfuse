@@ -472,9 +472,33 @@ mkfs_4kn() {
 	zstd -f resources/xfs_4kn.img
 }
 
+mkfs_nrext64() {
+	truncate -s 512m resources/xfs_nrext64.img
+	# Create a disk image with the Large Extent Counter feature.  Use 1k
+	# block size too, to increase the number of extents.
+	mkfs.xfs --unsupported -b size=1024 -i nrext64=1 -f resources/xfs_nrext64.img
+	MNTDIR=`mktemp -d`
+	mount -t xfs resources/xfs_nrext64.img $MNTDIR
+
+	# Create a file with 65536 attribute extents.  That's impossible without nrext64.
+	mkdir ${MNTDIR}/xattrs
+	mkattrs2 ${MNTDIR}/xattrs/giant 65536
+
+	# We can't exceed the non-nrext64 data fork extent limit with a file of
+	# less than a terabyte.  That's too big for this test suite, so don't
+	# bother.  Just create a file with a few data extents as a smoke check.
+	mkdir ${MNTDIR}/files
+	write_fragmented_file ${MNTDIR}/files/four_extents.txt 4096 4
+
+	umount ${MNTDIR}
+	rmdir $MNTDIR
+	zstd -f resources/xfs_nrext64.img
+}
+
 mkfs_4096
 mkfs_512
 mkfs_v4
 mkfs_preallocated
 mkfs_noftype
 mkfs_4kn
+mkfs_nrext64

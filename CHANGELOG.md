@@ -5,6 +5,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- Added support for the Large Extent Counts feature.
+  ([#181](https://github.com/KhaledEmaraDev/xfuse/issues/181))
+
 ### Fixed
 
 - Switch from `bincode` to `bincode-next`, as the former is no longer

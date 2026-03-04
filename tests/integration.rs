@@ -32,7 +32,16 @@ use rstest_reuse::{self, apply, template};
 use tempfile::{tempdir, TempDir};
 
 mod util;
-use util::{waitfor, GOLDEN1K, GOLDEN4K, GOLDEN4KN, GOLDENPREALLOCATED, GOLDENV4, GOLDEN_NOFTYPE};
+use util::{
+    waitfor,
+    GOLDEN1K,
+    GOLDEN4K,
+    GOLDEN4KN,
+    GOLDENPREALLOCATED,
+    GOLDENV4,
+    GOLDEN_NOFTYPE,
+    GOLDEN_NREXT64,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 struct ExpectedXattr {
@@ -66,6 +75,7 @@ fn local_attrs_per_file(f: &str) -> usize {
         "xattrs/btree3" => 0,
         "btree2.with-xattrs" => 1,
         "xattrs/extents4" => 0,
+        "xattrs/giant" => 0,
         _ => unimplemented!(),
     }
 }
@@ -80,6 +90,7 @@ fn remote_attrs_per_file(f: &str) -> usize {
         "xattrs/btree3" => 512,
         "btree2.with-xattrs" => 0,
         "xattrs/extents4" => 16,
+        "xattrs/giant" => 65536,
         _ => unimplemented!(),
     }
 }
@@ -181,6 +192,11 @@ fn harness_noftype() -> Harness {
     harness(GOLDEN_NOFTYPE.as_path())
 }
 
+#[fixture]
+fn harness_nrext64() -> Harness {
+    harness(GOLDEN_NREXT64.as_path())
+}
+
 impl Drop for Harness {
     #[allow(clippy::if_same_then_else)]
     fn drop(&mut self) {
@@ -268,6 +284,7 @@ fn all_dir_types_shortnames(h: fn() -> Harness, d: &str) {}
 #[case::v4_extents(harnessv4, "xattrs/extents")]
 #[case::four4kn_local(harness4kn, "xattrs/local")]
 #[case::four4kn_extents(harness4kn, "xattrs/extents4")]
+#[case::giant_nrext64(harness_nrext64, "xattrs/giant")]
 fn all_xattr_fork_types(h: fn() -> Harness, d: &str) {}
 
 #[template]
@@ -382,6 +399,7 @@ mod dev {
     #[case::onek(GOLDEN1K.as_path(), 512)]
     #[case::v4(GOLDENV4.as_path(), 512)]
     #[case::no_ftype(GOLDEN_NOFTYPE.as_path(), 512)]
+    #[case::no_nrext64(GOLDEN_NREXT64.as_path(), 512)]
     #[case::preallocated(GOLDENPREALLOCATED.as_path(), 512)]
     fn metadata(#[case] image: &Path, #[case] sectorsize: u32) {
         require_fusefs!();
@@ -409,6 +427,7 @@ mod dev {
     #[case::single_extent(GOLDEN4K.as_path(), 512, "single_extent.txt", 4096)]
     #[case::four_extents(GOLDEN4K.as_path(), 512, "four_extents.txt", 16384)]
     #[case::two_height_btree(GOLDEN4K.as_path(), 512, "btree2.txt", 65536)]
+    #[case::nrext64(GOLDEN_NREXT64.as_path(), 512, "four_extents.txt", 16384)]
     fn data(
         #[case] image: &Path,
         #[case] sectorsize: u32,
@@ -1112,6 +1131,7 @@ mod read {
     #[case::reflink_a(harness4k, "reflink_a.txt", 16384)]
     #[case::reflink_b(harness4k, "reflink_b.txt", 16384)]
     #[case::reflink_partial(harness4k, "reflink_partial.txt", 16384)]
+    #[case::nrext64(harness_nrext64, "four_extents.txt", 16384)]
     fn all_files(h: fn() -> Harness, d: &str) {}
 
     /// Attempting to read across eof should return the correct amount of data

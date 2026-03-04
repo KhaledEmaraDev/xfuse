@@ -85,37 +85,40 @@ mod constants {
     pub const XFS_DIFLAG_FILESTREAMS: u16 = 1 << 14;
 
     pub const XFS_DIFLAG2_BIGTIME: u64 = 1 << 3;
+    pub const XFS_DIFLAG2_NREXT64: u64 = 1 << 4;
 }
 
 #[derive(Debug)]
 #[cfg_attr(test, derive(Default))]
 pub struct DinodeCore {
     //_di_magic: u16,
-    pub di_mode:      u16,
-    pub di_version:   i8,
-    pub di_format:    XfsDinodeFmt,
+    pub di_mode:    u16,
+    pub di_version: i8,
+    pub di_format:  XfsDinodeFmt,
     //_di_onlink: u16,
-    pub di_uid:       u32,
-    pub di_gid:       u32,
-    pub di_nlink:     u32,
+    pub di_uid:     u32,
+    pub di_gid:     u32,
+    pub di_nlink:   u32,
     //_di_projid: u16,
     //_di_projid_hi: u16,
     //_di_pad: [u8; 6],
     //_di_flushiter: u16,
-    pub di_atime:     XfsTimestamp,
-    pub di_mtime:     XfsTimestamp,
-    pub di_ctime:     XfsTimestamp,
-    pub di_size:      XfsFsize,
-    pub di_nblocks:   XfsRfsblock,
+    pub di_atime:   XfsTimestamp,
+    pub di_mtime:   XfsTimestamp,
+    pub di_ctime:   XfsTimestamp,
+    pub di_size:    XfsFsize,
+    pub di_nblocks: XfsRfsblock,
     //_di_extsize: XfsExtlen,
-    pub di_nextents:  XfsExtnum,
-    pub di_anextents: XfsAextnum,
-    pub di_forkoff:   u8,
-    pub di_aformat:   XfsDinodeFmt,
+    /// Number of extents in the data fork
+    pub nextents:   u64,
+    /// Number of extents in the attr fork
+    pub anextents:  u32,
+    pub di_forkoff: u8,
+    pub di_aformat: XfsDinodeFmt,
     //_di_dmevmask: u32,
     //_di_dmstate: u16,
     //_di_flags: u16,
-    pub di_gen:       u32,
+    pub di_gen:     u32,
 
     //_di_next_unlinked: u32,
 
@@ -236,6 +239,8 @@ impl<Ctx> Decode<Ctx> for DinodeCore {
         let mut di_flags2 = 0;
         let mut di_crtime: XfsTimestamp = Default::default();
         let mut di_ino = 0;
+        let nextents;
+        let anextents;
 
         let di_magic: u16 = Decode::decode(decoder)?;
         assert_eq!(di_magic, XFS_DINODE_MAGIC, "Inode magic number is invalid");
@@ -252,16 +257,15 @@ impl<Ctx> Decode<Ctx> for DinodeCore {
         let di_nlink: u32 = Decode::decode(decoder)?;
         let _di_projid: u16 = Decode::decode(decoder)?;
         let _di_projid_hi: u16 = Decode::decode(decoder)?;
-        let _di_pad: [u8; 6] = Decode::decode(decoder)?;
-        let _di_flushiter: u16 = Decode::decode(decoder)?;
+        let di_maybe_big_nextents: u64 = Decode::decode(decoder)?;
         let di_atime: XfsTimestamp = Decode::decode(decoder)?;
         let di_mtime: XfsTimestamp = Decode::decode(decoder)?;
         let di_ctime: XfsTimestamp = Decode::decode(decoder)?;
         let di_size: XfsFsize = Decode::decode(decoder)?;
         let di_nblocks: XfsRfsblock = Decode::decode(decoder)?;
         let _di_extsize: XfsExtlen = Decode::decode(decoder)?;
-        let di_nextents: XfsExtnum = Decode::decode(decoder)?;
-        let di_anextents: XfsAextnum = Decode::decode(decoder)?;
+        let di_maybe_big_anextents: u32 = Decode::decode(decoder)?;
+        let di_maybe_anextents: u16 = Decode::decode(decoder)?;
         let di_forkoff: u8 = Decode::decode(decoder)?;
         let di_aformat: XfsDinodeFmt = Decode::decode(decoder)?;
         let _di_dmevmask: u32 = Decode::decode(decoder)?;
@@ -279,6 +283,16 @@ impl<Ctx> Decode<Ctx> for DinodeCore {
             di_crtime = Decode::decode(decoder)?;
             di_ino = Decode::decode(decoder)?;
             let _di_uuid: Uuid = Decode::decode(decoder)?;
+            if di_flags2 & constants::XFS_DIFLAG2_NREXT64 != 0 {
+                nextents = di_maybe_big_nextents;
+                anextents = di_maybe_big_anextents;
+            } else {
+                nextents = u64::from(di_maybe_big_anextents);
+                anextents = u32::from(di_maybe_anextents);
+            }
+        } else {
+            nextents = u64::from(di_maybe_big_anextents);
+            anextents = u32::from(di_maybe_anextents);
         }
 
         Ok(DinodeCore {
@@ -293,8 +307,8 @@ impl<Ctx> Decode<Ctx> for DinodeCore {
             di_ctime,
             di_size,
             di_nblocks,
-            di_nextents,
-            di_anextents,
+            nextents,
+            anextents,
             di_forkoff,
             di_aformat,
             di_gen,

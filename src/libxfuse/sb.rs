@@ -131,7 +131,7 @@ impl SbFeaturesIncompat {
         self.contains(SbFeaturesIncompat::MetaUuid)
     }
 
-    // This is redundant with information in DinodeCore.di_flags22
+    // This is redundant with information in DinodeCore.di_flags2
     //pub const fn bigtime(&self) -> bool {
     //    self.contains(SbFeaturesIncompat::Bigtime)
     //}
@@ -140,9 +140,10 @@ impl SbFeaturesIncompat {
         self.contains(SbFeaturesIncompat::NeedsRepair)
     }
 
-    pub const fn large_extent_counters(&self) -> bool {
-        self.contains(SbFeaturesIncompat::NrExt64)
-    }
+    // This is redundant with information in DinodeCore.di_flags2
+    //pub const fn large_extent_counters(&self) -> bool {
+    //    self.contains(SbFeaturesIncompat::NrExt64)
+    //}
 }
 
 bitflags! {
@@ -313,9 +314,6 @@ impl Sb {
         }
         if sb_features_incompat.needs_repair() {
             panic!("The NeedsRepair feature is not supported");
-        }
-        if sb_features_incompat.large_extent_counters() {
-            panic!("The Large Extent Counters feature is not supported");
         }
 
         Sb {
