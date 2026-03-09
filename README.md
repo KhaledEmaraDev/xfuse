@@ -1,10 +1,22 @@
 # An XFS FUSE server
 
 [![Cirrus Build Status](https://api.cirrus-ci.com/github/KhaledEmaraDev/xfuse.svg)](https://cirrus-ci.com/github/KhaledEmaraDev/xfuse)
-[![crates.io](https://meritbadge.herokuapp.com/xfuse)](https://crates.io/crates/xfuse)
+[![Crates.io](https://img.shields.io/crates/v/xfs-fuse.svg)](https://crates.io/crates/xfs-fuse)
+
 
 A read-only XFS implementation using FUSE, written for GSoC 2021.
 
+## Building from source
+```sh
+$ git clone https://github.com/KhaledEmaraDev/xfuse
+$ cd xfuse
+$ cargo build
+```
+
+## Example Usage
+```sh
+$ xfs-fuse /dev/sdb1 /mnt
+```
 
 ## Golden Image
 
