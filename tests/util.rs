@@ -104,6 +104,8 @@ pub static GOLDENPREALLOCATED: LazyLock<PathBuf> =
 pub static GOLDENV4: LazyLock<PathBuf> = LazyLock::new(|| prepare_image("xfsv4.img"));
 #[allow(unused)] // Not used by benches
 pub static GOLDEN_NOFTYPE: LazyLock<PathBuf> = LazyLock::new(|| prepare_image("xfs_noftype.img"));
+#[allow(unused)] // Not used by benches
+pub static GOLDEN_NREXT64: LazyLock<PathBuf> = LazyLock::new(|| prepare_image("xfs_nrext64.img"));
 
 #[derive(Clone, Copy, Debug)]
 pub struct WaitForError;

@@ -120,7 +120,7 @@ impl Dinode {
             S_IFREG => match di_core.di_format {
                 XfsDinodeFmt::Extents => {
                     let mut bmx = Vec::<BmbtRec>::new();
-                    for _i in 0..di_core.di_nextents {
+                    for _i in 0..di_core.nextents {
                         bmx.push(BmbtRec::decode(&mut decoder).unwrap())
                     }
                     di_u = Some(DiU::Bmx(bmx));
@@ -156,7 +156,7 @@ impl Dinode {
                 }
                 XfsDinodeFmt::Extents => {
                     let mut bmx = Vec::<BmbtRec>::new();
-                    for _i in 0..di_core.di_nextents {
+                    for _i in 0..di_core.nextents {
                         bmx.push(BmbtRec::decode(&mut decoder).unwrap())
                     }
                     di_u = Some(DiU::Bmx(bmx));
@@ -192,7 +192,7 @@ impl Dinode {
                 }
                 XfsDinodeFmt::Extents => {
                     let mut bmx = Vec::<BmbtRec>::new();
-                    for _i in 0..di_core.di_nextents {
+                    for _i in 0..di_core.nextents {
                         bmx.push(BmbtRec::decode(&mut decoder).unwrap());
                     }
                     di_u = Some(DiU::Bmx(bmx));
@@ -224,7 +224,7 @@ impl Dinode {
                 }
                 XfsDinodeFmt::Extents => {
                     let mut bmx = Vec::<BmbtRec>::new();
-                    for _i in 0..di_core.di_anextents {
+                    for _i in 0..di_core.anextents {
                         bmx.push(BmbtRec::decode(&mut decoder).unwrap());
                     }
                     di_a = Some(DiA::Abmx(bmx));
@@ -340,7 +340,7 @@ impl Dinode {
             self.attributes = match &self.di_a {
                 Some(DiA::Attrsf(attr)) => Some(Attributes::Sf(attr.clone())),
                 Some(DiA::Abmx(bmbtv)) => {
-                    if self.di_core.di_anextents > 0 {
+                    if self.di_core.anextents > 0 {
                         Some(crate::libxfuse::attr::open(
                             buf_reader.by_ref(),
                             superblock,
