@@ -10,7 +10,7 @@ task:
       env:
         VERSION: 1.90.0
       freebsd_instance:
-        image: freebsd-14-3-release-amd64-ufs
+        image: freebsd-14-4-release-amd64-ufs
     - name: FreeBSD nightly
       env:
         VERSION: nightly
