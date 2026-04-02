@@ -15,12 +15,6 @@ use std::{
     time::Duration,
 };
 
-// See https://github.com/assert-rs/assert_cmd/issues/258
-#[expect(
-    deprecated,
-    reason = "cargo_bin is deprecated, but cargo_bin! is not, and clippy does not differentiate \
-              between them."
-)]
 use assert_cmd::cargo::cargo_bin;
 use function_name::named;
 use nix::{
