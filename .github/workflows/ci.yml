@@ -38,26 +38,22 @@ jobs:
         shell: freebsd {0}
         run: |
           . $HOME/.cargo/env
-          cd $GITHUB_WORKSPACE
           cargo build --all-targets
       - name: Test
         shell: freebsd {0}
         run: |
           . $HOME/.cargo/env
-          cd $GITHUB_WORKSPACE
           cargo test
       - name: Benchmark
         shell: freebsd {0}
         run: |
           . $HOME/.cargo/env
-          cd $GITHUB_WORKSPACE
           cargo test --bench read-amplification
       - name: Clippy
         if: matrix.rust_version == 'nightly'
         shell: freebsd {0}
         run: |
           . $HOME/.cargo/env
-          cd $GITHUB_WORKSPACE
           rustup component add clippy
           cargo clippy --all-targets -- -D warnings
       - name: Audit
@@ -65,7 +61,6 @@ jobs:
         shell: freebsd {0}
         run: |
           . $HOME/.cargo/env
-          cd $GITHUB_WORKSPACE
           pkg install -y cargo-audit
           cargo audit
       - name: Minver
@@ -73,7 +68,6 @@ jobs:
         shell: freebsd {0}
         run: |
           . $HOME/.cargo/env
-          cd $GITHUB_WORKSPACE
           cargo update -Zdirect-minimal-versions
           cargo check --all-targets
       - name: Fmt
@@ -81,6 +75,5 @@ jobs:
         shell: freebsd {0}
         run: |
           . $HOME/.cargo/env
-          cd $GITHUB_WORKSPACE
           rustup component add rustfmt
           cargo fmt -- --check --color=never
