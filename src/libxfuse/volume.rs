@@ -389,7 +389,7 @@ impl Filesystem for Volume {
                 Err(e) => reply.error(e),
             },
             None => {
-                reply.error(libc::ENOATTR);
+                reply.error(crate::libxfuse::ENOATTR);
             }
         }
     }

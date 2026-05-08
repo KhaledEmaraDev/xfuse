@@ -142,7 +142,7 @@ impl AttrBtree {
         self.btree
             .map_block(buf_reader, logical_block.into())?
             .0
-            .ok_or(libc::ENOATTR)
+            .ok_or(crate::libxfuse::ENOATTR)
     }
 
     /// Read the AttrLeafblock located at the given directory block number
@@ -240,7 +240,13 @@ impl Attr for AttrBtree {
             .lookup(buf_reader.by_ref(), super_block, hash, |block, reader| {
                 self.map_dblock(reader.by_ref(), block).unwrap()
             })
-            .map_err(|e| if e == libc::ENOENT { libc::ENOATTR } else { e })?;
+            .map_err(|e| {
+                if e == libc::ENOENT {
+                    crate::libxfuse::ENOATTR
+                } else {
+                    e
+                }
+            })?;
         let mut leaf = self.read_leaf(buf_reader.by_ref(), super_block, dablk)?;
 
         leaf.get(buf_reader.by_ref(), hash, |block, reader| {

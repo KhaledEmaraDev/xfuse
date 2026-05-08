@@ -157,7 +157,13 @@ impl Attr for AttrNode {
             .lookup(buf_reader.by_ref(), super_block, hash, |block, _| {
                 self.map_dblock(block)
             })
-            .map_err(|e| if e == libc::ENOENT { libc::ENOATTR } else { e })?;
+            .map_err(|e| {
+                if e == libc::ENOENT {
+                    crate::libxfuse::ENOATTR
+                } else {
+                    e
+                }
+            })?;
         let mut leaf = self.read_leaf(buf_reader.by_ref(), super_block, dablk)?;
 
         leaf.get(buf_reader.by_ref(), hash, |block, _| self.map_dblock(block))
