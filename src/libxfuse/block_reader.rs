@@ -34,14 +34,29 @@ use std::{
 
 use bincode_next::{de::read::Reader, error::DecodeError};
 use cfg_if::cfg_if;
+use tracing::warn;
 
 #[cfg(target_os = "freebsd")]
 mod ffi {
+    nix::ioctl_read! {
+        /// get the size of the entire device in bytes.  this should be a multiple of the sector
+        /// size.
+        diocgmediasize, 'd', 129, nix::libc::off_t
+    }
+
     nix::ioctl_read! {
         /// Get the sector size of the device in bytes.  The sector size is the smallest unit of
         /// data which can be transferred from this device.  Usually this is a power of 2 but it
         /// might not be (i.e. CDROM audio).
         diocgsectorsize, b'd', 128, u32
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod ffi {
+    nix::ioctl_read! {
+        /// Get the size of the entire device in bytes.
+        blkgetsize64, 0x12, 114, u64
     }
 }
 
@@ -52,9 +67,45 @@ pub struct BlockReader {
     idx:        usize,
     /// The absolute minimum that we can read in any operation
     sectorsize: usize,
+    /// File's size in bytes.  It should not change while mounted.
+    pub size:   u64,
 }
 
 impl BlockReader {
+    fn mediasize(f: &File) -> u64 {
+        use std::os::{fd::AsRawFd, unix::fs::FileTypeExt};
+
+        let md = f.metadata().unwrap();
+        let ft = md.file_type();
+        if ft.is_block_device() || ft.is_char_device() {
+            cfg_if! {
+                if #[cfg(target_os = "freebsd")] {
+                    let mut mediasize = std::mem::MaybeUninit::<i64>::uninit();
+                    unsafe {
+                        // This ioctl is always safe
+                        ffi::diocgmediasize(f.as_raw_fd(), mediasize.as_mut_ptr()).unwrap();
+                        mediasize.assume_init() as u64
+                    }
+                } else if #[cfg(target_os = "linux")] {
+                    let mut mediasize = std::mem::MaybeUninit::<u64>::uninit();
+                    unsafe {
+                        // This ioctl is always safe
+                        ffi::blkgetsize64(f.as_raw_fd(), mediasize.as_mut_ptr()).unwrap();
+                        mediasize.assume_init()
+                    }
+                } else {
+                    warn!("No mediasize ioctl is supported on this operating system");
+                    0
+                }
+            }
+        } else if ft.is_file() {
+            md.size()
+        } else {
+            warn!("Trying to use a {:?} as a real-time device", ft);
+            0
+        }
+    }
+
     fn sectorsize(f: &File) -> usize {
         let md = f.metadata().unwrap();
         cfg_if! {
@@ -82,12 +133,14 @@ impl BlockReader {
         let file = File::options().read(true).write(false).open(path)?;
 
         let sectorsize = Self::sectorsize(&file);
+        let size = Self::mediasize(&file);
         let block = vec![0u8; sectorsize];
         Ok(Self {
             file,
             block,
             idx: sectorsize,
             sectorsize,
+            size,
         })
     }
 

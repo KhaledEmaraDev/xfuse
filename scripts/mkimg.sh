@@ -1,6 +1,6 @@
 #! /bin/sh -e
 
-# Recreate the golden image used for the integration tests
+# Recreate the golden images used for the integration tests
 
 mkfiles() {
 	DIR=$1
@@ -495,6 +495,44 @@ mkfs_nrext64() {
 	zstd -f resources/xfs_nrext64.img
 }
 
+mkfs_realtime() {
+	# Create a V5 image with a realtime device
+	rm -f resources/xfs_rt1.img resources/xfs_rt2.img
+	truncate -s 64m resources/xfs_rt1.img
+	truncate -s 64m resources/xfs_rt2.img
+	# To get good coverage of the realtime code requires agsize not be a power of two.
+	mkfs.xfs --unsupported -b size=4096 -d agsize=17m -r rtdev=resources/xfs_rt2.img -r extsize=4096 resources/xfs_rt1.img
+	MNTDIR=`mktemp -d`
+	LOOP0=`losetup -fP --show resources/xfs_rt1.img`
+	LOOP1=`losetup -fP --show resources/xfs_rt2.img`
+	mount -t xfs -o rtdev="$LOOP1" "$LOOP0" "$MNTDIR"
+
+	mkdir ${MNTDIR}/files
+
+	# Now create a file with data.  To get good coverage of the realtime
+	# code requires blocks in two or more allocation groups.  Realtime
+	# allocation is sequential, so we must allocate more data than
+	# 1<<sb_agblocklog .  Let's allocate 32MiB+4096
+	TEMPFILE=`mktemp /tmp/xfs_contents.XXXXXX`
+	write_sequential_file $TEMPFILE 33558528
+	# Fill most of the file with zeros, so it will compress well.
+	dd if=/dev/zero of=$TEMPFILE oseek=1 bs=4096 count=8190 conv=notrunc
+	# Use xfs_io -R to force the file to be stored on the real-time device.
+	xfs_io -Rf -c "pwrite -i $TEMPFILE 0 33558528" ${MNTDIR}/files/rtfile.txt
+
+	# Now write a file sufficiently fragment to use a btree
+	FRAGFILE=${MNTDIR}/files/btree2.txt
+	xfs_io -Rft -c "open" ${FRAGFILE}
+	write_fragmented_file ${FRAGFILE} 4096 64
+
+	umount ${MNTDIR}
+	losetup -d "${LOOP0}"
+	losetup -d "${LOOP1}"
+	rmdir $MNTDIR
+	zstd -f resources/xfs_rt1.img
+	zstd -f resources/xfs_rt2.img
+}
+
 mkfs_4096
 mkfs_512
 mkfs_v4
@@ -502,3 +540,4 @@ mkfs_preallocated
 mkfs_noftype
 mkfs_4kn
 mkfs_nrext64
+mkfs_realtime

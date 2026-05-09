@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] - ReleaseDate
+
+### Added
+
+- Added support for XFS real-time devices.
+  ([#189](https://github.com/KhaledEmaraDev/xfuse/issues/189))
+
 ## [0.6.0] - 2026-03-09
 
 ### Added

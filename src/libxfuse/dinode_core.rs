@@ -117,7 +117,7 @@ pub struct DinodeCore {
     pub di_aformat: XfsDinodeFmt,
     //_di_dmevmask: u32,
     //_di_dmstate: u16,
-    //_di_flags: u16,
+    pub di_flags:   u16,
     pub di_gen:     u32,
 
     //_di_next_unlinked: u32,
@@ -190,6 +190,11 @@ impl DinodeCore {
             3 => 0xb0,
             _ => unreachable!(),
         }
+    }
+
+    /// Is the inode's data located on a real-time device?
+    pub fn is_realtime(&self) -> bool {
+        (self.di_flags & constants::XFS_DIFLAG_REALTIME) != 0
     }
 
     pub fn stat(&self, ino: XfsIno) -> Result<FileAttr, c_int> {
@@ -270,7 +275,7 @@ impl<Ctx> Decode<Ctx> for DinodeCore {
         let di_aformat: XfsDinodeFmt = Decode::decode(decoder)?;
         let _di_dmevmask: u32 = Decode::decode(decoder)?;
         let _di_dmstate: u16 = Decode::decode(decoder)?;
-        let _di_flags: u16 = Decode::decode(decoder)?;
+        let di_flags: u16 = Decode::decode(decoder)?;
         let di_gen: u32 = Decode::decode(decoder)?;
         let _di_next_unlinked: u32 = Decode::decode(decoder)?;
         if di_version >= 3 {
@@ -311,6 +316,7 @@ impl<Ctx> Decode<Ctx> for DinodeCore {
             anextents,
             di_forkoff,
             di_aformat,
+            di_flags,
             di_gen,
             di_flags2,
             di_crtime,

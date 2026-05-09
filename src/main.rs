@@ -67,28 +67,35 @@ fn main() {
         opts.push(MountOption::AllowOther);
         opts.push(MountOption::DefaultPermissions);
     }
+    let mut rtdev: Option<PathBuf> = None;
     for o in app.options.iter() {
-        opts.push(match o.as_str() {
-            "auto_unmount" => MountOption::AutoUnmount,
-            "allow_other" => MountOption::AllowOther,
-            "allow_root" => MountOption::AllowRoot,
-            "default_permissions" => MountOption::DefaultPermissions,
-            "dev" => MountOption::Dev,
-            "nodev" => MountOption::NoDev,
-            "suid" => MountOption::Suid,
-            "nosuid" => MountOption::NoSuid,
-            "exec" => MountOption::Exec,
-            "noexec" => MountOption::NoExec,
-            "atime" => MountOption::Atime,
-            "noatime" => MountOption::NoAtime,
-            "dirsync" => MountOption::DirSync,
-            "sync" => MountOption::Sync,
-            "async" => MountOption::Async,
-            custom => MountOption::CUSTOM(custom.to_string()),
-        });
+        if let Some((lhs, rhs)) = o.split_once('=') {
+            if lhs == "rtdev" {
+                rtdev = Some(PathBuf::from(rhs))
+            }
+        } else {
+            opts.push(match o.as_str() {
+                "auto_unmount" => MountOption::AutoUnmount,
+                "allow_other" => MountOption::AllowOther,
+                "allow_root" => MountOption::AllowRoot,
+                "default_permissions" => MountOption::DefaultPermissions,
+                "dev" => MountOption::Dev,
+                "nodev" => MountOption::NoDev,
+                "suid" => MountOption::Suid,
+                "nosuid" => MountOption::NoSuid,
+                "exec" => MountOption::Exec,
+                "noexec" => MountOption::NoExec,
+                "atime" => MountOption::Atime,
+                "noatime" => MountOption::NoAtime,
+                "dirsync" => MountOption::DirSync,
+                "sync" => MountOption::Sync,
+                "async" => MountOption::Async,
+                custom => MountOption::CUSTOM(custom.to_string()),
+            });
+        }
     }
 
-    let vol = Volume::from(&app.device);
+    let vol = Volume::new(&app.device, rtdev.as_ref());
 
     if !app.foreground {
         daemon(false, false).unwrap();
