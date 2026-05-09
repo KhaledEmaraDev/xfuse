@@ -363,4 +363,9 @@ impl Dinode {
         }
         &mut self.attributes
     }
+
+    /// Is the inode's data located on a real-time device?
+    pub fn is_realtime(&self) -> bool {
+        self.di_core.is_realtime()
+    }
 }

@@ -30,7 +30,7 @@ use std::{
     ffi::OsStr,
     io::Read,
     os::unix::ffi::OsStrExt,
-    path::Path,
+    path::{Path, PathBuf},
     sync::OnceLock,
     time::Duration,
 };
@@ -81,8 +81,9 @@ struct OpenInode {
 
 #[derive(Debug)]
 pub struct Volume {
-    device: BlockReader,
-    sb:     Sb,
+    device:     BlockReader,
+    rt_device:  Option<BlockReader>,
+    sb:         Sb,
     open_files: HashMap<u64, OpenInode>,
     no_open:    bool,
     no_opendir: bool,
@@ -93,8 +94,9 @@ impl Volume {
     // of time, since nothing will ever change.
     const TTL: Duration = Duration::from_secs(u64::MAX);
 
-    pub fn from(device_name: &Path) -> Volume {
+    pub fn new(device_name: &Path, rt_device_name: Option<&PathBuf>) -> Volume {
         let mut device = BlockReader::open(device_name).unwrap();
+        let rt_device = rt_device_name.map(|n| BlockReader::open(n).unwrap());
 
         let superblock = Sb::from(device.by_ref());
         SUPERBLOCK.set(superblock).unwrap();
@@ -112,6 +114,7 @@ impl Volume {
 
         Volume {
             device,
+            rt_device,
             sb: superblock,
             open_files,
             no_open: false,
@@ -272,7 +275,18 @@ impl Filesystem for Volume {
 
         let file = oi.dinode.get_file(self.device.by_ref());
 
-        match file.read(self.device.by_ref(), offset, size) {
+        let br = if oi.dinode.is_realtime() {
+            if let Some(rtd) = &mut self.rt_device {
+                rtd.by_ref()
+            } else {
+                warn!("Realtime device not mounted");
+                reply.error(libc::EIO);
+                return;
+            }
+        } else {
+            self.device.by_ref()
+        };
+        match file.read(br, offset, size) {
             Ok((v, ignore)) => reply.data(&v[ignore..]),
             Err(e) => reply.error(e),
         }

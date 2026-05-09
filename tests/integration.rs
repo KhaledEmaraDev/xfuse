@@ -35,6 +35,8 @@ use util::{
     GOLDENV4,
     GOLDEN_NOFTYPE,
     GOLDEN_NREXT64,
+    GOLDEN_RT1,
+    GOLDEN_RT2,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -134,14 +136,13 @@ struct Harness {
     path:  PathBuf,
 }
 
-fn harness(img: &Path) -> Harness {
+fn harness(img: &Path, rtimg: Option<&Path>) -> Harness {
     let d = tempdir().unwrap();
-    let child = Command::new(cargo_bin!("xfs-fuse"))
-        .arg("-f")
-        .arg(img)
-        .arg(d.path())
-        .spawn()
-        .unwrap();
+    let mut cmd = Command::new(cargo_bin!("xfs-fuse"));
+    if let Some(rtpath) = rtimg {
+        cmd.arg("-o").arg(format!("rtdev={}", rtpath.display()));
+    }
+    let child = cmd.arg(img).arg("-f").arg(d.path()).spawn().unwrap();
 
     waitfor(Duration::from_secs(5), || {
         let s = nix::sys::statfs::statfs(d.path()).unwrap();
@@ -158,37 +159,47 @@ fn harness(img: &Path) -> Harness {
 
 #[fixture]
 fn harness1k() -> Harness {
-    harness(GOLDEN1K.as_path())
+    harness(GOLDEN1K.as_path(), None)
 }
 
 #[fixture]
 fn harness4k() -> Harness {
-    harness(GOLDEN4K.as_path())
+    harness(GOLDEN4K.as_path(), None)
 }
 
 #[fixture]
 fn harness4kn() -> Harness {
-    harness(GOLDEN4KN.as_path())
+    harness(GOLDEN4KN.as_path(), None)
 }
 
 #[fixture]
 fn harness_preallocated() -> Harness {
-    harness(GOLDENPREALLOCATED.as_path())
+    harness(GOLDENPREALLOCATED.as_path(), None)
 }
 
 #[fixture]
 fn harnessv4() -> Harness {
-    harness(GOLDENV4.as_path())
+    harness(GOLDENV4.as_path(), None)
 }
 
 #[fixture]
 fn harness_noftype() -> Harness {
-    harness(GOLDEN_NOFTYPE.as_path())
+    harness(GOLDEN_NOFTYPE.as_path(), None)
 }
 
 #[fixture]
 fn harness_nrext64() -> Harness {
-    harness(GOLDEN_NREXT64.as_path())
+    harness(GOLDEN_NREXT64.as_path(), None)
+}
+
+#[fixture]
+fn harness_missing_realtime() -> Harness {
+    harness(GOLDEN_RT1.as_path(), None)
+}
+
+#[fixture]
+fn harness_realtime() -> Harness {
+    harness(GOLDEN_RT1.as_path(), Some(GOLDEN_RT2.as_path()))
 }
 
 impl Drop for Harness {
@@ -1126,6 +1137,7 @@ mod read {
     #[case::reflink_b(harness4k, "reflink_b.txt", 16384)]
     #[case::reflink_partial(harness4k, "reflink_partial.txt", 16384)]
     #[case::nrext64(harness_nrext64, "four_extents.txt", 16384)]
+    #[case::realtime(harness_realtime, "one_rt_extent.txt", 4096)]
     fn all_files(h: fn() -> Harness, d: &str) {}
 
     /// Attempting to read across eof should return the correct amount of data
@@ -1267,6 +1279,28 @@ mod read {
     }
     // TODO: add a test case for reading with direct I/O where the image is on a
     // device, not a file
+
+    /// If a volume is mounted without its realtime device we won't be able to read any realtime
+    /// files.  But we should handle the problem gracefully.
+    #[named]
+    #[rstest]
+    fn missing_realtime(harness_missing_realtime: Harness) {
+        require_fusefs!();
+
+        let path = harness_missing_realtime
+            .d
+            .path()
+            .join("files")
+            .join("one_rt_extent.txt");
+        let f = fs::File::open(path).unwrap();
+        // We should still be able to read metadata
+        f.metadata().unwrap();
+
+        // But not data
+        let mut buf = vec![0; 4096];
+        let e = nix::unistd::read(f.as_raw_fd(), &mut buf).unwrap_err();
+        assert_eq!(e, nix::Error::EIO);
+    }
 
     /// Test reading a file that has been preallocated but unwritten, for example with
     /// posix_fallocate

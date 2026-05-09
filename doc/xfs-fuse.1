@@ -1,4 +1,4 @@
-.Dd July 15, 2025
+.Dd May 9, 2026
 .Dt XFUSE 1
 .Os
 .Sh NAME
@@ -22,16 +22,34 @@ The options are as follows:
 .It Fl f
 Run in the foreground instead of daemonizing.
 .It Fl o
-Pass various common options to the kernel.
+Various mount options.
 See
-.Xr mount_fusefs 8
-for the list.
+.Sx MOUNT OPTIONS
+for details.
 .It Fl h , -help
 Print usage information and exit.
 .It Fl V , -version
 Print the version and exit.
 .El
 .Pp
+.El
+.Sh MOUNT OPTIONS
+Any mount option accepted by
+.Xr mount_fusefs 8
+may be used here.
+In addition,
+.Nm
+recognizes the following special options:
+.Bl -tag -width indent
+.It Cm rtdev Ns = Ns Ar path
+Open
+.Ar path
+as the real-time device.
+The file system must've been created using the
+.Ar -r
+option of
+.Nm mkfs.xfs .
+This option may be specified no more than once.
 .El
 .Sh EXIT STATUS
 .Ex -std

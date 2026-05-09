@@ -1,6 +1,6 @@
 #! /bin/sh -e
 
-# Recreate the golden image used for the integration tests
+# Recreate the golden images used for the integration tests
 
 mkfiles() {
 	DIR=$1
@@ -495,6 +495,33 @@ mkfs_nrext64() {
 	zstd -f resources/xfs_nrext64.img
 }
 
+mkfs_realtime() {
+	# Create a V5 image with a realtime device
+	rm -f resources/xfs_rt1.img resources/xfs_rt2.img
+	truncate -s 64m resources/xfs_rt1.img
+	truncate -s 64m resources/xfs_rt2.img
+	mkfs.xfs --unsupported -b size=4096 -r rtdev=resources/xfs_rt2.img -r extsize=4096 resources/xfs_rt1.img
+	MNTDIR=`mktemp -d`
+	LOOP0=`losetup -fP --show resources/xfs_rt1.img`
+	LOOP1=`losetup -fP --show resources/xfs_rt2.img`
+	mount -t xfs -o rtdev="$LOOP1" "$LOOP0" "$MNTDIR"
+
+	mkdir ${MNTDIR}/files
+
+	# Now create a file with data.  Only one realtime block is necessary to
+	# get coverage of the realtime code.
+	TEMPFILE=`mktemp /tmp/xfs_contents.XXXXXX`
+	write_sequential_file $TEMPFILE 4096
+	xfs_io -Rf -c "pwrite -i $TEMPFILE 0 4096" ${MNTDIR}/files/one_rt_extent.txt
+
+	umount ${MNTDIR}
+	losetup -d "${LOOP0}"
+	losetup -d "${LOOP1}"
+	rmdir $MNTDIR
+	zstd -f resources/xfs_rt1.img
+	zstd -f resources/xfs_rt2.img
+}
+
 mkfs_4096
 mkfs_512
 mkfs_v4
@@ -502,3 +529,4 @@ mkfs_preallocated
 mkfs_noftype
 mkfs_4kn
 mkfs_nrext64
+mkfs_realtime
