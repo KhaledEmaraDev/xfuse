@@ -49,5 +49,15 @@ mod symlink_extent;
 mod utils;
 pub mod volume;
 
+use cfg_if::cfg_if;
+
+cfg_if! {
+    if #[cfg(target_os = "freebsd")] {
+        use libc::ENOATTR;
+    } else if #[cfg(target_os = "linux")] {
+        const ENOATTR: i32 = libc::ENODATA;
+    }
+}
+
 #[allow(clippy::unnecessary_cast)] // It isn't unnecessary on all platforms.
 const S_IFMT: u16 = libc::S_IFMT as u16;

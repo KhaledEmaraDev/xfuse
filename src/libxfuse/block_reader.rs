@@ -28,8 +28,7 @@
 use std::{
     fs::File,
     io::{self, BufRead, Read, Result as IoResult, Seek, SeekFrom},
-    mem,
-    os::{fd::AsRawFd, unix::fs::MetadataExt},
+    os::unix::fs::MetadataExt,
     path::Path,
 };
 
@@ -60,11 +59,14 @@ impl BlockReader {
         let md = f.metadata().unwrap();
         cfg_if! {
             if #[cfg(target_os = "freebsd")] {
-                use std::os::unix::fs::FileTypeExt;
+                use std::os::{
+                    fd::AsRawFd,
+                    unix::fs::FileTypeExt
+                };
 
                 let ft = md.file_type();
                 if ft.is_block_device() || ft.is_char_device() {
-                    let mut sectorsize = mem::MaybeUninit::<u32>::uninit();
+                    let mut sectorsize = std::mem::MaybeUninit::<u32>::uninit();
                     unsafe {
                         // This ioctl is always safe
                         ffi::diocgsectorsize(f.as_raw_fd(), sectorsize.as_mut_ptr()).unwrap();

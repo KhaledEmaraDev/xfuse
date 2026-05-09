@@ -220,7 +220,7 @@ impl AttrLeafblock {
             .binary_search_by_key(&hash, |entry| entry.hashval)
         {
             Ok(i) => Ok(self.names[i].value(buf_reader, map_logical_block_to_fs_block)),
-            Err(_) => Err(libc::ENOATTR),
+            Err(_) => Err(crate::libxfuse::ENOATTR),
         }
     }
 }

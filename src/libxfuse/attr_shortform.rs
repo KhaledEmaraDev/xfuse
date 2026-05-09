@@ -142,6 +142,6 @@ impl Attr for AttrShortform {
             }
         }
 
-        Err(libc::ENOATTR)
+        Err(crate::libxfuse::ENOATTR)
     }
 }
