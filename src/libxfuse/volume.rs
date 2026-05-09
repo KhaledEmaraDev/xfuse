@@ -81,8 +81,8 @@ struct OpenInode {
 
 #[derive(Debug)]
 pub struct Volume {
-    pub device: BlockReader,
-    pub sb:     Sb,
+    device: BlockReader,
+    sb:     Sb,
     open_files: HashMap<u64, OpenInode>,
     no_open:    bool,
     no_opendir: bool,
