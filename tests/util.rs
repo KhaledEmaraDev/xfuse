@@ -110,6 +110,8 @@ pub static GOLDEN_NREXT64: LazyLock<PathBuf> = LazyLock::new(|| prepare_image("x
 pub static GOLDEN_RT1: LazyLock<PathBuf> = LazyLock::new(|| prepare_image("xfs_rt1.img"));
 #[allow(unused)] // Not used by benches
 pub static GOLDEN_RT2: LazyLock<PathBuf> = LazyLock::new(|| prepare_image("xfs_rt2.img"));
+#[allow(unused)] // Not used by benches
+pub static GOLDEN_ATTRV1: LazyLock<PathBuf> = LazyLock::new(|| prepare_image("xfs_xattr_v1.img"));
 
 #[derive(Clone, Copy, Debug)]
 pub struct WaitForError;

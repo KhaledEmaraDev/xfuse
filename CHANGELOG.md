@@ -10,6 +10,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Added support for XFS real-time devices.
   ([#189](https://github.com/KhaledEmaraDev/xfuse/issues/189))
 
+- Added support for version 1 extended attributes.
+  ([#190](https://github.com/KhaledEmaraDev/xfuse/issues/190))
+
 ## [0.6.0] - 2026-03-09
 
 ### Added
