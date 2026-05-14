@@ -33,6 +33,7 @@ use util::{
     GOLDEN4KN,
     GOLDENPREALLOCATED,
     GOLDENV4,
+    GOLDEN_ATTRV1,
     GOLDEN_NOFTYPE,
     GOLDEN_NREXT64,
 };
@@ -191,6 +192,11 @@ fn harness_nrext64() -> Harness {
     harness(GOLDEN_NREXT64.as_path())
 }
 
+#[fixture]
+fn harness_attrv1() -> Harness {
+    harness(GOLDEN_ATTRV1.as_path())
+}
+
 impl Drop for Harness {
     #[allow(clippy::if_same_then_else)]
     fn drop(&mut self) {
@@ -279,6 +285,8 @@ fn all_dir_types_shortnames(h: fn() -> Harness, d: &str) {}
 #[case::four4kn_local(harness4kn, "xattrs/local")]
 #[case::four4kn_extents(harness4kn, "xattrs/extents4")]
 #[case::giant_nrext64(harness_nrext64, "xattrs/giant")]
+#[case::attr_v1_local(harness_attrv1, "xattrs/local")]
+#[case::attr_v1_extents(harness_attrv1, "xattrs/extents")]
 fn all_xattr_fork_types(h: fn() -> Harness, d: &str) {}
 
 #[template]
@@ -395,6 +403,7 @@ mod dev {
     #[case::no_ftype(GOLDEN_NOFTYPE.as_path(), 512)]
     #[case::no_nrext64(GOLDEN_NREXT64.as_path(), 512)]
     #[case::preallocated(GOLDENPREALLOCATED.as_path(), 512)]
+    #[case::preallocated(GOLDEN_ATTRV1.as_path(), 512)]
     fn metadata(#[case] image: &Path, #[case] sectorsize: u32) {
         require_fusefs!();
         require_root!();
@@ -616,6 +625,7 @@ fn hardlink(harness4k: Harness) {
 #[case::onek(harness1k)]
 #[case::v4(harnessv4)]
 #[case::fourkn(harness4kn)]
+#[case::attr_v1(harness_attrv1)]
 fn mount(#[case] h: fn() -> Harness) {
     require_fusefs!();
 

@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] - ReleaseDate
+
+### Added
+
+- Added support for version 1 extended attributes.
+  ([#190](https://github.com/KhaledEmaraDev/xfuse/issues/190))
+
 ## [0.6.0] - 2026-03-09
 
 ### Added
