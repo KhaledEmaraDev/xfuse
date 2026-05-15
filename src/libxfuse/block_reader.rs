@@ -52,6 +52,8 @@ pub struct BlockReader {
     idx:        usize,
     /// The absolute minimum that we can read in any operation
     sectorsize: usize,
+    /// File's size in bytes.  It should not change while mounted.
+    pub size:       u64
 }
 
 impl BlockReader {
@@ -83,11 +85,13 @@ impl BlockReader {
 
         let sectorsize = Self::sectorsize(&file);
         let block = vec![0u8; sectorsize];
+        let size = file.metadata()?.size();
         Ok(Self {
             file,
             block,
             idx: sectorsize,
             sectorsize,
+            size,
         })
     }
 

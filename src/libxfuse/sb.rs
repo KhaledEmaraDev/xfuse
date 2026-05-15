@@ -157,7 +157,7 @@ pub struct Sb {
     // sb_magicnum: u32,
     pub sb_blocksize:     u32,
     pub sb_dblocks:       XfsRfsblock,
-    // sb_rblocks: XfsRfsblock,
+    pub sb_rblocks: XfsRfsblock,
     // sb_rextents: XfsRtblock,
     pub sb_uuid:          Uuid,
     // sb_logstart: XfsFsblock,
@@ -217,7 +217,7 @@ impl Sb {
 
         let sb_blocksize = buf_reader.read_u32::<BigEndian>().unwrap();
         let sb_dblocks = buf_reader.read_u64::<BigEndian>().unwrap();
-        let _sb_rblocks = buf_reader.read_u64::<BigEndian>().unwrap();
+        let sb_rblocks = buf_reader.read_u64::<BigEndian>().unwrap();
         let _sb_rextents = buf_reader.read_u64::<BigEndian>().unwrap();
         let sb_uuid = Uuid::from_u128(buf_reader.read_u128::<BigEndian>().unwrap());
         let _sb_logstart = buf_reader.read_u64::<BigEndian>().unwrap();
@@ -319,6 +319,7 @@ impl Sb {
         Sb {
             sb_blocksize,
             sb_dblocks,
+            sb_rblocks,
             sb_uuid,
             sb_rootino,
             sb_agblocks,

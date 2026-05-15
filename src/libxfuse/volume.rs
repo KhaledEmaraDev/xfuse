@@ -100,6 +100,14 @@ impl Volume {
 
         let superblock = Sb::from(device.by_ref());
         SUPERBLOCK.set(superblock).unwrap();
+        if let Some(rtdev) = &rt_device {
+            // Check that rtdev's size matches superblock.sb_rblocks
+            let rtdev_blocks = rtdev.size / u64::from(superblock.sb_blocksize);
+            if rtdev_blocks != superblock.sb_rblocks {
+                warn!("realtime device size mismatch.  Expected {} blocks; found {}",
+                    superblock.sb_rblocks, rtdev_blocks);
+            }
+        }
 
         let root_inode = Dinode::from(device.by_ref(), &superblock, superblock.sb_rootino);
         let mut open_files = HashMap::new();
