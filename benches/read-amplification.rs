@@ -179,7 +179,7 @@ fn read_files(mountpoint: &Path, files: &[&'static str]) -> u64 {
     let mut user_data = 0;
     let mut buf = Vec::new();
     for file in files {
-        buf.truncate(0);
+        buf.clear();
         let mut f = File::open(mountpoint.join("files").join(file)).unwrap();
         f.read_to_end(&mut buf).unwrap();
         user_data += u64::try_from(buf.len()).unwrap();
