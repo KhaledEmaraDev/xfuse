@@ -45,6 +45,7 @@ pub struct FileExtentList {
 impl<R: BufRead + Reader + Seek> File<R> for FileExtentList {
     fn get_extent(&self, _buf_reader: &mut R, block: XfsFileoff) -> (Option<XfsFsblock>, u64) {
         let sb = SUPERBLOCK.get().unwrap();
+        tracing::debug!("self.bmx = {:?}", &self.bmx);
         let (start, len) = self.bmx.get_extent(block);
         let len = len.unwrap_or((self.size as u64).div_ceil(sb.sb_blocksize.into()) - block);
         (start, len)
