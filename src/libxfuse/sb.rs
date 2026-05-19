@@ -91,10 +91,6 @@ bitflags! {
 }
 
 impl SbFeatures2 {
-    pub const fn attr2(&self) -> bool {
-        self.contains(SbFeatures2::Attr2)
-    }
-
     pub const fn crc(&self) -> bool {
         self.contains(SbFeatures2::Crc)
     }
@@ -299,9 +295,6 @@ impl Sb {
                 "Unsupported filesystem version number {}",
                 sb_versionnum & 0xF
             );
-        }
-        if !sb_features2.attr2() {
-            panic!("Version 1 extended attributes are not supported");
         }
         if sb_versionnum & 0xF == 5 && !sb_features2.crc() {
             panic!("Version 5 file systems must set the CRC bit in sb_features2");

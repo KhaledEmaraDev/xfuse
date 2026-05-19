@@ -495,6 +495,22 @@ mkfs_nrext64() {
 	zstd -f resources/xfs_nrext64.img
 }
 
+mkfs_xattr_v1() {
+	# Create an image that uses version 1 extended attributes.  These have
+	# been deprecated for a very long time, but are still usable.
+	truncate -s 64m resources/xfs_xattr_v1.img
+	mkfs.xfs --unsupported -b size=512 -n size=4096 -m crc=0 -i attr=0 -f resources/xfs_xattr_v1.img
+	MNTDIR=`mktemp -d`
+	mount -t xfs resources/xfs_xattr_v1.img $MNTDIR
+
+        mkdir ${MNTDIR}/xattrs
+        mkattrs ${MNTDIR}/xattrs/local 4 0
+        mkattrs ${MNTDIR}/xattrs/extents 64 0
+
+	umount ${MNTDIR}
+	zstd -f resources/xfs_xattr_v1.img
+}
+
 mkfs_4096
 mkfs_512
 mkfs_v4
@@ -502,3 +518,4 @@ mkfs_preallocated
 mkfs_noftype
 mkfs_4kn
 mkfs_nrext64
+mkfs_xattr_v1
