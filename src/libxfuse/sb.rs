@@ -74,6 +74,11 @@ mod constants {
     pub const XFS_SB_FEAT_INCOMPAT_BIGTIME: u32 = 0x00000008;
     pub const XFS_SB_FEAT_INCOMPAT_NEEDSREPAIR: u32 = 0x00000010;
     pub const XFS_SB_FEAT_INCOMPAT_NREXT64: u32 = 0x00000020;
+    pub const XFS_SB_FEAT_INCOMPAT_EXCHRANGE: u32 = 0x00000040;
+    pub const XFS_SB_FEAT_INCOMPAT_PARENT: u32 = 0x00000080;
+    pub const XFS_SB_FEAT_INCOMPAT_METADIR: u32 = 0x00000100;
+    pub const XFS_SB_FEAT_INCOMPAT_ZONED: u32 = 0x00000200;
+    pub const XFS_SB_FEAT_INCOMPAT_ZONE_GAPS: u32 = 0x00000400;
 }
 
 bitflags! {
@@ -114,6 +119,11 @@ bitflags! {
         const Bigtime = constants::XFS_SB_FEAT_INCOMPAT_BIGTIME;
         const NeedsRepair = constants::XFS_SB_FEAT_INCOMPAT_NEEDSREPAIR;
         const NrExt64 = constants::XFS_SB_FEAT_INCOMPAT_NREXT64;
+        const Exchrange = constants::XFS_SB_FEAT_INCOMPAT_EXCHRANGE;
+        const Parent = constants::XFS_SB_FEAT_INCOMPAT_PARENT;
+        const Metadir = constants::XFS_SB_FEAT_INCOMPAT_METADIR;
+        const Zoned = constants::XFS_SB_FEAT_INCOMPAT_ZONED;
+        const ZONE_GAPS = constants::XFS_SB_FEAT_INCOMPAT_ZONE_GAPS;
     }
 }
 
@@ -143,6 +153,25 @@ impl SbFeaturesIncompat {
     // This is redundant with information in DinodeCore.di_flags2
     //pub const fn large_extent_counters(&self) -> bool {
     //    self.contains(SbFeaturesIncompat::NrExt64)
+    //}
+
+    // I don't think we need to care about this, unless se support log intents
+    //pub const fn exchrange(&self) -> bool{
+    //    self.contains(SbFeaturesIncompat::Exchrange)
+    //}
+
+    pub const fn metadir(&self) -> bool {
+        self.contains(SbFeaturesIncompat::Metadir)
+    }
+
+    pub const fn zoned(&self) -> bool {
+        self.contains(SbFeaturesIncompat::Zoned)
+    }
+
+    // This feature will never be enabled if zoned is not, and we don't support zoned, so we don't
+    // need to check for it explicitly.
+    //pub const fn zone_gaps(&self) -> bool {
+    //  self.contains(SbFeaturesIncompat::ZoneGaps)
     //}
 }
 
@@ -314,6 +343,12 @@ impl Sb {
         }
         if sb_features_incompat.needs_repair() {
             panic!("The NeedsRepair feature is not supported");
+        }
+        if sb_features_incompat.metadir() && sb_rblocks > 0 {
+            panic!("The Metadir feature is not supported in combination with a real-time volume");
+        }
+        if sb_features_incompat.zoned() && sb_rblocks > 0 {
+            panic!("The Zoned feature is not supported on real-time volumes");
         }
 
         Sb {

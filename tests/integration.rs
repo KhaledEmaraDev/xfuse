@@ -1137,7 +1137,6 @@ mod read {
     #[case::reflink_b(harness4k, "reflink_b.txt", 16384)]
     #[case::reflink_partial(harness4k, "reflink_partial.txt", 16384)]
     #[case::nrext64(harness_nrext64, "four_extents.txt", 16384)]
-    #[case::realtime(harness_realtime, "one_rt_extent.txt", 4096)]
     fn all_files(h: fn() -> Harness, d: &str) {}
 
     /// Attempting to read across eof should return the correct amount of data
@@ -1291,7 +1290,7 @@ mod read {
             .d
             .path()
             .join("files")
-            .join("one_rt_extent.txt");
+            .join("rtfile.txt");
         let f = fs::File::open(path).unwrap();
         // We should still be able to read metadata
         f.metadata().unwrap();
@@ -1299,9 +1298,45 @@ mod read {
         // But not data
         let mut buf = vec![0; 4096];
         let e = nix::unistd::read(f.as_raw_fd(), &mut buf).unwrap_err();
-        assert_eq!(e, nix::Error::EIO);
+        assert_eq!(e, nix::Error::ENXIO);
     }
 
+    /// Read a file stored on a realtime device.  The file in the resource contains the usual
+    /// pattern at offset 0 for 4096 bytes, then all zeros, then the usual pattern again for 4096
+    /// bytes starting at block 8192
+    #[named]
+    #[rstest]
+    fn realtime(harness_realtime: Harness) {
+        require_fusefs!();
+
+        let bsize = 4096;
+        let path = harness_realtime.d.path().join("files").join("rtfile.txt");
+        let mut buf = vec![0; bsize];
+        let f = fs::File::open(path).unwrap();
+        // Read the block at the beginning
+        f.read_exact_at(&mut buf[..], 0).unwrap();
+
+        // Verify contents
+        let mut ofs = 0;
+        while ofs < bsize {
+            let expected = format!("{ofs:016x}");
+            assert_eq!(&buf[ofs..ofs + 16], expected.as_bytes());
+            ofs += 16;
+        }
+
+        // Now read the block at the end, and verify _its_ contents
+        f.read_exact_at(&mut buf[..], (8192 * bsize) as u64)
+            .unwrap();
+        let mut bofs = 0;
+        while bofs < bsize {
+            let fofs = bofs + (8192 * bsize);
+            let expected = format!("{fofs:016x}");
+            assert_eq!(&buf[bofs..bofs + 16], expected.as_bytes());
+            bofs += 16;
+        }
+    }
+
+    ///
     /// Test reading a file that has been preallocated but unwritten, for example with
     /// posix_fallocate
     #[named]

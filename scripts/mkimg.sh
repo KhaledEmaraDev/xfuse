@@ -500,7 +500,8 @@ mkfs_realtime() {
 	rm -f resources/xfs_rt1.img resources/xfs_rt2.img
 	truncate -s 64m resources/xfs_rt1.img
 	truncate -s 64m resources/xfs_rt2.img
-	mkfs.xfs --unsupported -b size=4096 -r rtdev=resources/xfs_rt2.img -r extsize=4096 resources/xfs_rt1.img
+	# To get good coverage of the realtime code requires agsize not be a power of two.
+	mkfs.xfs --unsupported -b size=4096 -d agsize=17m -r rtdev=resources/xfs_rt2.img -r extsize=4096 resources/xfs_rt1.img
 	MNTDIR=`mktemp -d`
 	LOOP0=`losetup -fP --show resources/xfs_rt1.img`
 	LOOP1=`losetup -fP --show resources/xfs_rt2.img`
@@ -508,11 +509,16 @@ mkfs_realtime() {
 
 	mkdir ${MNTDIR}/files
 
-	# Now create a file with data.  Only one realtime block is necessary to
-	# get coverage of the realtime code.
+	# Now create a file with data.  To get good coverage of the realtime
+	# code requires blocks in two or more allocation groups.  Realtime
+	# allocation is sequential, so we must allocate more data than
+	# 1<<sb_agblocklog .  Let's allocate 32MiB+4096
 	TEMPFILE=`mktemp /tmp/xfs_contents.XXXXXX`
-	write_sequential_file $TEMPFILE 4096
-	xfs_io -Rf -c "pwrite -i $TEMPFILE 0 4096" ${MNTDIR}/files/one_rt_extent.txt
+	write_sequential_file $TEMPFILE 33558528
+	# Fill most of the file with zeros, so it will compress well.
+	dd if=/dev/zero of=$TEMPFILE oseek=1 bs=4096 count=8190 conv=notrunc
+	# Use xfs_io -R to force the file to be stored on the real-time device.
+	xfs_io -Rf -c "pwrite -i $TEMPFILE 0 33558528" ${MNTDIR}/files/rtfile.txt
 
 	umount ${MNTDIR}
 	losetup -d "${LOOP0}"

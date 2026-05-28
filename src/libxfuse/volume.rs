@@ -290,7 +290,7 @@ impl Filesystem for Volume {
                 rtd.by_ref()
             } else {
                 warn!("Realtime device not mounted");
-                reply.error(libc::EIO);
+                reply.error(libc::ENXIO);
                 return;
             }
         } else {
