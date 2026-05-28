@@ -104,8 +104,10 @@ impl Volume {
             // Check that rtdev's size matches superblock.sb_rblocks
             let rtdev_blocks = rtdev.size / u64::from(superblock.sb_blocksize);
             if rtdev_blocks != superblock.sb_rblocks {
-                warn!("realtime device size mismatch.  Expected {} blocks; found {}",
-                    superblock.sb_rblocks, rtdev_blocks);
+                warn!(
+                    "realtime device size mismatch.  Expected {} blocks; found {}",
+                    superblock.sb_rblocks, rtdev_blocks
+                );
             }
         }
 

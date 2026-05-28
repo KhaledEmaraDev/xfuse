@@ -157,7 +157,7 @@ pub struct Sb {
     // sb_magicnum: u32,
     pub sb_blocksize:     u32,
     pub sb_dblocks:       XfsRfsblock,
-    pub sb_rblocks: XfsRfsblock,
+    pub sb_rblocks:       XfsRfsblock,
     // sb_rextents: XfsRtblock,
     pub sb_uuid:          Uuid,
     // sb_logstart: XfsFsblock,
