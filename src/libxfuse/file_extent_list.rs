@@ -42,15 +42,22 @@ pub struct FileExtentList {
     pub size: XfsFsize,
 }
 
-impl<R: BufRead + Reader + Seek> File<R> for FileExtentList {
-    fn get_extent(&self, _buf_reader: &mut R, block: XfsFileoff) -> (Option<XfsFsblock>, u64) {
+impl File for FileExtentList {
+    fn get_extent<R>(&self, _buf_reader: &mut R, block: XfsFileoff) -> (Option<XfsFsblock>, u64)
+    where
+        R: BufRead + Reader + Seek,
+    {
         let sb = SUPERBLOCK.get().unwrap();
+        tracing::debug!("self.bmx = {:?}", &self.bmx);
         let (start, len) = self.bmx.get_extent(block);
         let len = len.unwrap_or((self.size as u64).div_ceil(sb.sb_blocksize.into()) - block);
         (start, len)
     }
 
-    fn lseek(&self, _buf_reader: &mut R, offset: u64, whence: i32) -> Result<u64, i32> {
+    fn lseek<R>(&self, _buf_reader: &mut R, offset: u64, whence: i32) -> Result<u64, i32>
+    where
+        R: BufRead + Reader + Seek,
+    {
         self.bmx.lseek(offset, whence)
     }
 

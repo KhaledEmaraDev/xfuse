@@ -30,7 +30,7 @@ use std::{
     ffi::OsStr,
     io::Read,
     os::unix::ffi::OsStrExt,
-    path::Path,
+    path::{Path, PathBuf},
     sync::OnceLock,
     time::Duration,
 };
@@ -81,8 +81,9 @@ struct OpenInode {
 
 #[derive(Debug)]
 pub struct Volume {
-    pub device: BlockReader,
-    pub sb:     Sb,
+    device:     BlockReader,
+    rt_device:  Option<BlockReader>,
+    sb:         Sb,
     open_files: HashMap<u64, OpenInode>,
     no_open:    bool,
     no_opendir: bool,
@@ -93,11 +94,22 @@ impl Volume {
     // of time, since nothing will ever change.
     const TTL: Duration = Duration::from_secs(u64::MAX);
 
-    pub fn from(device_name: &Path) -> Volume {
+    pub fn new(device_name: &Path, rt_device_name: Option<&PathBuf>) -> Volume {
         let mut device = BlockReader::open(device_name).unwrap();
+        let rt_device = rt_device_name.map(|n| BlockReader::open(n).unwrap());
 
         let superblock = Sb::from(device.by_ref());
         SUPERBLOCK.set(superblock).unwrap();
+        if let Some(rtdev) = &rt_device {
+            // Check that rtdev's size matches superblock.sb_rblocks
+            let rtdev_blocks = rtdev.size / u64::from(superblock.sb_blocksize);
+            if rtdev_blocks != superblock.sb_rblocks {
+                warn!(
+                    "realtime device size mismatch.  Expected {} blocks; found {}",
+                    superblock.sb_rblocks, rtdev_blocks
+                );
+            }
+        }
 
         let root_inode = Dinode::from(device.by_ref(), &superblock, superblock.sb_rootino);
         let mut open_files = HashMap::new();
@@ -112,6 +124,7 @@ impl Volume {
 
         Volume {
             device,
+            rt_device,
             sb: superblock,
             open_files,
             no_open: false,
@@ -178,14 +191,13 @@ impl Filesystem for Volume {
             return;
         };
 
-        let oi = &self.open_files.get(&ino).unwrap();
-        let file = oi.dinode.get_file(self.device.by_ref());
-        if offset > file.size() {
+        let oi = &mut self.open_files.get_mut(&ino).unwrap();
+        if offset > oi.dinode.fsize() {
             reply.error(libc::ENXIO);
             return;
         }
 
-        match file.lseek(self.device.by_ref(), uoffset, whence) {
+        match oi.dinode.lseek(self.device.by_ref(), uoffset, whence) {
             Ok(ofs) => reply.offset(i64::try_from(ofs).unwrap()),
             Err(e) => reply.error(e),
         }
@@ -267,12 +279,21 @@ impl Filesystem for Volume {
         _lock_owner: Option<u64>,
         reply: fuser::ReplyData,
     ) {
-        let oi = &self.open_files.get(&ino).unwrap();
+        let oi = &mut self.open_files.get_mut(&ino).unwrap();
         self.device.set_bufsize(self.sb.sb_blocksize as usize);
 
-        let file = oi.dinode.get_file(self.device.by_ref());
-
-        match file.read(self.device.by_ref(), offset, size) {
+        let rtdev = if oi.dinode.is_realtime() {
+            if let Some(rtd) = &mut self.rt_device {
+                Some(rtd.by_ref())
+            } else {
+                warn!("Realtime device not mounted");
+                reply.error(libc::ENXIO);
+                return;
+            }
+        } else {
+            None
+        };
+        match oi.dinode.read(self.device.by_ref(), rtdev, offset, size) {
             Ok((v, ignore)) => reply.data(&v[ignore..]),
             Err(e) => reply.error(e),
         }

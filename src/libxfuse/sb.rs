@@ -74,6 +74,11 @@ mod constants {
     pub const XFS_SB_FEAT_INCOMPAT_BIGTIME: u32 = 0x00000008;
     pub const XFS_SB_FEAT_INCOMPAT_NEEDSREPAIR: u32 = 0x00000010;
     pub const XFS_SB_FEAT_INCOMPAT_NREXT64: u32 = 0x00000020;
+    pub const XFS_SB_FEAT_INCOMPAT_EXCHRANGE: u32 = 0x00000040;
+    pub const XFS_SB_FEAT_INCOMPAT_PARENT: u32 = 0x00000080;
+    pub const XFS_SB_FEAT_INCOMPAT_METADIR: u32 = 0x00000100;
+    pub const XFS_SB_FEAT_INCOMPAT_ZONED: u32 = 0x00000200;
+    pub const XFS_SB_FEAT_INCOMPAT_ZONE_GAPS: u32 = 0x00000400;
 }
 
 bitflags! {
@@ -114,6 +119,11 @@ bitflags! {
         const Bigtime = constants::XFS_SB_FEAT_INCOMPAT_BIGTIME;
         const NeedsRepair = constants::XFS_SB_FEAT_INCOMPAT_NEEDSREPAIR;
         const NrExt64 = constants::XFS_SB_FEAT_INCOMPAT_NREXT64;
+        const Exchrange = constants::XFS_SB_FEAT_INCOMPAT_EXCHRANGE;
+        const Parent = constants::XFS_SB_FEAT_INCOMPAT_PARENT;
+        const Metadir = constants::XFS_SB_FEAT_INCOMPAT_METADIR;
+        const Zoned = constants::XFS_SB_FEAT_INCOMPAT_ZONED;
+        const ZONE_GAPS = constants::XFS_SB_FEAT_INCOMPAT_ZONE_GAPS;
     }
 }
 
@@ -144,6 +154,25 @@ impl SbFeaturesIncompat {
     //pub const fn large_extent_counters(&self) -> bool {
     //    self.contains(SbFeaturesIncompat::NrExt64)
     //}
+
+    // I don't think we need to care about this, unless se support log intents
+    //pub const fn exchrange(&self) -> bool{
+    //    self.contains(SbFeaturesIncompat::Exchrange)
+    //}
+
+    pub const fn metadir(&self) -> bool {
+        self.contains(SbFeaturesIncompat::Metadir)
+    }
+
+    pub const fn zoned(&self) -> bool {
+        self.contains(SbFeaturesIncompat::Zoned)
+    }
+
+    // This feature will never be enabled if zoned is not, and we don't support zoned, so we don't
+    // need to check for it explicitly.
+    //pub const fn zone_gaps(&self) -> bool {
+    //  self.contains(SbFeaturesIncompat::ZoneGaps)
+    //}
 }
 
 bitflags! {
@@ -157,7 +186,7 @@ pub struct Sb {
     // sb_magicnum: u32,
     pub sb_blocksize:     u32,
     pub sb_dblocks:       XfsRfsblock,
-    // sb_rblocks: XfsRfsblock,
+    pub sb_rblocks:       XfsRfsblock,
     // sb_rextents: XfsRtblock,
     pub sb_uuid:          Uuid,
     // sb_logstart: XfsFsblock,
@@ -217,7 +246,7 @@ impl Sb {
 
         let sb_blocksize = buf_reader.read_u32::<BigEndian>().unwrap();
         let sb_dblocks = buf_reader.read_u64::<BigEndian>().unwrap();
-        let _sb_rblocks = buf_reader.read_u64::<BigEndian>().unwrap();
+        let sb_rblocks = buf_reader.read_u64::<BigEndian>().unwrap();
         let _sb_rextents = buf_reader.read_u64::<BigEndian>().unwrap();
         let sb_uuid = Uuid::from_u128(buf_reader.read_u128::<BigEndian>().unwrap());
         let _sb_logstart = buf_reader.read_u64::<BigEndian>().unwrap();
@@ -315,10 +344,17 @@ impl Sb {
         if sb_features_incompat.needs_repair() {
             panic!("The NeedsRepair feature is not supported");
         }
+        if sb_features_incompat.metadir() && sb_rblocks > 0 {
+            panic!("The Metadir feature is not supported in combination with a real-time volume");
+        }
+        if sb_features_incompat.zoned() && sb_rblocks > 0 {
+            panic!("The Zoned feature is not supported on real-time volumes");
+        }
 
         Sb {
             sb_blocksize,
             sb_dblocks,
+            sb_rblocks,
             sb_uuid,
             sb_rootino,
             sb_agblocks,
@@ -357,9 +393,20 @@ impl Sb {
         (agno * u64::from(self.sb_agblocks) + agbno) << blkbb_log
     }
 
+    /// Calculate the disk address for a given file system block number, if it's stored on a
+    /// real-time device.  Real-time devices don't have allocation groups.
+    fn fsb_to_daddr_rt(&self, fsbno: XfsFsblock) -> u64 {
+        fsbno << (self.sb_blocklog - Self::BBSHIFT)
+    }
+
     /// Given a file system block number, calculate its disk byte offset
     pub fn fsb_to_offset(&self, fsbno: XfsFsblock) -> u64 {
         self.fsb_to_daddr(fsbno) << Self::BBSHIFT
+    }
+
+    /// Given a realtime device file system block number, calculate its disk byte offset
+    pub fn fsb_to_offset_rt(&self, fsbno: XfsFsblock) -> u64 {
+        self.fsb_to_daddr_rt(fsbno) << Self::BBSHIFT
     }
 
     /// Does this file system record file type in its directory inodes?
