@@ -393,9 +393,20 @@ impl Sb {
         (agno * u64::from(self.sb_agblocks) + agbno) << blkbb_log
     }
 
+    /// Calculate the disk address for a given file system block number, if it's stored on a
+    /// real-time device.  Real-time devices don't have allocation groups.
+    fn fsb_to_daddr_rt(&self, fsbno: XfsFsblock) -> u64 {
+        fsbno << (self.sb_blocklog - Self::BBSHIFT)
+    }
+
     /// Given a file system block number, calculate its disk byte offset
     pub fn fsb_to_offset(&self, fsbno: XfsFsblock) -> u64 {
         self.fsb_to_daddr(fsbno) << Self::BBSHIFT
+    }
+
+    /// Given a realtime device file system block number, calculate its disk byte offset
+    pub fn fsb_to_offset_rt(&self, fsbno: XfsFsblock) -> u64 {
+        self.fsb_to_daddr_rt(fsbno) << Self::BBSHIFT
     }
 
     /// Does this file system record file type in its directory inodes?

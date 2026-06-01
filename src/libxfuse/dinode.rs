@@ -418,7 +418,7 @@ impl Dinode {
             if let Some(blk) = blk {
                 if let Some(rtdev) = rtdev.as_deref_mut() {
                     rtdev
-                        .seek(SeekFrom::Start(sb.fsb_to_offset(blk) + block_offset))
+                        .seek(SeekFrom::Start(sb.fsb_to_offset_rt(blk) + block_offset))
                         .map_err(|e| e.raw_os_error().unwrap())?;
 
                     rtdev
