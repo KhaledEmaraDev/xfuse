@@ -379,6 +379,7 @@ impl Dinode {
     fn read_sectors<R>(
         &mut self,
         buf_reader: &mut R,
+        mut rtdev: Option<&mut R>,
         offset: i64,
         mut size: usize,
     ) -> Result<Vec<u8>, i32>
@@ -413,14 +414,25 @@ impl Dinode {
 
             let oldlen = data.len();
             data.resize(oldlen + z, 0u8);
-            if let Some(blk) = blk {
-                buf_reader
-                    .seek(SeekFrom::Start(sb.fsb_to_offset(blk) + block_offset))
-                    .map_err(|e| e.raw_os_error().unwrap())?;
 
-                buf_reader
-                    .read_exact(&mut data[oldlen..])
-                    .map_err(|e| e.raw_os_error().unwrap())?;
+            if let Some(blk) = blk {
+                if let Some(rtdev) = rtdev.as_deref_mut() {
+                    rtdev
+                        .seek(SeekFrom::Start(sb.fsb_to_offset(blk) + block_offset))
+                        .map_err(|e| e.raw_os_error().unwrap())?;
+
+                    rtdev
+                        .read_exact(&mut data[oldlen..])
+                        .map_err(|e| e.raw_os_error().unwrap())?;
+                } else {
+                    buf_reader
+                        .seek(SeekFrom::Start(sb.fsb_to_offset(blk) + block_offset))
+                        .map_err(|e| e.raw_os_error().unwrap())?;
+
+                    buf_reader
+                        .read_exact(&mut data[oldlen..])
+                        .map_err(|e| e.raw_os_error().unwrap())?;
+                }
             } else {
                 // A hole
             }
@@ -446,6 +458,7 @@ impl Dinode {
     pub fn read<R>(
         &mut self,
         buf_reader: &mut R,
+        rtdev: Option<&mut R>,
         offset: i64,
         size: u32,
     ) -> Result<(Vec<u8>, usize), i32>
@@ -464,7 +477,7 @@ impl Dinode {
             size_with_leader
         };
         let actual_offset = offset - i64::try_from(block_offset).unwrap();
-        let mut v = self.read_sectors(buf_reader, actual_offset, actual_size)?;
+        let mut v = self.read_sectors(buf_reader, rtdev, actual_offset, actual_size)?;
         v.resize(size_with_leader, 0);
         Ok((v, block_offset))
     }

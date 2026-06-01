@@ -282,18 +282,18 @@ impl Filesystem for Volume {
         let oi = &mut self.open_files.get_mut(&ino).unwrap();
         self.device.set_bufsize(self.sb.sb_blocksize as usize);
 
-        let br = if oi.dinode.is_realtime() {
+        let rtdev = if oi.dinode.is_realtime() {
             if let Some(rtd) = &mut self.rt_device {
-                rtd.by_ref()
+                Some(rtd.by_ref())
             } else {
                 warn!("Realtime device not mounted");
                 reply.error(libc::ENXIO);
                 return;
             }
         } else {
-            self.device.by_ref()
+            None
         };
-        match oi.dinode.read(br, offset, size) {
+        match oi.dinode.read(self.device.by_ref(), rtdev, offset, size) {
             Ok((v, ignore)) => reply.data(&v[ignore..]),
             Err(e) => reply.error(e),
         }
