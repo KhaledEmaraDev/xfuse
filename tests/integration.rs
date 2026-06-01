@@ -1137,6 +1137,7 @@ mod read {
     #[case::reflink_b(harness4k, "reflink_b.txt", 16384)]
     #[case::reflink_partial(harness4k, "reflink_partial.txt", 16384)]
     #[case::nrext64(harness_nrext64, "four_extents.txt", 16384)]
+    #[case::realtime_btree(harness_realtime, "btree2.txt", 262144)]
     fn all_files(h: fn() -> Harness, d: &str) {}
 
     /// Attempting to read across eof should return the correct amount of data

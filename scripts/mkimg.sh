@@ -520,6 +520,11 @@ mkfs_realtime() {
 	# Use xfs_io -R to force the file to be stored on the real-time device.
 	xfs_io -Rf -c "pwrite -i $TEMPFILE 0 33558528" ${MNTDIR}/files/rtfile.txt
 
+	# Now write a file sufficiently fragment to use a btree
+	FRAGFILE=${MNTDIR}/files/btree2.txt
+	xfs_io -Rft -c "open" ${FRAGFILE}
+	write_fragmented_file ${FRAGFILE} 4096 64
+
 	umount ${MNTDIR}
 	losetup -d "${LOOP0}"
 	losetup -d "${LOOP1}"
