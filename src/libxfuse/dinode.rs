@@ -26,6 +26,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 use std::{
+    cmp::min,
     ffi::CString,
     io::{BufRead, Seek, SeekFrom},
 };
@@ -48,11 +49,12 @@ use super::{
     dir3_block::Dir2Block,
     dir3_lf::Dir2Lf,
     dir3_sf::Dir2Sf,
-    file::File,
+    file::{File, FileMetadata},
     file_btree::FileBtree,
     file_extent_list::FileExtentList,
     sb::Sb,
     symlink_extent::SymlinkExtents,
+    volume::SUPERBLOCK,
 };
 
 #[derive(Debug)]
@@ -83,6 +85,8 @@ pub struct Dinode {
     directory:   Option<Directory>,
     /// Cache of this inode's attribute object, if any
     attributes:  Option<Attributes>,
+    /// Cache of this inode's File object, if any
+    file:        Option<FileMetadata>,
 }
 
 impl Dinode {
@@ -260,6 +264,7 @@ impl Dinode {
             di_a,
             directory: None,
             attributes: None,
+            file: None,
         }
     }
 
@@ -297,23 +302,29 @@ impl Dinode {
         self.directory.as_ref().unwrap()
     }
 
-    pub fn get_file<R: bincode_next::de::read::Reader + BufRead + Seek>(
-        &self,
-        _buf_reader: &mut R,
-    ) -> Box<dyn File<R>> {
-        match &self.di_u {
-            DiU::Bmx(bmx) => Box::new(FileExtentList {
-                bmx:  Bmx::new(bmx),
-                size: self.di_core.di_size,
-            }),
-            DiU::Bmbt((bmdr, keys, pointers)) => Box::new(FileBtree {
-                btree: BtreeRoot::new(bmdr.clone(), keys.clone(), pointers.clone()),
-                size:  self.di_core.di_size,
-            }),
-            _ => {
-                panic!("Unsupported file format!");
-            }
+    pub fn get_file(&mut self) -> &FileMetadata {
+        if self.file.is_none() {
+            self.file = Some(match &self.di_u {
+                DiU::Bmx(bmx) => {
+                    let fel = FileExtentList {
+                        bmx:  Bmx::new(bmx),
+                        size: self.di_core.di_size,
+                    };
+                    FileMetadata::Bmx(fel)
+                }
+                DiU::Bmbt((bmdr, keys, pointers)) => {
+                    let fbt = FileBtree {
+                        btree: BtreeRoot::new(bmdr.clone(), keys.clone(), pointers.clone()),
+                        size:  self.di_core.di_size,
+                    };
+                    FileMetadata::Btree(fbt)
+                }
+                _ => {
+                    panic!("Unsupported file format!");
+                }
+            });
         }
+        self.file.as_ref().unwrap()
     }
 
     pub fn get_link_data<R>(&self, buf_reader: &mut R, superblock: &Sb) -> CString
@@ -364,8 +375,108 @@ impl Dinode {
         &mut self.attributes
     }
 
+    /// Perform a sector-size aligned read of the file
+    fn read_sectors<R>(
+        &mut self,
+        buf_reader: &mut R,
+        offset: i64,
+        mut size: usize,
+    ) -> Result<Vec<u8>, i32>
+    where
+        R: BufRead + Reader + Seek,
+    {
+        let sb = SUPERBLOCK.get().unwrap();
+        debug_assert_eq!(
+            offset & ((1i64 << sb.sb_blocklog) - 1),
+            0,
+            "fusefs did a non-sector-size aligned read.  offset={offset:?} size={size:?}"
+        );
+        debug_assert_eq!(
+            size & ((1usize << sb.sb_blocklog) - 1),
+            0,
+            "fusefs did a non-sector-size aligned read.  offset={offset:?} size={size:?}"
+        );
+
+        let mut data = Vec::<u8>::with_capacity(size);
+
+        let mut logical_block = u64::try_from(offset >> sb.sb_blocklog).unwrap();
+        let mut block_offset: u64 = 0;
+
+        let file_metadata = self.get_file();
+        while size > 0 {
+            let (blk, blocks) = (*file_metadata).get_extent(buf_reader.by_ref(), logical_block);
+            let z = usize::try_from(min(
+                u64::try_from(size).unwrap(),
+                (blocks << sb.sb_blocklog) - block_offset,
+            ))
+            .unwrap();
+
+            let oldlen = data.len();
+            data.resize(oldlen + z, 0u8);
+            if let Some(blk) = blk {
+                buf_reader
+                    .seek(SeekFrom::Start(sb.fsb_to_offset(blk) + block_offset))
+                    .map_err(|e| e.raw_os_error().unwrap())?;
+
+                buf_reader
+                    .read_exact(&mut data[oldlen..])
+                    .map_err(|e| e.raw_os_error().unwrap())?;
+            } else {
+                // A hole
+            }
+            logical_block += blocks;
+            size -= z;
+            block_offset = 0;
+        }
+
+        Ok(data)
+    }
+
+    /// Like lseek(2), but only works for SEEK_HOLE and SEEK_DATA
+    pub fn lseek<R>(&mut self, buf_reader: &mut R, offset: u64, whence: i32) -> Result<u64, i32>
+    where
+        R: BufRead + Reader + Seek,
+    {
+        let md = self.get_file();
+        md.lseek(buf_reader, offset, whence)
+    }
+
+    /// Return from a file.  Return a buffer containing the requested data, plus a number of bytes
+    /// that the caller should ignore from the head of the vector.
+    pub fn read<R>(
+        &mut self,
+        buf_reader: &mut R,
+        offset: i64,
+        size: u32,
+    ) -> Result<(Vec<u8>, usize), i32>
+    where
+        R: BufRead + Reader + Seek,
+    {
+        let sb = SUPERBLOCK.get().unwrap();
+        let size = u32::try_from(i64::from(size).min(self.di_core.di_size - offset)).unwrap();
+
+        let block_offset = usize::try_from(offset & ((1i64 << sb.sb_blocklog) - 1)).unwrap();
+        let size_with_leader = usize::try_from(size).unwrap() + block_offset;
+        let size_remainder = size_with_leader & ((1 << sb.sb_blocklog) - 1);
+        let actual_size = if size_remainder > 0 {
+            size_with_leader + usize::try_from(sb.sb_blocksize).unwrap() - size_remainder
+        } else {
+            size_with_leader
+        };
+        let actual_offset = offset - i64::try_from(block_offset).unwrap();
+        let mut v = self.read_sectors(buf_reader, actual_offset, actual_size)?;
+        v.resize(size_with_leader, 0);
+        Ok((v, block_offset))
+    }
+
     /// Is the inode's data located on a real-time device?
     pub fn is_realtime(&self) -> bool {
         self.di_core.is_realtime()
+    }
+
+    /// The size in bytes of the associated regular file, if any exists
+    pub fn fsize(&mut self) -> XfsFsize {
+        let md = self.get_file();
+        md.size()
     }
 }

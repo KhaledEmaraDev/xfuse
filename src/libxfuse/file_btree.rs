@@ -42,15 +42,21 @@ pub struct FileBtree {
     pub size:  XfsFsize,
 }
 
-impl<R: BufRead + Reader + Seek> File<R> for FileBtree {
-    fn get_extent(&self, buf_reader: &mut R, block: XfsFileoff) -> (Option<XfsFsblock>, u64) {
+impl File for FileBtree {
+    fn get_extent<R>(&self, buf_reader: &mut R, block: XfsFileoff) -> (Option<XfsFsblock>, u64)
+    where
+        R: BufRead + Reader + Seek,
+    {
         let sb = SUPERBLOCK.get().unwrap();
         let (start, len) = self.btree.map_block(buf_reader.by_ref(), block).unwrap();
         let len = len.unwrap_or((self.size as u64).div_ceil(sb.sb_blocksize.into()) - block);
         (start, len)
     }
 
-    fn lseek(&self, buf_reader: &mut R, offset: u64, whence: i32) -> Result<u64, i32> {
+    fn lseek<R>(&self, buf_reader: &mut R, offset: u64, whence: i32) -> Result<u64, i32>
+    where
+        R: BufRead + Reader + Seek,
+    {
         self.btree.lseek(buf_reader, offset, whence)
     }
 

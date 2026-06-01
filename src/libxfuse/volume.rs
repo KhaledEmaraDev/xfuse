@@ -191,14 +191,13 @@ impl Filesystem for Volume {
             return;
         };
 
-        let oi = &self.open_files.get(&ino).unwrap();
-        let file = oi.dinode.get_file(self.device.by_ref());
-        if offset > file.size() {
+        let oi = &mut self.open_files.get_mut(&ino).unwrap();
+        if offset > oi.dinode.fsize() {
             reply.error(libc::ENXIO);
             return;
         }
 
-        match file.lseek(self.device.by_ref(), uoffset, whence) {
+        match oi.dinode.lseek(self.device.by_ref(), uoffset, whence) {
             Ok(ofs) => reply.offset(i64::try_from(ofs).unwrap()),
             Err(e) => reply.error(e),
         }
@@ -280,10 +279,8 @@ impl Filesystem for Volume {
         _lock_owner: Option<u64>,
         reply: fuser::ReplyData,
     ) {
-        let oi = &self.open_files.get(&ino).unwrap();
+        let oi = &mut self.open_files.get_mut(&ino).unwrap();
         self.device.set_bufsize(self.sb.sb_blocksize as usize);
-
-        let file = oi.dinode.get_file(self.device.by_ref());
 
         let br = if oi.dinode.is_realtime() {
             if let Some(rtd) = &mut self.rt_device {
@@ -296,7 +293,7 @@ impl Filesystem for Volume {
         } else {
             self.device.by_ref()
         };
-        match file.read(br, offset, size) {
+        match oi.dinode.read(br, offset, size) {
             Ok((v, ignore)) => reply.data(&v[ignore..]),
             Err(e) => reply.error(e),
         }
