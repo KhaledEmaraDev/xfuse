@@ -98,7 +98,8 @@ pub struct DinodeCore {
     //_di_onlink: u16,
     pub di_uid:     u32,
     pub di_gid:     u32,
-    pub di_nlink:   u32,
+    //_di_nlink:   u32,
+    nlink:          u32,
     //_di_projid: u16,
     //_di_projid_hi: u16,
     //_di_pad: [u8; 6],
@@ -214,7 +215,7 @@ impl DinodeCore {
             crtime: self.timestamp(&self.di_crtime),
             kind,
             perm: self.di_mode & !S_IFMT,
-            nlink: self.di_nlink,
+            nlink: self.nlink,
             uid: self.di_uid,
             gid: self.di_gid,
             rdev: 0,
@@ -251,15 +252,16 @@ impl<Ctx> Decode<Ctx> for DinodeCore {
         assert_eq!(di_magic, XFS_DINODE_MAGIC, "Inode magic number is invalid");
         let di_mode: u16 = Decode::decode(decoder)?;
         let di_version: i8 = Decode::decode(decoder)?;
-        assert!(
-            di_version == 2 || di_version == 3,
-            "Only inode versions 2 and 3 are supported"
-        );
         let di_format: XfsDinodeFmt = Decode::decode(decoder)?;
-        let _di_onlink: u16 = Decode::decode(decoder)?;
+        let di_onlink: u16 = Decode::decode(decoder)?;
         let di_uid: u32 = Decode::decode(decoder)?;
         let di_gid: u32 = Decode::decode(decoder)?;
         let di_nlink: u32 = Decode::decode(decoder)?;
+        let nlink: u32 = if di_version == 1 {
+            di_onlink.into()
+        } else {
+            di_nlink
+        };
         let _di_projid: u16 = Decode::decode(decoder)?;
         let _di_projid_hi: u16 = Decode::decode(decoder)?;
         let di_maybe_big_nextents: u64 = Decode::decode(decoder)?;
@@ -306,7 +308,7 @@ impl<Ctx> Decode<Ctx> for DinodeCore {
             di_format,
             di_uid,
             di_gid,
-            di_nlink,
+            nlink,
             di_atime,
             di_mtime,
             di_ctime,
