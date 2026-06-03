@@ -36,6 +36,7 @@ use bincode_next::{
     Decode,
 };
 use libc::{mode_t, S_IFBLK, S_IFCHR, S_IFDIR, S_IFIFO, S_IFLNK, S_IFMT, S_IFREG, S_IFSOCK};
+use tracing::warn;
 
 use super::{
     attr::Attributes,
@@ -120,7 +121,18 @@ impl Dinode {
         let di_core = DinodeCore::decode(&mut decoder).unwrap();
 
         let di_u: Option<DiU>;
-        match (di_core.di_mode as mode_t) & S_IFMT {
+        let effective_mode = if di_core.di_mode == 0 {
+            // SGI XFS file systems sometimes have corrupt inodes with a mode of 0 . Treat them
+            // like regular files, which they all appear to be
+            warn!(
+                "Unknown inode type {:#o} for inode {inode_number}",
+                di_core.di_mode
+            );
+            S_IFREG
+        } else {
+            (di_core.di_mode as mode_t) & S_IFMT
+        };
+        match effective_mode {
             S_IFREG => match di_core.di_format {
                 XfsDinodeFmt::Extents => {
                     let mut bmx = Vec::<BmbtRec>::new();
@@ -302,7 +314,7 @@ impl Dinode {
         self.directory.as_ref().unwrap()
     }
 
-    pub fn get_file(&mut self) -> &FileMetadata {
+    pub fn get_file(&mut self) -> Result<&FileMetadata, i32> {
         if self.file.is_none() {
             self.file = Some(match &self.di_u {
                 DiU::Bmx(bmx) => {
@@ -319,12 +331,10 @@ impl Dinode {
                     };
                     FileMetadata::Btree(fbt)
                 }
-                _ => {
-                    panic!("Unsupported file format!");
-                }
+                _ => return Err(libc::ENXIO),
             });
         }
-        self.file.as_ref().unwrap()
+        Ok(self.file.as_ref().unwrap())
     }
 
     pub fn get_link_data<R>(&self, buf_reader: &mut R, superblock: &Sb) -> CString
@@ -403,7 +413,7 @@ impl Dinode {
         let mut logical_block = u64::try_from(offset >> sb.sb_blocklog).unwrap();
         let mut block_offset: u64 = 0;
 
-        let file_metadata = self.get_file();
+        let file_metadata = self.get_file()?;
         while size > 0 {
             let (blk, blocks) = (*file_metadata).get_extent(buf_reader.by_ref(), logical_block);
             let z = usize::try_from(min(
@@ -449,7 +459,7 @@ impl Dinode {
     where
         R: BufRead + Reader + Seek,
     {
-        let md = self.get_file();
+        let md = self.get_file()?;
         md.lseek(buf_reader, offset, whence)
     }
 
@@ -489,7 +499,6 @@ impl Dinode {
 
     /// The size in bytes of the associated regular file, if any exists
     pub fn fsize(&mut self) -> XfsFsize {
-        let md = self.get_file();
-        md.size()
+        self.get_file().map(FileMetadata::size).unwrap_or(0)
     }
 }

@@ -108,10 +108,11 @@ pub fn get_file_type(kind: FileKind) -> Result<FileType, c_int> {
             S_IFCHR => Ok(FileType::CharDevice),
             S_IFBLK => Ok(FileType::BlockDevice),
             S_IFIFO => Ok(FileType::NamedPipe),
-            _ => {
-                error!("Unknown file type {:?}.", (file_mode as mode_t) & S_IFMT);
-                Err(ENOENT)
-            }
+            // TODO: add a FileType::unknown to fuser
+            // https://github.com/cberner/fuser/issues/685
+            // Until fuser gains that feature, the best that we can do is to report these corrupt
+            // inodes as some other type of file.
+            _ => Ok(FileType::RegularFile),
         },
     }
 }
