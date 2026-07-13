@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] - ReleaseDate
+
+### Fixed
+
+- Fixed the build on FreeBSD RISCV without COMPAT11 enabled.
+  ([#195](https://github.com/KhaledEmaraDev/xfuse/issues/195))
+
 ## [0.7.0] - 2026-06-08
 
 ### Added
