@@ -28,11 +28,12 @@
 use std::path::PathBuf;
 
 use clap::{crate_version, Parser};
+use compat::daemon;
 use fuser::{mount2, MountOption};
 use libxfuse::volume::Volume;
-use nix::unistd::daemon;
 use tracing_subscriber::EnvFilter;
 
+mod compat;
 mod libxfuse;
 
 #[derive(Parser, Clone, Debug)]
