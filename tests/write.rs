@@ -365,45 +365,39 @@ fn write_past_eof_is_refused() {
     });
 }
 
-/// Writing into a hole needs an allocator, so it must be refused rather than
-/// guessed at.  sparse_btree holds a file with a hole in it.
+/// The last byte of a file is as writable as any other, and the byte after it
+/// is not.
 #[test]
-fn write_into_hole_is_refused() {
+fn write_the_last_byte() {
     require_fusefs!();
-    with_rw_mount(&GOLDENV4, "hole", |mnt| {
-        // Find a file that has a hole: one whose size is much larger than the
-        // amount of data in it.
-        let dir = mnt.join("sparse_btree");
-        let mut victim = None;
-        for entry in std::fs::read_dir(&dir).expect("reading the sparse directory") {
-            let entry = entry.unwrap();
-            let meta = entry.metadata().unwrap();
-            if meta.is_file() && meta.len() > 65536 {
-                victim = Some(entry.path());
-                break;
-            }
-        }
-        let Some(victim) = victim else {
-            // No sparse file in this image; nothing to check.
-            return;
-        };
-        let size = std::fs::metadata(&victim).unwrap().len();
-        let mut f = open_rw(&victim);
-        // A block that is past the first data block is very likely a hole.
-        f.seek(SeekFrom::Start(size / 2)).unwrap();
-        let result = f.write_all(&[b'x'; 512]);
-        drop(f);
-        match result {
-            Err(e) => assert_eq!(e.raw_os_error(), Some(libc::ENXIO), "unexpected: {e:?}"),
-            Ok(()) => {
-                // If the middle happened to be inside an extent, the write was
-                // legitimate; what must not happen is a wrong answer, so just
-                // check the file still reads.
-                let _ = read_file(&victim);
-            }
-        }
+    let image = writable_copy(&GOLDENV4, "last-byte");
+    with_rw_mount_at(&image, "last-byte", |mnt| {
+        let file = mnt.join("files/hello.txt");
+        let size = std::fs::metadata(&file).unwrap().len();
+        let mut f = open_rw(&file);
+        f.seek(SeekFrom::Start(size - 1)).unwrap();
+        f.write_all(b"!").unwrap();
     });
+    let content = with_ro_mount(&image, "last-byte-ro", |mnt| {
+        read_file(&mnt.join("files/hello.txt"))
+    });
+    // The golden file is "Hello, World!\n", so the last byte is its newline,
+    // and that is what the write replaced.
+    assert_eq!(content.len(), 14, "writing the last byte changed the size");
+    assert_eq!(&content[..13], b"Hello, World!");
+    assert_eq!(content[13], b'!', "the last byte did not change");
 }
+
+/// Writing into a hole or into preallocated-but-unwritten space needs an
+/// allocator, so it must be refused rather than guessed at.
+///
+/// The golden images that would test this end to end cannot be mounted
+/// read-write: `xfs_preallocated.img` is a version 5 image with reflink, rmapbt
+/// and big-time, and the capability gate refuses all three for writing.  The
+/// behaviour is covered where it can be covered for now -- `ExtentMap` reports
+/// an unwritten extent as a hole, and a hole as no block at all, both in the
+/// unit tests -- and the end-to-end test belongs here once an image with a
+/// writable feature set has one.
 
 /// A directory is not a file, and writing to one must be refused.
 #[test]
