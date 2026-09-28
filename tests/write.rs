@@ -458,7 +458,8 @@ fn whole_block_and_unaligned_writes() {
 #[test]
 fn write_past_eof_is_refused() {
     require_fusefs!();
-    with_rw_mount(&GOLDENV4, "past-eof", |mnt| {
+    let image = writable_copy(&GOLDENV4, "past-eof");
+    let (size, before) = with_rw_mount_at(&image, "past-eof", |mnt| {
         let file = mnt.join("files/hello.txt");
         let before = read_file(&file);
         let size = before.len();
@@ -467,14 +468,13 @@ fn write_past_eof_is_refused() {
         let result = f.write_all(b"more data than fits");
         drop(f);
 
-        // What matters is that the write did not happen: the file is the size
-        // it was and holds what it held.  How the refusal arrives is the
-        // kernel's business as much as ours -- a kernel that finds the write
-        // unacceptable before it reaches the file system reports a short write
-        // rather than the file system's EFBIG, and both are a refusal.
+        // How the refusal arrives is the kernel's business as much as ours: a
+        // kernel that finds the write unacceptable before it reaches the file
+        // system reports a short write rather than the file system's EFBIG, and
+        // both are a refusal.  A write reported as a success is not.
         match result {
             Ok(()) => panic!(
-                "a write of 17 bytes past the end of a {size} byte file was reported as succeeding"
+                "a write of 21 bytes past the end of a {size} byte file was reported as succeeding"
             ),
             Err(e) => {
                 let acceptable =
@@ -486,13 +486,29 @@ fn write_past_eof_is_refused() {
                 );
             }
         }
-        let after = read_file(&file);
+        (size, before)
+    });
+
+    // What the file looks like *through the mount that tried the write* is not
+    // the question.  A kernel may extend its own idea of the file's size on its
+    // way to the write -- it has to, to turn a write past the end into a write
+    // at the end -- and then hand us a request we refuse, leaving the kernel
+    // with a larger size than the file system has and padding reads to match.
+    // That disagreement is the kernel's, and it lasts only as long as the mount.
+    //
+    // The question is whether anything was written, and that is what a second,
+    // read-only mount with no cached size of its own can answer.
+    with_ro_mount(&image, "past-eof-ro", |mnt| {
+        let after = read_file(&mnt.join("files/hello.txt"));
         assert_eq!(
             after.len(),
             size,
-            "a refused write changed the size of the file"
+            "a refused write changed the file on the image"
         );
-        assert_eq!(after, before, "a refused write changed the file");
+        assert_eq!(
+            after, before,
+            "a refused write changed the file on the image"
+        );
     });
 }
 
