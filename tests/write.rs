@@ -388,16 +388,15 @@ fn write_the_last_byte() {
     assert_eq!(content[13], b'!', "the last byte did not change");
 }
 
-/// Writing into a hole or into preallocated-but-unwritten space needs an
-/// allocator, so it must be refused rather than guessed at.
-///
-/// The golden images that would test this end to end cannot be mounted
-/// read-write: `xfs_preallocated.img` is a version 5 image with reflink, rmapbt
-/// and big-time, and the capability gate refuses all three for writing.  The
-/// behaviour is covered where it can be covered for now -- `ExtentMap` reports
-/// an unwritten extent as a hole, and a hole as no block at all, both in the
-/// unit tests -- and the end-to-end test belongs here once an image with a
-/// writable feature set has one.
+// Writing into a hole, or into preallocated-but-unwritten space, needs an
+// allocator and so must be refused rather than guessed at.  There is no test for
+// it here yet, and the reason is worth writing down: the image that would test
+// it, xfs_preallocated.img, is a version 5 image with reflink, rmapbt and
+// big-time, and the capability gate refuses all three for writing.  The
+// behaviour is covered where it can be covered for now -- `ExtentMap` reports an
+// unwritten extent as a hole, and a hole as no block at all, both in the unit
+// tests -- and the end-to-end test belongs here once an image with a writable
+// feature set has a hole in it.
 
 /// A directory is not a file, and writing to one must be refused.
 #[test]

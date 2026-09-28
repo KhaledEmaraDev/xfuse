@@ -109,7 +109,7 @@ impl FsError {
             FsError::NoSpace => libc::ENOSPC,
             FsError::ReadOnly { .. } => libc::EROFS,
             FsError::Unsupported { .. } => libc::ENOSYS,
-            FsError::Corrupt { .. } => libc::EUCLEAN,
+            FsError::Corrupt { .. } => crate::libxfuse::EUCLEAN,
             FsError::Io(e) => e.raw_os_error().unwrap_or(libc::EIO),
         }
     }
@@ -208,7 +208,7 @@ mod t {
         assert_eq!(FsError::NoSpace.errno(), libc::ENOSPC);
         assert_eq!(FsError::read_only("x").errno(), libc::EROFS);
         assert_eq!(FsError::unsupported("reflink").errno(), libc::ENOSYS);
-        assert_eq!(FsError::corrupt("x").errno(), libc::EUCLEAN);
+        assert_eq!(FsError::corrupt("x").errno(), crate::libxfuse::EUCLEAN);
         assert_eq!(FsError::invalid(libc::EISDIR, "x").errno(), libc::EISDIR);
         assert_eq!(
             FsError::from(io::Error::from_raw_os_error(libc::EIO)).errno(),
@@ -222,7 +222,7 @@ mod t {
     fn short_read_is_corruption() {
         let e: FsError = io::Error::new(io::ErrorKind::UnexpectedEof, "boom").into();
         assert!(matches!(e, FsError::Corrupt { .. }));
-        assert_eq!(e.errno(), libc::EUCLEAN);
+        assert_eq!(e.errno(), crate::libxfuse::EUCLEAN);
     }
 
     /// Messages must name the problem, since they end up in the log and in the

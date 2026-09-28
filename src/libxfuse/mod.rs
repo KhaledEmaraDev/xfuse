@@ -51,5 +51,17 @@ cfg_if! {
     }
 }
 
+/// The errno to report for a file system that is damaged.
+///
+/// Linux and macOS have a dedicated code for "structure needs cleaning", which
+/// is exactly what a corrupt on-disk structure is, and which tells the caller
+/// that the answer is not going to improve on a retry.  The BSDs have no such
+/// code, and an I/O error is the honest thing to report there: the damage was
+/// found in the image, and reading the image is what failed.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+const EUCLEAN: i32 = libc::EUCLEAN;
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+const EUCLEAN: i32 = libc::EIO;
+
 #[allow(clippy::unnecessary_cast)] // It isn't unnecessary on all platforms.
 const S_IFMT: u16 = libc::S_IFMT as u16;

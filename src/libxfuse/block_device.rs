@@ -340,7 +340,7 @@ mod t {
     fn write_past_end() {
         let f = image();
         let dev = BlockDevice::open(f.path(), Access::ReadWrite).unwrap();
-        let ss = dev.sectorsize() as usize;
+        let ss = dev.sectorsize();
         let buf = vec![0u8; ss];
         assert!(dev.write_at(&buf, dev.size() - (ss as u64) + 1).is_err());
         assert!(dev.write_at(&buf, dev.size()).is_err());

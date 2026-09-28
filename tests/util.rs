@@ -25,6 +25,13 @@ macro_rules! skip {
 
 /// Skip the test if we don't have the ability to mount fuse file systems.
 // Copied from nix.
+//
+// The skip message names the file and line of the `require_fusefs!` call, which
+// is what a test reader wants and is available everywhere.  It used to name the
+// test's own function, through the `function_name!` macro that the
+// `function_name` crate's `#[named]` attribute defines; that only works in a
+// test target where *every* test carries the attribute, and in a target without
+// it the name resolved to the crate of that name instead, which is not a macro.
 #[cfg(target_os = "freebsd")]
 #[macro_export]
 macro_rules! require_fusefs {
@@ -40,9 +47,12 @@ macro_rules! require_fusefs {
                     .unwrap())
             || !::std::path::Path::new("/dev/fuse").exists()
         {
+            let here = ::std::panic::Location::caller();
             skip!(
-                "{} requires the ability to mount fusefs. Skipping test.",
-                concat!(::std::module_path!(), "::", function_name!())
+                "{} requires the ability to mount fusefs. Skipping test ({}:{}).",
+                ::std::module_path!(),
+                here.file(),
+                here.line()
             );
         }
     };
@@ -55,9 +65,12 @@ macro_rules! require_fusefs {
 macro_rules! require_fusefs {
     () => {
         if !::std::path::Path::new("/dev/fuse").exists() {
+            let here = ::std::panic::Location::caller();
             skip!(
-                "{} requires the ability to mount fusefs. Skipping test.",
-                ::std::module_path!()
+                "{} requires the ability to mount fusefs. Skipping test ({}:{}).",
+                ::std::module_path!(),
+                here.file(),
+                here.line()
             );
         }
     };
@@ -69,12 +82,15 @@ macro_rules! require_root {
         if !::nix::unistd::Uid::current().is_root() {
             use ::std::io::Write;
 
+            let here = ::std::panic::Location::caller();
             let stderr = ::std::io::stderr();
             let mut handle = stderr.lock();
             writeln!(
                 handle,
-                "{} requires root privileges.  Skipping test.",
-                concat!(::std::module_path!(), "::", function_name!())
+                "{} requires root privileges.  Skipping test ({}:{}).",
+                ::std::module_path!(),
+                here.file(),
+                here.line()
             )
             .unwrap();
             return;
@@ -109,6 +125,7 @@ fn prepare_image(filename: &str) -> PathBuf {
 }
 
 pub static GOLDEN1K: LazyLock<PathBuf> = LazyLock::new(|| prepare_image("xfs1024.img"));
+#[allow(unused)] // Not used by the write tests
 pub static GOLDEN4K: LazyLock<PathBuf> = LazyLock::new(|| prepare_image("xfs4096.img"));
 #[allow(unused)] // Not used by benches
 pub static GOLDEN4KN: LazyLock<PathBuf> = LazyLock::new(|| prepare_image("xfs_4kn.img"));
@@ -128,6 +145,7 @@ pub static GOLDEN_RT2: LazyLock<PathBuf> = LazyLock::new(|| prepare_image("xfs_r
 #[allow(unused)] // Not used by benches
 pub static GOLDEN_ATTRV1: LazyLock<PathBuf> = LazyLock::new(|| prepare_image("xfs_xattr_v1.img"));
 
+#[allow(unused)] // Not used by benches
 /// Copy a golden image to a scratch file that a test may modify.
 ///
 /// The golden images are shared by every test in the binary, so a test that

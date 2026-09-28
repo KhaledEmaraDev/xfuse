@@ -256,7 +256,7 @@ mod t {
             let idx = br.idx;
 
             br.seek(SeekFrom::Current(0)).unwrap();
-            assert_eq!(pos as u64, br.position());
+            assert_eq!(pos, br.position());
             assert_eq!(idx, br.idx);
         }
 
@@ -307,7 +307,6 @@ mod t {
             let bs = br.bufsize() as u64;
             let initial = bs + (bs >> 2);
             br.seek(SeekFrom::Start(initial)).unwrap();
-            let idx = br.idx as u64;
 
             br.seek(SeekFrom::Current(bs as i64)).unwrap();
             assert_eq!(initial + bs, br.position());
