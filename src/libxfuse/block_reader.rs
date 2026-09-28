@@ -26,45 +26,39 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 use std::{
-    fs::File,
     io::{self, BufRead, Read, Result as IoResult, Seek, SeekFrom},
-    os::unix::fs::MetadataExt,
     path::Path,
+    sync::Arc,
 };
 
 use bincode_next::{de::read::Reader, error::DecodeError};
-use cfg_if::cfg_if;
-use tracing::warn;
 
-#[cfg(target_os = "freebsd")]
-mod ffi {
-    nix::ioctl_read! {
-        /// get the size of the entire device in bytes.  this should be a multiple of the sector
-        /// size.
-        diocgmediasize, 'd', 129, nix::libc::off_t
-    }
+use super::block_device::{Access, BlockDevice};
 
-    nix::ioctl_read! {
-        /// Get the sector size of the device in bytes.  The sector size is the smallest unit of
-        /// data which can be transferred from this device.  Usually this is a power of 2 but it
-        /// might not be (i.e. CDROM audio).
-        diocgsectorsize, b'd', 128, u32
-    }
-}
-
-#[cfg(target_os = "linux")]
-mod ffi {
-    nix::ioctl_read! {
-        /// Get the size of the entire device in bytes.
-        blkgetsize64, 0x12, 114, u64
-    }
-}
-
+/// A forward-only, seekable window onto a [`BlockDevice`].
+///
+/// This is the read side's view of the image: the file system's parsers want a
+/// `Seek` + `Read` stream they can decode structures from, while the write side
+/// wants random positional access.  Rather than teach the parsers about
+/// positional I/O, the reader keeps one readahead window on top of the device.
+///
+/// The window is *read only*.  It is never the home of a modified block: the
+/// write path goes through the block cache and the transaction, and calls
+/// [`BlockReader::invalidate`] after it commits, so no stale copy of a physical
+/// block can survive a mutation of the image.
 #[derive(Debug)]
 pub struct BlockReader {
-    file:       File,
+    device:     Arc<BlockDevice>,
     block:      Vec<u8>,
+    /// The next byte to be returned out of `block`.
     idx:        usize,
+    /// The image offset at which the contents of `block` begin.
+    start:      u64,
+    /// The image offset of the next byte a read would return.  This is tracked
+    /// separately from `start + idx` because the window can be thrown away or
+    /// resized, and because the reader's position must stay put when that
+    /// happens.
+    pos:        u64,
     /// The absolute minimum that we can read in any operation
     sectorsize: usize,
     /// File's size in bytes.  It should not change while mounted.
@@ -72,81 +66,58 @@ pub struct BlockReader {
 }
 
 impl BlockReader {
-    fn mediasize(f: &File) -> u64 {
-        use std::os::{fd::AsRawFd, unix::fs::FileTypeExt};
-
-        let md = f.metadata().unwrap();
-        let ft = md.file_type();
-        if ft.is_block_device() || ft.is_char_device() {
-            cfg_if! {
-                if #[cfg(target_os = "freebsd")] {
-                    let mut mediasize = std::mem::MaybeUninit::<i64>::uninit();
-                    unsafe {
-                        // This ioctl is always safe
-                        ffi::diocgmediasize(f.as_raw_fd(), mediasize.as_mut_ptr()).unwrap();
-                        mediasize.assume_init() as u64
-                    }
-                } else if #[cfg(target_os = "linux")] {
-                    let mut mediasize = std::mem::MaybeUninit::<u64>::uninit();
-                    unsafe {
-                        // This ioctl is always safe
-                        ffi::blkgetsize64(f.as_raw_fd(), mediasize.as_mut_ptr()).unwrap();
-                        mediasize.assume_init()
-                    }
-                } else {
-                    warn!("No mediasize ioctl is supported on this operating system");
-                    0
-                }
-            }
-        } else if ft.is_file() {
-            md.size()
-        } else {
-            warn!("Trying to use a {:?} as a real-time device", ft);
-            0
-        }
-    }
-
-    fn sectorsize(f: &File) -> usize {
-        let md = f.metadata().unwrap();
-        cfg_if! {
-            if #[cfg(target_os = "freebsd")] {
-                use std::os::{
-                    fd::AsRawFd,
-                    unix::fs::FileTypeExt
-                };
-
-                let ft = md.file_type();
-                if ft.is_block_device() || ft.is_char_device() {
-                    let mut sectorsize = std::mem::MaybeUninit::<u32>::uninit();
-                    unsafe {
-                        // This ioctl is always safe
-                        ffi::diocgsectorsize(f.as_raw_fd(), sectorsize.as_mut_ptr()).unwrap();
-                        return sectorsize.assume_init() as usize;
-                    }
-                }
-            }
-        }
-        md.blksize() as usize
-    }
-
+    /// Open the image at `path` for reading.
     pub fn open(path: &Path) -> IoResult<Self> {
-        let file = File::options().read(true).write(false).open(path)?;
+        Ok(Self::from_device(Arc::new(BlockDevice::open(path, Access::ReadOnly)?)))
+    }
 
-        let sectorsize = Self::sectorsize(&file);
-        let size = Self::mediasize(&file);
+    /// Build a reader over an already opened device.
+    pub fn from_device(device: Arc<BlockDevice>) -> Self {
+        let sectorsize = device.sectorsize();
+        let size = device.size();
         let block = vec![0u8; sectorsize];
-        Ok(Self {
-            file,
+        Self {
+            device,
             block,
             idx: sectorsize,
+            start: 0,
+            pos: 0,
             sectorsize,
             size,
-        })
+        }
     }
 
+    /// The device that this reader is looking at.  Cloning it gives another
+    /// handle onto the very same image, which is how the write path reaches the
+    /// same bytes.
+    pub fn device(&self) -> Arc<BlockDevice> {
+        Arc::clone(&self.device)
+    }
+
+    /// The image offset of the next byte that a read would return.
+    pub const fn position(&self) -> u64 {
+        self.pos
+    }
+
+    /// Throw the readahead window away, so that the next read comes from the
+    /// image.
+    ///
+    /// The write path calls this after it commits, because the window may
+    /// contain bytes that the commit has just replaced.  The reader's position
+    /// does not move.
+    pub fn invalidate(&mut self) {
+        self.idx = self.block.len();
+    }
+
+    /// Fill the window, aligning it on the reader's current position.
+    ///
+    /// Aligning means the window always starts at a multiple of its own size,
+    /// which is what keeps every device access on a sector boundary no matter
+    /// where in the image the caller asked to read.
     fn refill(&mut self) -> IoResult<()> {
-        self.file.read_exact(&mut self.block)?;
-        self.idx = 0;
+        self.start = self.pos - (self.pos % self.block.len() as u64);
+        self.device.read_at(&mut self.block, self.start)?;
+        self.idx = (self.pos - self.start) as usize;
         Ok(())
     }
 
@@ -167,8 +138,8 @@ impl BlockReader {
     }
 
     /// Change the reader's bufsize.  It will be rounded up to a multiple of the sectorsize.
-    /// After this operation, the buffer should be considered undefined until the next absolute
-    /// Seek operation.
+    /// After this operation, the window is empty and will be refilled, starting
+    /// again at the reader's current position.
     pub fn set_bufsize(&mut self, bufsize: usize) {
         let remainder = bufsize & (self.sectorsize - 1);
         let bufsize = if remainder > 0 {
@@ -188,6 +159,7 @@ impl Read for BlockReader {
         let buf = &mut buf[0..num];
         buf.copy_from_slice(&self.block[self.idx..(self.idx + num)]);
         self.idx += num;
+        self.pos += num as u64;
         Ok(num)
     }
 }
@@ -206,34 +178,31 @@ impl BufRead for BlockReader {
 
 impl Seek for BlockReader {
     fn seek(&mut self, pos: SeekFrom) -> IoResult<u64> {
-        let bs = self.bufsize() as u64;
-        match pos {
-            SeekFrom::Start(pos) => {
-                let real = self.file.seek(SeekFrom::Start(pos / bs * bs))?;
-                let rem = pos - real;
-                assert!(rem < bs);
-
-                self.refill()?;
-                self.idx = rem as usize;
-
-                Ok(real + rem)
-            }
+        let target = match pos {
+            SeekFrom::Start(target) => target,
             SeekFrom::Current(offset) => {
-                let real = self.file.stream_position()?;
-                let cur = real - self.block.len() as u64 + self.idx as u64;
-                let newidx = offset + self.idx as i64;
-                if newidx >= 0 && newidx < self.bufsize() as i64 {
-                    // The data is already buffered; just adjust the pointer
-                    self.idx = newidx as usize;
-                    Ok(real - self.block.len() as u64 + newidx as u64)
-                } else if cur as i64 + offset < 0 {
-                    Err(io::Error::from_raw_os_error(libc::EINVAL))
+                let cur = self.position();
+                if offset < 0 {
+                    cur.checked_sub(offset.unsigned_abs())
                 } else {
-                    self.seek(SeekFrom::Start((cur as i64 + offset) as u64))
+                    cur.checked_add(offset as u64)
                 }
+                .ok_or_else(|| io::Error::from_raw_os_error(libc::EINVAL))?
             }
             SeekFrom::End(_) => todo!("SeekFrom::End()"),
+        };
+
+        let end = self.start + self.block.len() as u64;
+        if (self.start..end).contains(&target) {
+            // The window already holds what was asked for; move along it.
+            self.idx = (target - self.start) as usize;
+            self.pos = target;
+            return Ok(target);
         }
+
+        self.pos = target;
+        self.refill()?;
+        Ok(target)
     }
 }
 
@@ -272,20 +241,19 @@ mod t {
             br
         }
 
-        /// Seeking to SeekFrom::Current(0) should refill the internal buffer but otherwise be a
-        /// no-op.
+        /// Seeking to SeekFrom::Current(0) should be a no-op when the target is
+        /// already inside the window.
         #[test]
         #[allow(clippy::seek_from_current)] // That's the whole point of the test
         fn current_0() {
             let mut br = harness();
-            let bs = br.bufsize();
+            let bs = br.bufsize() as u64;
             let pos = bs + (bs >> 2);
-            br.seek(SeekFrom::Start(pos as u64)).unwrap();
+            br.seek(SeekFrom::Start(pos)).unwrap();
             let idx = br.idx;
-            let real_pos = br.file.stream_position().unwrap();
 
             br.seek(SeekFrom::Current(0)).unwrap();
-            assert_eq!(real_pos, br.file.stream_position().unwrap());
+            assert_eq!(pos as u64, br.position());
             assert_eq!(idx, br.idx);
         }
 
@@ -293,28 +261,27 @@ mod t {
         #[test]
         fn current_neg() {
             let mut br = harness();
-            let bs = br.bufsize();
+            let bs = br.bufsize() as u64;
             let initial = bs + (bs >> 2);
-            br.seek(SeekFrom::Start(initial as u64)).unwrap();
+            br.seek(SeekFrom::Start(initial)).unwrap();
             let idx = br.idx as u64;
-            let real_pos = br.file.stream_position().unwrap();
 
             br.seek(SeekFrom::Current(-1)).unwrap();
-            assert_eq!(
-                real_pos + idx - 1,
-                br.file.stream_position().unwrap() + br.idx as u64
-            );
+            assert_eq!(initial - 1, br.position());
+            assert_eq!(idx - 1, br.idx as u64);
         }
 
         /// Seek to a negative absolute offset using SeekFrom::Current
         #[test]
         fn current_neg_neg() {
             let mut br = harness();
-            let bs = br.bufsize();
+            let bs = br.bufsize() as u64;
             let initial = bs + (bs >> 2);
-            br.seek(SeekFrom::Start(initial as u64)).unwrap();
+            br.seek(SeekFrom::Start(initial)).unwrap();
 
-            let e = br.seek(SeekFrom::Current(-2 * initial as i64)).unwrap_err();
+            let e = br
+                .seek(SeekFrom::Current(-2 * initial as i64))
+                .unwrap_err();
             assert_eq!(libc::EINVAL, e.raw_os_error().unwrap());
         }
 
@@ -322,34 +289,66 @@ mod t {
         #[test]
         fn current_pos_incr() {
             let mut br = harness();
-            let bs = br.bufsize();
+            let bs = br.bufsize() as u64;
             let initial = bs + (bs >> 2);
-            br.seek(SeekFrom::Start(initial as u64)).unwrap();
+            br.seek(SeekFrom::Start(initial)).unwrap();
             let idx = br.idx as u64;
-            let real_pos = br.file.stream_position().unwrap();
 
             br.seek(SeekFrom::Current(1)).unwrap();
-            assert_eq!(
-                real_pos + idx + 1,
-                br.file.stream_position().unwrap() + br.idx as u64
-            );
+            assert_eq!(initial + 1, br.position());
+            assert_eq!(idx + 1, br.idx as u64);
         }
 
         /// Seek to a large positive offset from current
         #[test]
         fn current_pos_large() {
             let mut br = harness();
-            let bs = br.bufsize();
+            let bs = br.bufsize() as u64;
             let initial = bs + (bs >> 2);
-            br.seek(SeekFrom::Start(initial as u64)).unwrap();
+            br.seek(SeekFrom::Start(initial)).unwrap();
             let idx = br.idx as u64;
-            let real_pos = br.file.stream_position().unwrap();
 
             br.seek(SeekFrom::Current(bs as i64)).unwrap();
-            assert_eq!(
-                real_pos + idx + bs as u64,
-                br.file.stream_position().unwrap() + br.idx as u64
-            );
+            assert_eq!(initial + bs, br.position());
+            // The window realigned itself around the new position, so the
+            // reader sits at the same place within the window as it did before.
+            assert_eq!((initial + bs) % bs, br.idx as u64);
+        }
+
+        /// The window must always start on a multiple of its own size, no
+        /// matter how the caller got there.
+        #[test]
+        fn window_alignment() {
+            let mut br = harness();
+            let bs = br.bufsize() as u64;
+            for pos in [0u64, 1, bs - 1, bs, bs + 1, 3 * bs + 17, 7 * bs] {
+                br.seek(SeekFrom::Start(pos)).unwrap();
+                assert_eq!(pos, br.position());
+                assert_eq!(0, br.start % bs);
+            }
+        }
+
+        /// Changing the buffer size empties the window but must not move the
+        /// reader.  The next read refills starting from the same position.
+        #[test]
+        fn set_bufsize_keeps_position() {
+            let mut br = harness();
+            let bs = br.bufsize() as u64;
+            br.seek(SeekFrom::Start(bs + 1)).unwrap();
+            br.set_bufsize(bs as usize * 2);
+            assert_eq!(bs + 1, br.position());
+            assert_eq!(0, br.buffered());
+        }
+
+        /// Invalidating the window must not move the reader either.
+        #[test]
+        fn invalidate_keeps_position() {
+            let mut br = harness();
+            let bs = br.bufsize() as u64;
+            br.seek(SeekFrom::Start(bs + 3)).unwrap();
+            br.invalidate();
+            assert_eq!(bs + 3, br.position());
+            assert_eq!(0, br.buffered());
         }
     }
 }
