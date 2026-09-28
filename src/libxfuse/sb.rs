@@ -226,9 +226,14 @@ pub struct Sb {
     sb_features2:         SbFeatures2,
     // sb_bad_features2: u32,
     // sb_features_compat: u32,
-    // sb_features_ro_compat: u32,
-    sb_features_incompat: SbFeaturesIncompat,
+    /// Features that only make sense on a read-only file system, such as
+    /// reflink and the reverse mapping B+tree.
+    sb_features_ro_compat: u32,
+    // sb_features_incompat: u32,
     // sb_features_log_incompat: u32,
+    sb_features_incompat: SbFeaturesIncompat,
+    /// File system level flags, such as "this file system is read-only".
+    sb_flags:             u8,
 }
 
 impl Sb {
@@ -278,7 +283,7 @@ impl Sb {
         let _sb_uquotino = buf_reader.read_u64::<BigEndian>().unwrap();
         let _sb_gquotino = buf_reader.read_u64::<BigEndian>().unwrap();
         let _sb_qflags = buf_reader.read_u16::<BigEndian>().unwrap();
-        let _sb_flags = buf_reader.read_u8().unwrap();
+        let sb_flags = buf_reader.read_u8().unwrap();
         let _sb_shared_vn = buf_reader.read_u8().unwrap();
         let _sb_inoalignmt = buf_reader.read_u32::<BigEndian>().unwrap();
         let _sb_unit = buf_reader.read_u32::<BigEndian>().unwrap();
@@ -293,7 +298,7 @@ impl Sb {
 
         /* Version 5 superblock features */
         let _sb_features_compat = buf_reader.read_u32::<BigEndian>().unwrap();
-        let _sb_features_ro_compat = buf_reader.read_u32::<BigEndian>().unwrap();
+        let sb_features_ro_compat = buf_reader.read_u32::<BigEndian>().unwrap();
         let incompat_raw = buf_reader.read_u32::<BigEndian>().unwrap();
         let sb_features_incompat = SbFeaturesIncompat::from_bits(incompat_raw)
             .unwrap_or_else(|| panic!("Unknown value in sb_features_incompat: {incompat_raw:?}"));
@@ -364,8 +369,48 @@ impl Sb {
             sb_fdblocks,
             sb_dirblklog,
             sb_features2,
+            sb_features_ro_compat,
             sb_features_incompat,
+            sb_flags,
         }
+    }
+
+    /// Is a read-only-compat feature enabled?
+    ///
+    /// These are the features that describe how a file system was built rather
+    /// than whether it may be written to.  Each of them implies on-disk
+    /// structures that a writer has to keep up to date.
+    pub const fn read_only_compat(&self, feature: u32) -> bool {
+        self.sb_features_ro_compat & feature != 0
+    }
+
+    /// Is an incompatible feature enabled?
+    ///
+    /// An incompatible feature means the file system cannot be mounted by an
+    /// implementation that does not know about it at all.
+    pub const fn incompat(&self, feature: u32) -> bool {
+        self.sb_features_incompat.intersects(SbFeaturesIncompat::from_bits_truncate(feature))
+    }
+
+    /// Does the superblock itself say that this file system is read-only?
+    ///
+    /// The file system sets this flag when it was unmounted cleanly or was
+    /// deliberately made read-only, and the kernel's driver refuses to write
+    /// to an image that carries it.
+    pub const fn is_read_only(&self) -> bool {
+        self.sb_flags & constants::XFS_SBF_READONLY != 0
+    }
+
+    /// Enable a read-only-compat feature.  Only the tests need this.
+    #[cfg(test)]
+    pub fn set_read_only_compat(&mut self, feature: u32) {
+        self.sb_features_ro_compat |= feature;
+    }
+
+    /// Enable an incompatible feature.  Only the tests need this.
+    #[cfg(test)]
+    pub fn set_incompat(&mut self, feature: u32) {
+        self.sb_features_incompat.insert(SbFeaturesIncompat::from_bits_truncate(feature));
     }
 
     #[inline]
