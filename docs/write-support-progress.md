@@ -245,10 +245,39 @@ exactly as before.
 * the modification time moving on the image, checked through a read-only mount;
 * rejection of a read-write mount of an image with a blocking feature, with the
   refusal naming the feature;
-* rejection of writes past end of file, into a hole, and to a directory, each
-  leaving the file byte-for-byte as it was;
+* the last byte of a file being writable, and a write past the end of the file
+  being refused with `EFBIG` and leaving the file byte-for-byte as it was;
+* a write to a directory being refused;
 * `xfs_repair -n` reporting no unexpected problems after the writes, and the
   data still reading back correctly.
+
+### What the tests do not cover, and why
+
+Writing into a hole, or into preallocated-but-unwritten space, is not tested end
+to end.  The image that would test it is `xfs_preallocated.img`, whose
+`files/preallocated` is a single 8 MiB unwritten extent, but that is a version 5
+image with reflink, rmapbt and big-time, and the capability gate refuses all
+three for writing.  The behaviour itself is covered where it can be: `ExtentMap`
+reports an unwritten extent as a hole and a hole as no block at all, and a
+volume write of a block with no physical block behind it is `ENXIO`.  The
+end-to-end test belongs in this file once an image with a writable feature set
+has a hole in it.
+
+### How the results were checked by something other than xfuse
+
+`xfs_repair -n` is the strongest witness available without root and a loop
+device, and it reports the image clean after the writes.  Two further checks
+were run by hand on a written image and are worth repeating as tests when
+there is a place to put them:
+
+* `xfs_db` reads the inode we wrote and agrees with it: the modification and
+  change times it prints are the ones we stored, down to the nanosecond, and the
+  size, block count and extent count are unchanged.
+* Reading the image at the file's extent offset, computed by hand, returns the
+  bytes that were written where they were written.
+
+Neither of these is a substitute for mounting the image with the kernel's own
+XFS driver, which is the check that this file's "definition of done" still owes.
 
 Two facts that the tests turned up, and that the golden images do not make
 obvious:
