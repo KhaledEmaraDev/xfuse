@@ -59,6 +59,14 @@ pub struct BlockReader {
     /// resized, and because the reader's position must stay put when that
     /// happens.
     pos:        u64,
+    /// Whether the window holds bytes that were read from the device.
+    ///
+    /// A window starts out as zeroes, and zeroes are indistinguishable from
+    /// data, so "the byte you want is inside the window" and "the window holds
+    /// what is on the image" have to be two different questions.  A reader that
+    /// seeks into a window it has never filled must read before it answers, or
+    /// it will hand back the zeroes it was born with.
+    valid:      bool,
     /// The absolute minimum that we can read in any operation
     sectorsize: usize,
     /// File's size in bytes.  It should not change while mounted.
@@ -85,6 +93,7 @@ impl BlockReader {
             idx: sectorsize,
             start: 0,
             pos: 0,
+            valid: false,
             sectorsize,
             size,
         }
@@ -110,6 +119,7 @@ impl BlockReader {
     /// does not move.
     pub fn invalidate(&mut self) {
         self.idx = self.block.len();
+        self.valid = false;
     }
 
     /// Fill the window, aligning it on the reader's current position.
@@ -121,6 +131,7 @@ impl BlockReader {
         self.start = self.pos - (self.pos % self.block.len() as u64);
         self.device.read_at(&mut self.block, self.start)?;
         self.idx = (self.pos - self.start) as usize;
+        self.valid = true;
         Ok(())
     }
 
@@ -129,7 +140,7 @@ impl BlockReader {
     }
 
     fn refill_if_empty(&mut self) -> IoResult<()> {
-        if self.buffered() == 0 {
+        if !self.valid || self.buffered() == 0 {
             self.refill()?;
         }
         Ok(())
@@ -152,6 +163,7 @@ impl BlockReader {
         };
         self.block.resize(bufsize, 0u8);
         self.idx = bufsize;
+        self.valid = false;
     }
 }
 
@@ -196,7 +208,7 @@ impl Seek for BlockReader {
         };
 
         let end = self.start + self.block.len() as u64;
-        if (self.start..end).contains(&target) {
+        if self.valid && (self.start..end).contains(&target) {
             // The window already holds what was asked for; move along it.
             self.idx = (target - self.start) as usize;
             self.pos = target;
@@ -388,5 +400,48 @@ mod t {
             assert_eq!(bs + 3, br.position());
             assert_eq!(0, br.buffered());
         }
+    }
+
+    /// A reader that has not read anything yet must not answer from a window
+    /// that has never been filled.
+    ///
+    /// A window starts out as zeroes, and a seek whose target falls inside it
+    /// must still read: the offset being inside the window says nothing about
+    /// whether the window holds the image.  The real-time device is where this
+    /// bites, because its reader is used only by seeks and its first one targets
+    /// the start of the device, which is where its window starts.
+    #[test]
+    fn a_fresh_reader_reads_real_data() {
+        let f = tempfile::NamedTempFile::new().unwrap();
+        let ss = {
+            let dev = crate::libxfuse::block_device::BlockDevice::open(
+                f.path(),
+                crate::libxfuse::block_device::Access::ReadWrite,
+            )
+            .unwrap();
+            dev.sectorsize()
+        };
+        f.as_file().set_len(8 * ss as u64).unwrap();
+        {
+            let dev = crate::libxfuse::block_device::BlockDevice::open(
+                f.path(),
+                crate::libxfuse::block_device::Access::ReadWrite,
+            )
+            .unwrap();
+            let mut buf = vec![0u8; ss];
+            buf[0..8].copy_from_slice(b"MARKER!!");
+            dev.write_at(&buf, 0).unwrap();
+            dev.flush().unwrap();
+        }
+        // A brand new reader, whose window has never been filled, must still
+        // return what is on the image when it seeks to the start of it.
+        let mut br = BlockReader::open(f.path()).unwrap();
+        br.seek(SeekFrom::Start(0)).unwrap();
+        let mut buf = [0u8; 8];
+        br.read_exact(&mut buf).unwrap();
+        assert_eq!(
+            &buf, b"MARKER!!",
+            "a fresh reader returned its unwritten window"
+        );
     }
 }
