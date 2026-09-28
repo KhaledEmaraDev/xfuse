@@ -616,3 +616,50 @@ fn timestamps_and_size() {
         "the golden image's hello.txt is unexpectedly recent: {before_time:?}"
     );
 }
+
+/// A golden image that was not decompressed properly must not be silently
+/// believed.
+///
+/// A real-time image that is empty or all zeroes is invisible from inside a
+/// mount: the file that uses it has exactly the right size, because the size
+/// comes from the other image, and its contents are zeroes.  That is a fixture
+/// failure wearing the clothes of a file system failure, and the harness cannot
+/// let it.  The staleness check trusts a file that is newer than the compressed
+/// image, which is what an interrupted run leaves behind, so the contents have to
+/// overrule it.
+#[test]
+fn a_bad_golden_image_is_extracted_again() {
+    require_fusefs!();
+    // A real-time image, because it is the one that is not a file system and so
+    // is the one a superblock check would reject.
+    let image = util::prepare_image("xfs_rt2.img");
+    let good = std::fs::read(&image).expect("reading the golden image");
+    assert!(good.len() > 1024, "the golden image is implausibly small");
+
+    // The two ways an extraction can go wrong that leave a file that looks
+    // current: nothing was written at all, and something was written but the
+    // file is zeros.
+    for damage in [(0usize, 0usize), (0, good.len())] {
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&image)
+            .expect("opening the golden image");
+        file.set_len(damage.1 as u64).unwrap();
+        if damage.0 == 0 && damage.1 > 0 {
+            std::fs::write(&image, vec![0u8; damage.1]).unwrap();
+        }
+        // Preparing it again must notice and fix it, rather than handing the
+        // damage to whatever test asks for this image next.
+        let again = util::prepare_image("xfs_rt2.img");
+        assert_eq!(again, image);
+        let after = std::fs::read(&image).expect("reading the golden image again");
+        assert_eq!(
+            after.len(),
+            good.len(),
+            "the image was not re-extracted: {} bytes instead of {}",
+            after.len(),
+            good.len()
+        );
+        assert!(after.iter().any(|b| *b != 0), "the image is all zeroes");
+    }
+}

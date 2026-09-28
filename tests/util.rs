@@ -99,33 +99,56 @@ macro_rules! require_root {
     };
 }
 
-/// Make sure an image that has been extracted looks like an XFS file system.
+/// Does this look like a golden image that was extracted properly?
 ///
-/// A golden image that is truncated, empty, or was never finished being written
-/// is indistinguishable from a file system that reads the wrong thing: the
-/// mount succeeds, the sizes are right, and the contents are zeroes.  The one
-/// cheap thing that tells the two apart is the superblock, so check it here,
-/// where the failure can be named as what it is.
-fn check_extracted_image(img: &std::path::Path) {
-    const XFS_MAGIC: &[u8; 4] = b"XFSB";
-    let mut magic = [0u8; 4];
-    match fs::File::open(img).and_then(|mut f| f.read_exact(&mut magic)) {
-        Ok(()) if &magic == XFS_MAGIC => {}
-        Ok(()) => panic!(
-            "{} is not an XFS image: it starts with {magic:02x?} rather than the superblock \
-             magic.  The golden image was probably not decompressed properly; delete it and run \
-             the tests again.",
-            img.display()
-        ),
-        Err(e) => panic!(
-            "{} could not be read ({e}); the golden image was probably not decompressed \
-             properly.  Delete it and run the tests again.",
-            img.display()
-        ),
+/// Not all of the golden images are file systems: `xfs_rt2.img` is a real-time
+/// device, which holds nothing but the data blocks a real-time file occupies, so
+/// it has no superblock and its first bytes are the test's own pattern.  The one
+/// thing every image has in common is that its first bytes are not all zeroes,
+/// which is exactly what a failed extraction leaves behind.
+///
+/// The tail is not checked, because it cannot be: the images are sized to a round
+/// number of blocks, so the end of every one of them is unused space.
+fn looks_extracted(img: &std::path::Path) -> bool {
+    const WINDOW: usize = 512;
+    let Ok(mut f) = fs::File::open(img) else {
+        return false;
+    };
+    let mut head = [0u8; WINDOW];
+    match f.read_exact(&mut head) {
+        Ok(()) => head.iter().any(|b| *b != 0),
+        // A file shorter than the window is not an image.
+        Err(_) => false,
     }
 }
 
-fn prepare_image(filename: &str) -> PathBuf {
+/// Decompress a golden image, and complain loudly if it did not work.
+fn extract_image(zimg: &std::path::Path, img: &std::path::Path) {
+    let output = Command::new("unzstd")
+        .arg("-f")
+        .arg("-o")
+        .arg(img)
+        .arg(zimg)
+        .output()
+        .expect("Uncompressing golden image failed");
+    // A decompression that fails leaves a file that looks current to the
+    // staleness check, and that every test then reads.  Do not let one pass
+    // silently.
+    assert!(
+        output.status.success(),
+        "uncompressing {} failed: {}",
+        zimg.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        looks_extracted(img),
+        "{} does not look like a decompressed golden image: it is empty or all zeroes.  Delete it \
+         and run the tests again.",
+        img.display()
+    );
+}
+
+pub fn prepare_image(filename: &str) -> PathBuf {
     let mut zimg = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     zimg.push("resources");
     zimg.push(filename);
@@ -139,25 +162,15 @@ fn prepare_image(filename: &str) -> PathBuf {
     // https://github.com/facebook/zstd/issues/3748
     let zmtime = fs::metadata(&zimg).unwrap().modified().unwrap();
     let mtime = fs::metadata(&img);
-    if mtime.is_err() || (mtime.unwrap().modified().unwrap() + Duration::from_secs(1)) < zmtime {
-        let output = Command::new("unzstd")
-            .arg("-f")
-            .arg("-o")
-            .arg(&img)
-            .arg(&zimg)
-            .output()
-            .expect("Uncompressing golden image failed");
-        // A decompression that fails leaves a file that looks current to the
-        // check above, and that every later test then reads.  Do not let one
-        // pass silently.
-        assert!(
-            output.status.success(),
-            "uncompressing {} failed: {}",
-            zimg.display(),
-            String::from_utf8_lossy(&output.stderr)
-        );
+    let stale =
+        mtime.is_err() || (mtime.unwrap().modified().unwrap() + Duration::from_secs(1)) < zmtime;
+    // Being newer than the compressed image is not proof that the extraction
+    // finished: a run that was interrupted part way through leaves a file that
+    // looks current and that every test would then read.  So the contents have a
+    // say in it, and a file that does not look extracted is decompressed again.
+    if stale || !looks_extracted(&img) {
+        extract_image(&zimg, &img);
     }
-    check_extracted_image(&img);
     img
 }
 
