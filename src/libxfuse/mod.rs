@@ -3,7 +3,11 @@ mod attr_bptree;
 mod attr_leaf;
 mod attr_node;
 mod attr_shortform;
+mod block_cache;
 mod block_device;
+mod error;
+mod capabilities;
+mod inode;
 mod block_reader;
 mod bmbt_rec;
 mod btree;
@@ -23,8 +27,6 @@ mod symlink_extent;
 mod utils;
 pub mod volume;
 
-pub use fuser::FileType;
-pub use libc::{c_int, c_ulong};
 use cfg_if::cfg_if;
 
 cfg_if! {
