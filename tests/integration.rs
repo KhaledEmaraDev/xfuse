@@ -1315,12 +1315,29 @@ mod read {
     /// Read a file stored on a realtime device.  The file in the resource contains the usual
     /// pattern at offset 0 for 4096 bytes, then all zeros, then the usual pattern again for 4096
     /// bytes starting at block 8192
+    ///
+    /// The data is in the real-time image, not in the main one, so a mismatch here has two
+    /// possible meanings: the file system read the wrong thing, or the real-time image itself
+    /// does not hold what the test assumes.  The second is invisible from inside the mount --
+    /// the sizes all come from the main image, so a real-time image that is empty or was never
+    /// finished being written produces a file of exactly the right size full of zeroes -- and it
+    /// is therefore checked first, directly, so that a failure says which of the two it is.
     #[named]
     #[rstest]
     fn realtime(harness_realtime: Harness) {
         require_fusefs!();
 
         let bsize = 4096;
+        {
+            let mut image = fs::File::open(GOLDEN_RT2.as_path()).unwrap();
+            let mut first = vec![0; 16];
+            image.read_exact(&mut first).unwrap();
+            assert_eq!(
+                &first, b"0000000000000000",
+                "the real-time image does not hold the pattern this test reads for, so this is a \
+                 problem with the image, not with the file system: {GOLDEN_RT2:?}"
+            );
+        }
         let path = harness_realtime.d.path().join("files").join("rtfile.txt");
         let mut buf = vec![0; bsize];
         let f = fs::File::open(path).unwrap();

@@ -46,75 +46,173 @@ use std::{
     fs::{File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
-    process::Command,
-    time::Duration,
+    process::{Child, Command, Stdio},
+    time::{Duration, Instant},
 };
 
-use util::{writable_copy, GOLDEN1K, GOLDENV4};
+use util::{writable_copy, GOLDEN4KN, GOLDENV4};
 
-/// Mount a read-write copy of a golden image, hand it to `body`, and unmount.
+/// Copy a golden image, mount it read-write, hand the mountpoint to `body`, and
+/// put everything back.
 fn with_rw_mount<T>(golden: &Path, tag: &str, body: impl FnOnce(&Path) -> T) -> T {
     let image = writable_copy(golden, tag);
-    let mnt = mountpoint(tag);
-    let _ = std::fs::remove_dir_all(&mnt);
-    std::fs::create_dir_all(&mnt).expect("creating the mountpoint");
-
-    let mut xfs_fuse = Command::new(env!("CARGO_BIN_EXE_xfs-fuse"))
-        .arg("-f")
-        .arg("-r")
-        .arg(&image)
-        .arg(&mnt)
-        .spawn()
-        .expect("running xfs-fuse");
-    let mounted = util::waitfor(Duration::from_secs(30), || is_live(&mnt));
-    let result = match mounted {
-        Ok(()) => body(&mnt),
-        Err(e) => panic!("xfs-fuse did not mount {image:?}: {e}"),
-    };
-
-    unmount(&mnt);
-    let _ = xfs_fuse.wait();
-    result
+    with_rw_mount_at(&image, tag, body)
 }
 
-/// Mount an already copied image read-write, hand it to `body`, and unmount.
+/// Mount an image read-write, hand the mountpoint to `body`, and put everything
+/// back.
 fn with_rw_mount_at<T>(image: &Path, tag: &str, body: impl FnOnce(&Path) -> T) -> T {
-    let mnt = mountpoint(tag);
-    let _ = std::fs::remove_dir_all(&mnt);
-    std::fs::create_dir_all(&mnt).expect("creating the mountpoint");
-    let mut xfs_fuse = Command::new(env!("CARGO_BIN_EXE_xfs-fuse"))
-        .args(["-f", "-r"])
-        .arg(image)
-        .arg(&mnt)
-        .spawn()
-        .expect("running xfs-fuse");
-    util::waitfor(Duration::from_secs(30), || is_live(&mnt))
-        .expect("xfs-fuse did not mount the image read-write");
-    let result = body(&mnt);
-    unmount(&mnt);
-    let _ = xfs_fuse.wait();
-    result
+    let _guard = serialize();
+    let fs = mount(image, tag, true);
+    body(&fs.mnt)
 }
 
-/// Mount an image read-only, hand it to `body`, and unmount.
+/// Mount an image read-only, hand the mountpoint to `body`, and put everything
+/// back.
 fn with_ro_mount<T>(image: &Path, tag: &str, body: impl FnOnce(&Path) -> T) -> T {
-    let mnt = mountpoint(tag);
+    let _guard = serialize();
+    let fs = mount(image, tag, false);
+    body(&fs.mnt)
+}
+
+/// Run these tests one at a time.
+///
+/// Every test here mounts a file system, and mounting is not something a small
+/// build machine does well in parallel: the tests would spend their time
+/// competing for the same disk and the same FUSE slots, and a failure would be
+/// much harder to read.  The lock is taken for the whole test, so the tests queue
+/// up.  A test that panics poisons the lock, and poisoning has to be ignored
+/// here, or one failure would turn into ten.
+fn serialize() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// A mounted file system and the process serving it.
+///
+/// The process is killed and the mount cleaned up when this is dropped.  That
+/// matters for more than tidiness: a test that fails part way through unwinds
+/// past any cleanup written after the failure, and a FUSE process that is left
+/// running keeps its mount *and* the test harness's output pipe open, which is
+/// enough to make the whole run look like it has hung.
+struct Mounted {
+    mnt:     PathBuf,
+    process: Child,
+}
+
+impl Drop for Mounted {
+    fn drop(&mut self) {
+        // Every write was committed before the kernel was told it had
+        // succeeded, so there is nothing to flush, and the only way to be sure
+        // the process is gone is to insist.  The kernel takes the mount down when
+        // the process closes its FUSE descriptor.
+        let _ = self.process.kill();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            match self.process.try_wait() {
+                Ok(Some(_)) | Err(_) => break,
+                // Out of patience: fall through and let the system unmount it.
+                Ok(None) if Instant::now() >= deadline => break,
+                Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            }
+        }
+        // The process is gone; if the mount outlived it, ask the system to take
+        // it down rather than looking it up by polling, which on a mount whose
+        // server has gone can block instead of failing.
+        for unmounter in [
+            "/bin/fusermount3",
+            "/usr/local/bin/fusermount3",
+            "/usr/bin/fusermount3",
+            "fusermount",
+        ] {
+            if Path::new(unmounter).exists() {
+                let _ = Command::new(unmounter)
+                    .arg("-u")
+                    .arg(&self.mnt)
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status();
+            }
+        }
+        let _ = std::fs::remove_dir_all(&self.mnt);
+    }
+}
+
+/// Mount `image` at a mountpoint of our own, and wait until it answers.
+///
+/// `tag` keeps two tests, or two runs, from sharing a mountpoint.
+fn mount(image: &Path, tag: &str, writable: bool) -> Mounted {
+    let mut mnt = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    mnt.push(format!("mnt-{}-{}", std::process::id(), tag));
     let _ = std::fs::remove_dir_all(&mnt);
     std::fs::create_dir_all(&mnt).expect("creating the mountpoint");
 
-    let mut xfs_fuse = Command::new(env!("CARGO_BIN_EXE_xfs-fuse"))
-        .arg("-f")
+    let mut command = Command::new(env!("CARGO_BIN_EXE_xfs-fuse"));
+    command.arg("-f");
+    if writable {
+        command.arg("-r");
+    }
+    // The child's output would otherwise be the test harness's, and a process
+    // that outlives its test would hold that pipe open.
+    let mut process = command
         .arg(image)
         .arg(&mnt)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
-        .expect("running xfs-fuse");
-    util::waitfor(Duration::from_secs(30), || is_live(&mnt))
-        .expect("xfs-fuse did not mount the image read-only");
+        .unwrap_or_else(|e| panic!("running xfs-fuse on {image:?}: {e}"));
 
-    let result = body(&mnt);
-    unmount(&mnt);
-    let _ = xfs_fuse.wait();
-    result
+    let mounted = util::waitfor(Duration::from_secs(60), || is_live(&mnt));
+    if let Err(e) = mounted {
+        let _ = process.kill();
+        panic!("xfs-fuse did not mount {image:?} at {mnt:?}: {e}");
+    }
+    Mounted { mnt, process }
+}
+
+/// Run a command to completion, with a bound on how long it may take, and return
+/// what it said.
+///
+/// The bound is the point.  A test that waits forever tells whoever reads the
+/// output nothing; a test that says "the mount did not refuse within a minute"
+/// says exactly what happened.  The output goes to files rather than to pipes
+/// because a pipe has to be drained by somebody, and draining it is another way
+/// for a test to block.
+fn run_bounded(
+    command: &mut Command,
+    tag: &str,
+    limit: Duration,
+) -> (Option<std::process::ExitStatus>, String, String) {
+    let mut out_path = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    out_path.push(format!("out-{}-{tag}-{tag}.log", std::process::id()));
+    let mut err_path = out_path.clone();
+    err_path.set_extension("err");
+    let out = File::create(&out_path).expect("creating the child's output file");
+    let err = File::create(&err_path).expect("creating the child's error file");
+    let mut process = command
+        .stdout(Stdio::from(out))
+        .stderr(Stdio::from(err))
+        .spawn()
+        .expect("running the command");
+
+    let deadline = Instant::now() + limit;
+    let status = loop {
+        match process.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = process.kill();
+                let _ = process.wait();
+                break None;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Err(e) => panic!("waiting for {tag}: {e}"),
+        }
+    };
+    let out = std::fs::read_to_string(&out_path).unwrap_or_default();
+    let err = std::fs::read_to_string(&err_path).unwrap_or_default();
+    let _ = std::fs::remove_file(&out_path);
+    let _ = std::fs::remove_file(&err_path);
+    (status, out, err)
 }
 
 /// Is the file system at `mnt` answering requests?
@@ -126,32 +224,6 @@ fn is_live(mnt: &Path) -> bool {
     std::fs::read_dir(mnt)
         .map(|mut entries| entries.next().is_some())
         .unwrap_or(false)
-}
-
-/// A mountpoint of our own, so that parallel tests do not collide.
-fn mountpoint(tag: &str) -> PathBuf {
-    let mut mnt = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
-    mnt.push(format!("mnt-{}-{}", std::process::id(), tag));
-    mnt
-}
-
-fn unmount(mnt: &Path) {
-    for unmounter in [
-        "/bin/fusermount3",
-        "/usr/local/bin/fusermount3",
-        "/usr/bin/fusermount3",
-    ] {
-        if Path::new(unmounter).exists() {
-            let _ = Command::new(unmounter).arg("-u").arg(mnt).status();
-            // Give the file system a moment to notice.
-            let _ = util::waitfor(Duration::from_secs(10), || std::fs::read_dir(mnt).is_err());
-            return;
-        }
-    }
-    // Fall back to the classic name, which is what the FreeBSD and Linux
-    // fuse packages install.
-    let _ = Command::new("fusermount").arg("-u").arg(mnt).status();
-    let _ = util::waitfor(Duration::from_secs(10), || std::fs::read_dir(mnt).is_err());
 }
 
 /// Read a whole file.
@@ -251,23 +323,11 @@ fn overwrite_byte() {
 fn overwrite_survives_remount() {
     require_fusefs!();
     let image = writable_copy(&GOLDENV4, "remount");
-    {
-        let mnt = mountpoint("remount-rw");
-        std::fs::create_dir_all(&mnt).unwrap();
-        let mut xfs_fuse = Command::new(env!("CARGO_BIN_EXE_xfs-fuse"))
-            .args(["-f", "-r"])
-            .arg(&image)
-            .arg(&mnt)
-            .spawn()
-            .unwrap();
-        util::waitfor(Duration::from_secs(30), || is_live(&mnt)).unwrap();
+    with_rw_mount_at(&image, "remount", |mnt| {
         let mut f = open_rw(&mnt.join("files/hello.txt"));
         f.seek(SeekFrom::Start(0)).unwrap();
         f.write_all(b"HELLO").unwrap();
-        drop(f);
-        unmount(&mnt);
-        let _ = xfs_fuse.wait();
-    }
+    });
     with_ro_mount(&image, "remount-ro", |mnt| {
         let after = read_file(&mnt.join("files/hello.txt"));
         assert_eq!(&after[..5], b"HELLO");
@@ -413,36 +473,45 @@ fn write_to_directory_is_refused() {
 
 /// A read-write mount of an image whose features cannot be maintained must be
 /// refused, while a read-only mount of the same image must work.
+///
+/// The image is `xfs_4kn.img`: a version 5 file system with reflink, the reverse
+/// mapping tree, and big timestamps, all of which the write path cannot keep up
+/// to date.  A smaller image with the same features would do, and this one is
+/// small, because the point of the test is the refusal and not the copy.
 #[test]
 fn unsupported_features_refuse_rw_mount() {
     require_fusefs!();
-    let image = writable_copy(&GOLDEN1K, "refuse");
-    let mnt = mountpoint("refuse");
+    let image = writable_copy(&GOLDEN4KN, "refuse");
+    static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let seq = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut mnt = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    mnt.push(format!("mnt-{}-refuse-{seq}", std::process::id()));
     std::fs::create_dir_all(&mnt).unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_xfs-fuse"))
-        .args(["-f", "-r"])
-        .arg(&image)
-        .arg(&mnt)
-        .output()
-        .expect("running xfs-fuse");
+    let mut command = Command::new(env!("CARGO_BIN_EXE_xfs-fuse"));
+    command.args(["-f", "-r"]).arg(&image).arg(&mnt);
+    let (status, stdout, stderr) = run_bounded(&mut command, "refuse", Duration::from_secs(60));
     assert!(
-        !output.status.success(),
-        "a read-write mount of a reflinked file system should have been refused"
+        !status.map(|s| s.success()).unwrap_or(false),
+        "a read-write mount of a reflinked file system should have been refused; it said: \
+         {stdout}{stderr}"
     );
-    let message = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let message = format!("{stdout}{stderr}");
     assert!(
         message.contains("reflink") || message.contains("cannot yet write"),
         "the refusal did not say why: {message}"
     );
 
-    // The same image must still mount read-only.
+    // The same image must still mount read-only, which is the whole point of
+    // separating the two questions: a feature that stops xfuse writing must not
+    // stop it reading.  This image's root has no "files" directory, so the check
+    // is on a name that exists in it.
     with_ro_mount(&image, "refuse-ro", |mnt| {
-        assert!(mnt.join("files").is_dir());
+        assert!(
+            mnt.join("xattrs").is_dir(),
+            "the image did not mount read-only: {}",
+            std::fs::read_dir(mnt).map(|d| d.count()).unwrap_or(0)
+        );
     });
 }
 
@@ -466,17 +535,7 @@ fn read_only_mount_refuses_writes() {
 fn xfs_repair_is_happy() {
     require_fusefs!();
     let image = writable_copy(&GOLDENV4, "repair");
-    {
-        let mnt = mountpoint("repair");
-        std::fs::create_dir_all(&mnt).unwrap();
-        let mut xfs_fuse = Command::new(env!("CARGO_BIN_EXE_xfs-fuse"))
-            .args(["-f", "-r"])
-            .arg(&image)
-            .arg(&mnt)
-            .spawn()
-            .unwrap();
-        util::waitfor(Duration::from_secs(30), || is_live(&mnt)).unwrap();
-
+    with_rw_mount_at(&image, "repair", |mnt| {
         // Overwrite a byte in each of several files, including one with many
         // extents and one in a directory of a different format.
         // One file per inode: hello.txt and hello2.txt are two names for one
@@ -499,9 +558,7 @@ fn xfs_repair_is_happy() {
             f.write_all(b"MODIFIED").unwrap();
             drop(f);
         }
-        unmount(&mnt);
-        let _ = xfs_fuse.wait();
-    }
+    });
 
     if let Err(e) = xfs_repair_check(&image) {
         panic!("{e}");

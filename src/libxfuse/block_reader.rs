@@ -444,4 +444,60 @@ mod t {
             "a fresh reader returned its unwritten window"
         );
     }
+
+    /// A read longer than the window must return everything, not stop at the end
+    /// of the first window.
+    ///
+    /// A regular file's reported block size becomes the reader's first window,
+    /// and on FreeBSD that is 128 KiB while a file system block is 4 KiB, so
+    /// this direction -- a window larger than the read -- is the one the mount
+    /// takes.  The other direction happens when a caller sets a window smaller
+    /// than the structure it is decoding, which the transaction tests do.
+    #[test]
+    fn a_read_longer_than_the_window() {
+        for bufsize in [512usize, 4096, 128 * 1024] {
+            let f = tempfile::NamedTempFile::new().unwrap();
+            f.as_file().set_len(64 * 1024 * 1024).unwrap();
+            {
+                let dev = crate::libxfuse::block_device::BlockDevice::open(
+                    f.path(),
+                    crate::libxfuse::block_device::Access::ReadWrite,
+                )
+                .unwrap();
+                for block in 0..64u64 {
+                    let mut buf = vec![0u8; 1024 * 1024];
+                    for (i, b) in buf.iter_mut().enumerate() {
+                        *b = ((block as usize * 1024 * 1024 + i) % 251) as u8;
+                    }
+                    dev.write_at(&buf, block * 1024 * 1024).unwrap();
+                }
+                dev.flush().unwrap();
+            }
+            let mut br = BlockReader::open(f.path()).unwrap();
+            br.set_bufsize(bufsize);
+            // A read of a file system block, starting where the file starts.
+            br.seek(SeekFrom::Start(0)).unwrap();
+            let mut buf = vec![0u8; 4096];
+            br.read_exact(&mut buf).unwrap();
+            for (i, b) in buf.iter().enumerate() {
+                assert_eq!(
+                    *b,
+                    (i % 251) as u8,
+                    "window {bufsize}: byte {i} of a 4096 byte read is wrong"
+                );
+            }
+            // And a read that starts part way through a block.
+            br.seek(SeekFrom::Start(1_000_003)).unwrap();
+            let mut buf = vec![0u8; 4096];
+            br.read_exact(&mut buf).unwrap();
+            for (i, b) in buf.iter().enumerate() {
+                let at = 1_000_003 + i as u64;
+                assert_eq!(
+                    *b,
+                    (at % 251) as u8,
+                    "window {bufsize}: unaligned read, byte {i}"
+                );
+            }
+        }
+    }
 }

@@ -1,6 +1,7 @@
 use std::{
     fmt,
     fs,
+    io::Read,
     path::PathBuf,
     process::Command,
     sync::LazyLock,
@@ -98,6 +99,32 @@ macro_rules! require_root {
     };
 }
 
+/// Make sure an image that has been extracted looks like an XFS file system.
+///
+/// A golden image that is truncated, empty, or was never finished being written
+/// is indistinguishable from a file system that reads the wrong thing: the
+/// mount succeeds, the sizes are right, and the contents are zeroes.  The one
+/// cheap thing that tells the two apart is the superblock, so check it here,
+/// where the failure can be named as what it is.
+fn check_extracted_image(img: &std::path::Path) {
+    const XFS_MAGIC: &[u8; 4] = b"XFSB";
+    let mut magic = [0u8; 4];
+    match fs::File::open(img).and_then(|mut f| f.read_exact(&mut magic)) {
+        Ok(()) if &magic == XFS_MAGIC => {}
+        Ok(()) => panic!(
+            "{} is not an XFS image: it starts with {magic:02x?} rather than the superblock \
+             magic.  The golden image was probably not decompressed properly; delete it and run \
+             the tests again.",
+            img.display()
+        ),
+        Err(e) => panic!(
+            "{} could not be read ({e}); the golden image was probably not decompressed \
+             properly.  Delete it and run the tests again.",
+            img.display()
+        ),
+    }
+}
+
 fn prepare_image(filename: &str) -> PathBuf {
     let mut zimg = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     zimg.push("resources");
@@ -113,17 +140,28 @@ fn prepare_image(filename: &str) -> PathBuf {
     let zmtime = fs::metadata(&zimg).unwrap().modified().unwrap();
     let mtime = fs::metadata(&img);
     if mtime.is_err() || (mtime.unwrap().modified().unwrap() + Duration::from_secs(1)) < zmtime {
-        Command::new("unzstd")
+        let output = Command::new("unzstd")
             .arg("-f")
             .arg("-o")
             .arg(&img)
             .arg(&zimg)
             .output()
             .expect("Uncompressing golden image failed");
+        // A decompression that fails leaves a file that looks current to the
+        // check above, and that every later test then reads.  Do not let one
+        // pass silently.
+        assert!(
+            output.status.success(),
+            "uncompressing {} failed: {}",
+            zimg.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
+    check_extracted_image(&img);
     img
 }
 
+#[allow(unused)] // Not used by the write tests
 pub static GOLDEN1K: LazyLock<PathBuf> = LazyLock::new(|| prepare_image("xfs1024.img"));
 #[allow(unused)] // Not used by the write tests
 pub static GOLDEN4K: LazyLock<PathBuf> = LazyLock::new(|| prepare_image("xfs4096.img"));
