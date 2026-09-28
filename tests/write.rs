@@ -111,30 +111,61 @@ impl Drop for Mounted {
         loop {
             match self.process.try_wait() {
                 Ok(Some(_)) | Err(_) => break,
-                // Out of patience: fall through and let the system unmount it.
+                // Out of patience: fall through and ask the system below.
                 Ok(None) if Instant::now() >= deadline => break,
                 Ok(None) => std::thread::sleep(Duration::from_millis(50)),
             }
         }
-        // The process is gone; if the mount outlived it, ask the system to take
-        // it down rather than looking it up by polling, which on a mount whose
-        // server has gone can block instead of failing.
+
+        // If the mount outlived the process, ask the system to take it down.
+        // Both steps are bounded, because a test that hangs says nothing.
+        let mut unmounted = false;
         for unmounter in [
             "/bin/fusermount3",
             "/usr/local/bin/fusermount3",
             "/usr/bin/fusermount3",
+            "fusermount3",
             "fusermount",
         ] {
-            if Path::new(unmounter).exists() {
-                let _ = Command::new(unmounter)
-                    .arg("-u")
-                    .arg(&self.mnt)
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .status();
+            let Ok(mut fusermount) = Command::new(unmounter)
+                .arg("-u")
+                .arg(&self.mnt)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            else {
+                // Not installed under that name; try the next one.
+                continue;
+            };
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                match fusermount.try_wait() {
+                    Ok(Some(status)) => {
+                        // The unmounter's exit status is the only reliable
+                        // statement available about whether the mount is gone.
+                        unmounted |= status.success();
+                        break;
+                    }
+                    Ok(None) if Instant::now() >= deadline => break,
+                    Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+                    Err(_) => break,
+                }
+            }
+            let _ = fusermount.kill();
+            if unmounted {
+                break;
             }
         }
-        let _ = std::fs::remove_dir_all(&self.mnt);
+
+        // Only touch the mountpoint if an unmount said it worked.  A FUSE mount
+        // whose server has gone can stay registered, and a path inside such a
+        // mount blocks rather than failing, so `remove_dir_all` on a
+        // mountpoint whose server may be dead is a way for a test to hang
+        // forever.  A mount that would not unmount leaves its directory in the
+        // system temporary directory, where nothing has to walk it.
+        if unmounted {
+            let _ = std::fs::remove_dir_all(&self.mnt);
+        }
     }
 }
 
@@ -142,10 +173,16 @@ impl Drop for Mounted {
 ///
 /// `tag` keeps two tests, or two runs, from sharing a mountpoint.
 fn mount(image: &Path, tag: &str, writable: bool) -> Mounted {
-    let mut mnt = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
-    mnt.push(format!("mnt-{}-{}", std::process::id(), tag));
-    let _ = std::fs::remove_dir_all(&mnt);
-    std::fs::create_dir_all(&mnt).expect("creating the mountpoint");
+    // A path of its own for every mount, including every round of a test that
+    // mounts more than once: a mount left behind by a killed process stays
+    // registered, and the next test would block at the first call it makes on
+    // the path.
+    static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut mnt = mountpoint_dir();
+    mnt.push(format!("mnt-{tag}-{seq}"));
+    std::fs::create_dir_all(&mnt)
+        .unwrap_or_else(|e| panic!("creating the mountpoint {mnt:?}: {e}"));
 
     let mut command = Command::new(env!("CARGO_BIN_EXE_xfs-fuse"));
     command.arg("-f");
@@ -213,6 +250,18 @@ fn run_bounded(
     let _ = std::fs::remove_file(&out_path);
     let _ = std::fs::remove_file(&err_path);
     (status, out, err)
+}
+
+/// A directory of this run's own, in the system temporary directory.
+///
+/// The mountpoints live here rather than in the target directory because a mount
+/// left behind by a killed process stays registered, and a build machine that
+/// later collects the target directory will trip over it.
+fn mountpoint_dir() -> PathBuf {
+    let mut dir = std::env::temp_dir();
+    dir.push(format!("xfuse-write-tests-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("creating {}: {e}", dir.display()));
+    dir
 }
 
 /// Is the file system at `mnt` answering requests?
@@ -412,16 +461,38 @@ fn write_past_eof_is_refused() {
     with_rw_mount(&GOLDENV4, "past-eof", |mnt| {
         let file = mnt.join("files/hello.txt");
         let before = read_file(&file);
+        let size = before.len();
         let mut f = open_rw(&file);
         f.seek(SeekFrom::End(0)).unwrap();
-        let err = f.write_all(b"more data than fits").unwrap_err();
+        let result = f.write_all(b"more data than fits");
         drop(f);
+
+        // What matters is that the write did not happen: the file is the size
+        // it was and holds what it held.  How the refusal arrives is the
+        // kernel's business as much as ours -- a kernel that finds the write
+        // unacceptable before it reaches the file system reports a short write
+        // rather than the file system's EFBIG, and both are a refusal.
+        match result {
+            Ok(()) => panic!(
+                "a write of 17 bytes past the end of a {size} byte file was reported as succeeding"
+            ),
+            Err(e) => {
+                let acceptable =
+                    e.raw_os_error() == Some(libc::EFBIG) || e.raw_os_error().is_none();
+                assert!(
+                    acceptable,
+                    "writing past the end of the file failed with an error that is not a refusal: \
+                     {e:?}"
+                );
+            }
+        }
+        let after = read_file(&file);
         assert_eq!(
-            err.raw_os_error(),
-            Some(libc::EFBIG),
-            "unexpected error: {err:?}"
+            after.len(),
+            size,
+            "a refused write changed the size of the file"
         );
-        assert_eq!(read_file(&file), before, "a refused write changed the file");
+        assert_eq!(after, before, "a refused write changed the file");
     });
 }
 
@@ -484,8 +555,8 @@ fn unsupported_features_refuse_rw_mount() {
     let image = writable_copy(&GOLDEN4KN, "refuse");
     static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let seq = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let mut mnt = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
-    mnt.push(format!("mnt-{}-refuse-{seq}", std::process::id()));
+    let mut mnt = mountpoint_dir();
+    mnt.push(format!("mnt-refuse-{seq}"));
     std::fs::create_dir_all(&mnt).unwrap();
 
     let mut command = Command::new(env!("CARGO_BIN_EXE_xfs-fuse"));
