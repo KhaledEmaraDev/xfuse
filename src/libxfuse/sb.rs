@@ -423,6 +423,27 @@ impl Sb {
         self.sb_inodesize.into()
     }
 
+    /// Given an inode number, calculate its offset in bytes in the image.
+    ///
+    /// An inode number is a three-part address: an allocation group, a block
+    /// within that group, and an index within that block.  Nothing on the image
+    /// records where an inode is; the address is the location, which is why an
+    /// inode can be modified without first being found.
+    pub fn inode_offset(&self, inode_number: XfsIno) -> u64 {
+        let ag_no = inode_number >> (self.sb_agblklog + self.sb_inopblog);
+        let ag_blk =
+            (inode_number >> self.sb_inopblog) & ((1 << self.sb_agblklog) - 1);
+        let blk_ino = inode_number & ((1 << self.sb_inopblog) - 1);
+        ((ag_no * u64::from(self.sb_agblocks)) << self.sb_blocklog)
+            + (ag_blk << self.sb_blocklog)
+            + (blk_ino << self.sb_inodelog)
+    }
+
+    /// Does this inode number refer to an allocation group that exists?
+    pub fn ag_number_exists(&self, inode_number: XfsIno) -> bool {
+        inode_number >> (self.sb_agblklog + self.sb_inopblog) < u64::from(self.sb_agcount)
+    }
+
     /// Given a file system block number, calculate its disk address in units of 512B blocks
     fn fsb_to_daddr(&self, fsbno: XfsFsblock) -> u64 {
         let blkbb_log = self.sb_blocklog - Self::BBSHIFT;

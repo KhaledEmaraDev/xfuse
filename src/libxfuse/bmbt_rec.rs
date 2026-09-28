@@ -81,6 +81,16 @@ impl Bmx {
         Self(bmx)
     }
 
+    /// The extent records, in ascending order of their offset within the file.
+    pub fn extents(&self) -> &[BmbtRec] {
+        &self.0
+    }
+
+    /// The extent records, for modification.
+    pub fn extents_mut(&mut self) -> &mut Vec<BmbtRec> {
+        &mut self.0
+    }
+
     /// Return the extent, if any, that contains the given block within the file.
     /// Return its starting position as an FSblock, and its length in file system block units.
     /// If a hole's length extends to EoF, return None for length.

@@ -50,9 +50,7 @@ use super::{
     dir3_block::Dir2Block,
     dir3_lf::Dir2Lf,
     dir3_sf::Dir2Sf,
-    file::{File, FileMetadata},
-    file_btree::FileBtree,
-    file_extent_list::FileExtentList,
+    extent::ExtentMap,
     sb::Sb,
     symlink_extent::SymlinkExtents,
     volume::SUPERBLOCK,
@@ -86,36 +84,34 @@ pub struct Dinode {
     directory:   Option<Directory>,
     /// Cache of this inode's attribute object, if any
     attributes:  Option<Attributes>,
-    /// Cache of this inode's File object, if any
-    file:        Option<FileMetadata>,
+    /// Cache of this inode's extent map, if any
+    file:        Option<ExtentMap>,
 }
 
 impl Dinode {
+    /// Read an inode out of the image.
     pub fn from<R: bincode_next::de::read::Reader + BufRead + Seek>(
         buf_reader: &mut R,
         superblock: &Sb,
         inode_number: XfsIno,
     ) -> Dinode {
-        let ag_no: u64 = inode_number >> (superblock.sb_agblklog + superblock.sb_inopblog);
-        if ag_no >= superblock.sb_agcount.into() {
-            panic!("Wrong AG number!");
-        }
-
-        let ag_blk: u64 =
-            (inode_number >> superblock.sb_inopblog) & ((1 << superblock.sb_agblklog) - 1);
-        let blk_ino = inode_number & ((1 << superblock.sb_inopblog) - 1);
-
-        let off: u64 = ((ag_no * u64::from(superblock.sb_agblocks)) << superblock.sb_blocklog)
-            + (ag_blk << superblock.sb_blocklog)
-            + (blk_ino << superblock.sb_inodelog);
-
+        let off = superblock.inode_offset(inode_number);
         buf_reader.seek(SeekFrom::Start(off)).unwrap();
         let mut raw = vec![0u8; superblock.inode_size()];
         buf_reader.read_exact(&mut raw).unwrap();
+        Self::from_bytes(&raw, superblock, inode_number)
+    }
+
+    /// Decode an inode from its own bytes.
+    ///
+    /// The write path already has the bytes -- it read them in order to change
+    /// them -- and decoding them here means there is exactly one parser, which
+    /// the read path and the write path both go through.
+    pub fn from_bytes(raw: &[u8], superblock: &Sb, inode_number: XfsIno) -> Dinode {
         let config = bincode_next::config::standard()
             .with_big_endian()
             .with_fixed_int_encoding();
-        let reader = bincode_next::de::read::SliceReader::new(&raw[..]);
+        let reader = bincode_next::de::read::SliceReader::new(raw);
         let mut decoder = bincode_next::de::DecoderImpl::new(reader, config, ());
 
         let di_core = DinodeCore::decode(&mut decoder).unwrap();
@@ -314,27 +310,21 @@ impl Dinode {
         self.directory.as_ref().unwrap()
     }
 
-    pub fn get_file(&mut self) -> Result<&FileMetadata, i32> {
+    /// This file's extent map: where its logical blocks live in the image.
+    pub fn get_file(&mut self) -> Result<&mut ExtentMap, i32> {
         if self.file.is_none() {
             self.file = Some(match &self.di_u {
                 DiU::Bmx(bmx) => {
-                    let fel = FileExtentList {
-                        bmx:  Bmx::new(bmx),
-                        size: self.di_core.di_size,
-                    };
-                    FileMetadata::Bmx(fel)
+                    ExtentMap::from_core(Bmx::new(bmx), self.di_core.di_size)
                 }
-                DiU::Bmbt((bmdr, keys, pointers)) => {
-                    let fbt = FileBtree {
-                        btree: BtreeRoot::new(bmdr.clone(), keys.clone(), pointers.clone()),
-                        size:  self.di_core.di_size,
-                    };
-                    FileMetadata::Btree(fbt)
-                }
+                DiU::Bmbt((bmdr, keys, pointers)) => ExtentMap::from_btree(
+                    BtreeRoot::new(bmdr.clone(), keys.clone(), pointers.clone()),
+                    self.di_core.di_size,
+                ),
                 _ => return Err(libc::ENXIO),
             });
         }
-        Ok(self.file.as_ref().unwrap())
+        Ok(self.file.as_mut().unwrap())
     }
 
     pub fn get_link_data<R>(&self, buf_reader: &mut R, superblock: &Sb) -> CString
@@ -415,7 +405,7 @@ impl Dinode {
 
         let file_metadata = self.get_file()?;
         while size > 0 {
-            let (blk, blocks) = (*file_metadata).get_extent(buf_reader.by_ref(), logical_block);
+            let (blk, blocks) = file_metadata.lookup(buf_reader.by_ref(), sb, logical_block)?;
             let z = usize::try_from(min(
                 u64::try_from(size).unwrap(),
                 (blocks << sb.sb_blocklog) - block_offset,
@@ -499,6 +489,7 @@ impl Dinode {
 
     /// The size in bytes of the associated regular file, if any exists
     pub fn fsize(&mut self) -> XfsFsize {
-        self.get_file().map(FileMetadata::size).unwrap_or(0)
+        self.get_file().map(|f| f.size()).unwrap_or(0)
     }
 }
+

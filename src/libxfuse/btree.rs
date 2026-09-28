@@ -119,7 +119,7 @@ pub type XfsBmbtLblock = BtreeBlockHdr<u64>;
 trait BtreePriv {
     fn keys(&self) -> &[BmbtKey];
     fn level(&self) -> u16;
-    fn block_cache(&self) -> &RefCell<BlockCache>;
+    fn block_cache(&self) -> &RefCell<BtreeBlockCache>;
     fn ptrs(&self) -> &[XfsBmbtPtr];
 }
 
@@ -144,7 +144,7 @@ pub trait Btree: BtreePriv {
 
         let mut guard = self.block_cache().borrow_mut();
         match &mut *guard {
-            BlockCache::Intermediate(bci) => {
+            BtreeBlockCache::Intermediate(bci) => {
                 assert!(self.level() > 1);
 
                 let entry = bci.entry(idx);
@@ -164,7 +164,7 @@ pub trait Btree: BtreePriv {
                     }
                 }
             }
-            BlockCache::Leaf(bcl) => {
+            BtreeBlockCache::Leaf(bcl) => {
                 assert!(self.level() <= 1);
 
                 let entry = bcl.entry(idx);
@@ -189,17 +189,17 @@ pub trait Btree: BtreePriv {
 }
 
 #[derive(Debug)]
-enum BlockCache {
+enum BtreeBlockCache {
     Intermediate(BTreeMap<usize, BtreeIntermediate>),
     Leaf(BTreeMap<usize, BtreeLeaf>),
 }
 
-impl BlockCache {
+impl BtreeBlockCache {
     fn new(level: u16) -> Self {
         if level > 1 {
-            BlockCache::Intermediate(Default::default())
+            BtreeBlockCache::Intermediate(Default::default())
         } else {
-            BlockCache::Leaf(Default::default())
+            BtreeBlockCache::Leaf(Default::default())
         }
     }
 }
@@ -215,7 +215,7 @@ pub struct BtreeRoot {
     pub keys: Vec<BmbtKey>,
     pub ptrs: Vec<XfsBmdrPtr>,
     /// A cache of the object's extents, indexed by block number
-    blocks:   RefCell<BlockCache>,
+    blocks:   RefCell<BtreeBlockCache>,
 }
 
 impl BtreeRoot {
@@ -284,7 +284,7 @@ impl BtreeRoot {
     }
 
     pub fn new(bmdr: BmdrBlock, keys: Vec<BmbtKey>, ptrs: Vec<XfsBmdrPtr>) -> Self {
-        let blocks = RefCell::new(BlockCache::new(bmdr.bb_level));
+        let blocks = RefCell::new(BtreeBlockCache::new(bmdr.bb_level));
         Self {
             bmdr,
             keys,
@@ -295,7 +295,7 @@ impl BtreeRoot {
 }
 
 impl BtreePriv for BtreeRoot {
-    fn block_cache(&self) -> &RefCell<BlockCache> {
+    fn block_cache(&self) -> &RefCell<BtreeBlockCache> {
         &self.blocks
     }
 
@@ -321,11 +321,11 @@ struct BtreeIntermediate {
     keys:   Vec<BmbtKey>,
     ptrs:   Vec<XfsBmbtPtr>,
     /// A cache of the object's extents, indexed by block number
-    blocks: RefCell<BlockCache>,
+    blocks: RefCell<BtreeBlockCache>,
 }
 
 impl BtreePriv for BtreeIntermediate {
-    fn block_cache(&self) -> &RefCell<BlockCache> {
+    fn block_cache(&self) -> &RefCell<BtreeBlockCache> {
         &self.blocks
     }
 
@@ -374,7 +374,7 @@ impl<Ctx> Decode<Ctx> for BtreeIntermediate {
             ptrs.push(ptr);
         }
 
-        let blocks = RefCell::new(BlockCache::new(hdr.bb_level));
+        let blocks = RefCell::new(BtreeBlockCache::new(hdr.bb_level));
         Ok(Self {
             hdr,
             keys,
