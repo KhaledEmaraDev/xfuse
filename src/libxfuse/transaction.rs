@@ -145,8 +145,6 @@ impl<'a> Transaction<'a> {
     /// The commit mode this transaction was created with.
     /// Used by the operations that are a later phase, or by the tests below.
     #[allow(dead_code)]
-    /// Used by the operations that are a later phase, or by the tests below.
-    #[allow(dead_code)]
     pub const fn mode(&self) -> CommitMode {
         self.mode
     }
@@ -372,8 +370,6 @@ impl TransactionContext {
     }
 
     /// The commit mode that new transactions inherit.
-    /// Used by the operations that are a later phase, or by the tests below.
-    #[allow(dead_code)]
     /// Used by the operations that are a later phase, or by the tests below.
     #[allow(dead_code)]
     pub const fn mode(&self) -> CommitMode {

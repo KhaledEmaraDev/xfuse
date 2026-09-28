@@ -7,6 +7,14 @@
 cargo check
 ```
 
+   And the lints, on the toolchain CI uses.  CI runs clippy and rustfmt on
+   nightly, and nightly has lints that stable does not have, so a change that
+   stable accepts can still fail the build:
+```
+cargo +nightly clippy --all-targets -- -D warnings
+cargo +nightly fmt -- --check
+```
+
 2. Build the project
 ```
 cargo build
