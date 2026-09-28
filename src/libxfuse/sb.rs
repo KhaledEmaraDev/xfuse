@@ -180,36 +180,36 @@ bitflags! {
 #[derive(Clone, Copy, Debug)]
 pub struct Sb {
     // sb_magicnum: u32,
-    pub sb_blocksize:     u32,
-    pub sb_dblocks:       XfsRfsblock,
-    pub sb_rblocks:       XfsRfsblock,
+    pub sb_blocksize:      u32,
+    pub sb_dblocks:        XfsRfsblock,
+    pub sb_rblocks:        XfsRfsblock,
     // sb_rextents: XfsRtblock,
-    pub sb_uuid:          Uuid,
+    pub sb_uuid:           Uuid,
     // sb_logstart: XfsFsblock,
-    pub sb_rootino:       XfsIno,
+    pub sb_rootino:        XfsIno,
     // sb_rbmino: XfsIno,
     // sb_rsumino: XfsIno,
     // sb_rextsize: XfsAgblock,
-    pub sb_agblocks:      XfsAgblock,
-    pub sb_agcount:       XfsAgnumber,
+    pub sb_agblocks:       XfsAgblock,
+    pub sb_agcount:        XfsAgnumber,
     // sb_rbmblocks: XfsExtlen,
-    pub sb_logblocks:     XfsExtlen,
-    sb_versionnum:        u16,
+    pub sb_logblocks:      XfsExtlen,
+    sb_versionnum:         u16,
     // sb_sectsize: u16,
-    sb_inodesize:         u16,
+    sb_inodesize:          u16,
     // sb_inopblock: u16,
     // sb_fname: [u8; 12],
-    pub sb_blocklog:      u8,
+    pub sb_blocklog:       u8,
     // sb_sectlog: u8,
-    pub sb_inodelog:      u8,
-    pub sb_inopblog:      u8,
-    pub sb_agblklog:      u8,
+    pub sb_inodelog:       u8,
+    pub sb_inopblog:       u8,
+    pub sb_agblklog:       u8,
     // sb_rextslog: u8,
     // sb_inprogress: u8,
     // sb_imax_pct: u8,
-    pub sb_icount:        u64,
-    pub sb_ifree:         u64,
-    pub sb_fdblocks:      u64,
+    pub sb_icount:         u64,
+    pub sb_ifree:          u64,
+    pub sb_fdblocks:       u64,
     // sb_frextents: u64,
     // sb_uquotino: XfsIno,
     // sb_gquotino: XfsIno,
@@ -219,11 +219,11 @@ pub struct Sb {
     // sb_inoalignmt: XfsExtlen,
     // sb_unit: u32,
     // sb_width: u32,
-    pub sb_dirblklog:     u8,
+    pub sb_dirblklog:      u8,
     // sb_logsectlog: u8,
     // sb_logsectsize: u16,
     // sb_logsunit: u32,
-    sb_features2:         SbFeatures2,
+    sb_features2:          SbFeatures2,
     // sb_bad_features2: u32,
     // sb_features_compat: u32,
     /// Features that only make sense on a read-only file system, such as
@@ -231,9 +231,9 @@ pub struct Sb {
     sb_features_ro_compat: u32,
     // sb_features_incompat: u32,
     // sb_features_log_incompat: u32,
-    sb_features_incompat: SbFeaturesIncompat,
+    sb_features_incompat:  SbFeaturesIncompat,
     /// File system level flags, such as "this file system is read-only".
-    sb_flags:             u8,
+    sb_flags:              u8,
 }
 
 impl Sb {
@@ -389,7 +389,8 @@ impl Sb {
     /// An incompatible feature means the file system cannot be mounted by an
     /// implementation that does not know about it at all.
     pub const fn incompat(&self, feature: u32) -> bool {
-        self.sb_features_incompat.intersects(SbFeaturesIncompat::from_bits_truncate(feature))
+        self.sb_features_incompat
+            .intersects(SbFeaturesIncompat::from_bits_truncate(feature))
     }
 
     /// Does the superblock itself say that this file system is read-only?
@@ -410,12 +411,18 @@ impl Sb {
     /// Enable an incompatible feature.  Only the tests need this.
     #[cfg(test)]
     pub fn set_incompat(&mut self, feature: u32) {
-        self.sb_features_incompat.insert(SbFeaturesIncompat::from_bits_truncate(feature));
+        self.sb_features_incompat
+            .insert(SbFeaturesIncompat::from_bits_truncate(feature));
     }
 
     #[inline]
     pub fn get_dir3_leaf_offset(&self) -> XfsDablk {
         1 << (35 - self.sb_blocklog)
+    }
+
+    /// How many allocation groups the file system has.
+    pub const fn agcount(&self) -> u32 {
+        self.sb_agcount
     }
 
     /// Get the size of an inode in bytes
@@ -431,17 +438,11 @@ impl Sb {
     /// inode can be modified without first being found.
     pub fn inode_offset(&self, inode_number: XfsIno) -> u64 {
         let ag_no = inode_number >> (self.sb_agblklog + self.sb_inopblog);
-        let ag_blk =
-            (inode_number >> self.sb_inopblog) & ((1 << self.sb_agblklog) - 1);
+        let ag_blk = (inode_number >> self.sb_inopblog) & ((1 << self.sb_agblklog) - 1);
         let blk_ino = inode_number & ((1 << self.sb_inopblog) - 1);
         ((ag_no * u64::from(self.sb_agblocks)) << self.sb_blocklog)
             + (ag_blk << self.sb_blocklog)
             + (blk_ino << self.sb_inodelog)
-    }
-
-    /// Does this inode number refer to an allocation group that exists?
-    pub fn ag_number_exists(&self, inode_number: XfsIno) -> bool {
-        inode_number >> (self.sb_agblklog + self.sb_inopblog) < u64::from(self.sb_agcount)
     }
 
     /// Given a file system block number, calculate its disk address in units of 512B blocks

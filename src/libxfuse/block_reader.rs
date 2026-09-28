@@ -68,7 +68,10 @@ pub struct BlockReader {
 impl BlockReader {
     /// Open the image at `path` for reading.
     pub fn open(path: &Path) -> IoResult<Self> {
-        Ok(Self::from_device(Arc::new(BlockDevice::open(path, Access::ReadOnly)?)))
+        Ok(Self::from_device(Arc::new(BlockDevice::open(
+            path,
+            Access::ReadOnly,
+        )?)))
     }
 
     /// Build a reader over an already opened device.
@@ -279,9 +282,7 @@ mod t {
             let initial = bs + (bs >> 2);
             br.seek(SeekFrom::Start(initial)).unwrap();
 
-            let e = br
-                .seek(SeekFrom::Current(-2 * initial as i64))
-                .unwrap_err();
+            let e = br.seek(SeekFrom::Current(-2 * initial as i64)).unwrap_err();
             assert_eq!(libc::EINVAL, e.raw_os_error().unwrap());
         }
 

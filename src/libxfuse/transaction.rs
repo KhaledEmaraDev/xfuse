@@ -99,15 +99,15 @@ impl CommitMode {
 /// its transactions rather than interleaving them, and it is much easier to
 /// prove correct.
 pub struct Transaction<'a> {
-    device:  &'a BlockDevice,
-    cache:   &'a mut BlockCache,
-    sb:      &'a Sb,
-    mode:    CommitMode,
+    device:   &'a BlockDevice,
+    cache:    &'a mut BlockCache,
+    sb:       &'a Sb,
+    mode:     CommitMode,
     /// Whether the device in use is the real-time device.  Real-time blocks
     /// live on a separate image, so a transaction has to know which one it is
     /// writing to.
     realtime: bool,
-    done:    bool,
+    done:     bool,
 }
 
 impl<'a> Transaction<'a> {
@@ -143,12 +143,18 @@ impl<'a> Transaction<'a> {
     }
 
     /// The commit mode this transaction was created with.
+    /// Used by the operations that are a later phase, or by the tests below.
+    #[allow(dead_code)]
+    /// Used by the operations that are a later phase, or by the tests below.
+    #[allow(dead_code)]
     pub const fn mode(&self) -> CommitMode {
         self.mode
     }
 
     /// The superblock, so that callers do not have to carry a second reference
     /// to it around.
+    /// Used by the operations that are a later phase, or by the tests below.
+    #[allow(dead_code)]
     pub const fn sb(&self) -> &Sb {
         self.sb
     }
@@ -160,6 +166,8 @@ impl<'a> Transaction<'a> {
 
     /// The byte offset within the image at which file system block `block`
     /// starts, taking the real-time device into account.
+    /// Used by the operations that are a later phase, or by the tests below.
+    #[allow(dead_code)]
     pub fn block_offset(&self, block: u64) -> u64 {
         if self.realtime {
             self.sb.fsb_to_offset_rt(block)
@@ -179,6 +187,8 @@ impl<'a> Transaction<'a> {
     }
 
     /// Read a file system block's contents, going through the cache.
+    /// Used by the operations that are a later phase, or by the tests below.
+    #[allow(dead_code)]
     pub fn read_block(&mut self, block: u64) -> FsResult<Vec<u8>> {
         let offset = self.block_offset(block);
         Ok(self.cache.read_block(self.device, offset)?.to_vec())
@@ -186,6 +196,8 @@ impl<'a> Transaction<'a> {
 
     /// Get a file system block for modification, together with the byte offset
     /// it lives at, which callers need in order to write into the middle of it.
+    /// Used by the operations that are a later phase, or by the tests below.
+    #[allow(dead_code)]
     pub fn modify_block(&mut self, block: u64) -> FsResult<(u64, &mut [u8])> {
         self.refuse("modifying a block")?;
         let offset = self.block_offset(block);
@@ -195,6 +207,8 @@ impl<'a> Transaction<'a> {
 
     /// Get the block that contains byte `offset` in the image, for
     /// modification, together with that byte's offset within the block.
+    /// Used by the operations that are a later phase, or by the tests below.
+    #[allow(dead_code)]
     pub fn modify_block_at(&mut self, offset: u64) -> FsResult<(u64, u64, &mut [u8])> {
         let bs = self.blocksize();
         let start = offset - (offset % bs);
@@ -218,7 +232,10 @@ impl<'a> Transaction<'a> {
         if end > self.device.size() {
             return Err(FsError::invalid(
                 libc::EFBIG,
-                format!("write at {offset} length {} runs past the end of the image", data.len()),
+                format!(
+                    "write at {offset} length {} runs past the end of the image",
+                    data.len()
+                ),
             ));
         }
         if data.is_empty() {
@@ -228,7 +245,7 @@ impl<'a> Transaction<'a> {
         // A write that is not block aligned needs read-modify-write at both
         // ends.  The middle, if any, can go in whole.
         let mut written = 0u64;
-        if offset % bs != 0 {
+        if !offset.is_multiple_of(bs) {
             let first_len = std::cmp::min(bs - (offset % bs), data.len() as u64);
             self.cache
                 .write_within_block(self.device, offset, &data[..first_len as usize])?;
@@ -236,8 +253,11 @@ impl<'a> Transaction<'a> {
         }
         while written + bs <= data.len() as u64 {
             let start = offset + written;
-            self.cache
-                .write_within_block(self.device, start, &data[written as usize..(written + bs) as usize])?;
+            self.cache.write_within_block(
+                self.device,
+                start,
+                &data[written as usize..(written + bs) as usize],
+            )?;
             written += bs;
         }
         if (written as usize) < data.len() {
@@ -264,6 +284,26 @@ impl<'a> Transaction<'a> {
         self.write_bytes(offset, data)
     }
 
+    /// Read a run of bytes out of the image, going through the block cache.
+    ///
+    /// A read has to go through the cache, not straight to the device, because
+    /// the transaction may already have changed part of the block the bytes are
+    /// in.  Reading past the change would make a transaction believe it had
+    /// restored a field it meant to keep.
+    pub fn read_bytes(&mut self, offset: u64, len: usize) -> FsResult<Vec<u8>> {
+        let bs = self.blocksize();
+        let mut out = Vec::with_capacity(len);
+        while out.len() < len {
+            let at = offset + out.len() as u64;
+            let start = at - (at % bs);
+            let within = usize::try_from(at - start).expect("offset within a block");
+            let block = self.cache.read_block(self.device, start)?;
+            let n = std::cmp::min(bs as usize - within, len - out.len());
+            out.extend_from_slice(&block[within..within + n]);
+        }
+        Ok(out)
+    }
+
     /// Write the changes out.
     pub fn commit(mut self) -> FsResult<()> {
         self.done = true;
@@ -286,6 +326,8 @@ impl<'a> Transaction<'a> {
 
     /// Has this transaction been committed or aborted?  A transaction that has
     /// not been finished must not be allowed to commit later by accident.
+    /// Used by the operations that are a later phase, or by the tests below.
+    #[allow(dead_code)]
     pub const fn is_done(&self) -> bool {
         self.done
     }
@@ -324,12 +366,16 @@ impl TransactionContext {
         Self {
             device,
             cache: BlockCache::new(sb.sb_blocksize as usize, limit),
-            sb: sb.clone(),
+            sb: *sb,
             mode,
         }
     }
 
     /// The commit mode that new transactions inherit.
+    /// Used by the operations that are a later phase, or by the tests below.
+    #[allow(dead_code)]
+    /// Used by the operations that are a later phase, or by the tests below.
+    #[allow(dead_code)]
     pub const fn mode(&self) -> CommitMode {
         self.mode
     }
@@ -340,8 +386,16 @@ impl TransactionContext {
     }
 
     /// The block cache, for tests and for the invalidation that a commit needs.
+    /// Used by the operations that are a later phase, or by the tests below.
+    #[allow(dead_code)]
     pub const fn cache(&self) -> &BlockCache {
         &self.cache
+    }
+
+    /// The image this context writes to, for the operations that need to push
+    /// data out to the underlying storage.
+    pub fn device(&self) -> &BlockDevice {
+        &self.device
     }
 }
 
@@ -372,10 +426,10 @@ mod t {
     }
 
     struct Harness {
-        _f:   tempfile::NamedTempFile,
-        dev:  BlockDevice,
+        _f:    tempfile::NamedTempFile,
+        dev:   BlockDevice,
         cache: BlockCache,
-        sb:   Sb,
+        sb:    Sb,
     }
 
     fn harness(writable: bool) -> Harness {
@@ -387,10 +441,10 @@ mod t {
             Access::ReadOnly
         };
         Harness {
-            dev: BlockDevice::open(f.path(), access).unwrap(),
+            dev:   BlockDevice::open(f.path(), access).unwrap(),
             cache: BlockCache::new(512, 64),
-            sb: sb(),
-            _f: f,
+            sb:    sb(),
+            _f:    f,
         }
     }
 
@@ -504,9 +558,7 @@ mod t {
         tx.commit().unwrap();
 
         let mut buf = vec![0u8; 512];
-        h.dev
-            .read_at(&mut buf, h.sb.fsb_to_offset(1024))
-            .unwrap();
+        h.dev.read_at(&mut buf, h.sb.fsb_to_offset(1024)).unwrap();
         assert_eq!(&buf[..3], b"ag1");
     }
 

@@ -40,12 +40,9 @@
 //! complete.  Neither of them is a reason to panic, and neither of them may be
 //! reported to FUSE as success.
 
-use std::{
-    fmt,
-    io,
-    num::TryFromIntError,
-    path::PathBuf,
-};
+use std::{fmt, io, num::TryFromIntError, path::PathBuf};
+
+use nix::errno;
 
 /// An error produced by the file system.
 ///
@@ -125,7 +122,11 @@ impl fmt::Display for FsError {
                 write!(f, "{} (errno {})", msg, errno)
             }
             FsError::NoEntry { name } => {
-                write!(f, "no such file or directory: {}", String::from_utf8_lossy(name))
+                write!(
+                    f,
+                    "no such file or directory: {}",
+                    String::from_utf8_lossy(name)
+                )
             }
             FsError::Exists { name } => {
                 write!(f, "file exists: {}", String::from_utf8_lossy(name))
@@ -168,11 +169,22 @@ impl From<io::Error> for FsError {
     }
 }
 
+impl From<i32> for FsError {
+    /// Wrap a bare `errno` from the read path, which still reports its failures
+    /// that way.
+    fn from(errno: i32) -> Self {
+        FsError::Invalid {
+            errno,
+            msg: format!("operation failed: {}", errno::Errno::from_raw(errno)),
+        }
+    }
+}
+
 impl From<TryFromIntError> for FsError {
     fn from(e: TryFromIntError) -> Self {
         FsError::Invalid {
             errno: libc::EINVAL,
-            msg: e.to_string(),
+            msg:   e.to_string(),
         }
     }
 }
@@ -180,23 +192,11 @@ impl From<TryFromIntError> for FsError {
 /// The result type used by the write path.
 pub type FsResult<T> = Result<T, FsError>;
 
-/// Report a corrupt structure with a description of what was being read.
-pub fn corrupt(what: impl Into<String>) -> FsError {
-    FsError::corrupt(what)
-}
-
 /// Convenience for a name that could not be found.
 pub fn no_entry(name: &[u8]) -> FsError {
     FsError::NoEntry {
         name: name.to_vec(),
     }
-}
-
-/// Turn a name into the byte string that FUSE hands us, and that the file
-/// system stores.
-pub fn name_bytes(name: &std::ffi::OsStr) -> Vec<u8> {
-    use std::os::unix::ffi::OsStrExt as _;
-    name.as_bytes().to_vec()
 }
 
 #[cfg(test)]
@@ -210,7 +210,10 @@ mod t {
         assert_eq!(FsError::unsupported("reflink").errno(), libc::ENOSYS);
         assert_eq!(FsError::corrupt("x").errno(), libc::EUCLEAN);
         assert_eq!(FsError::invalid(libc::EISDIR, "x").errno(), libc::EISDIR);
-        assert_eq!(FsError::from(io::Error::from_raw_os_error(libc::EIO)).errno(), libc::EIO);
+        assert_eq!(
+            FsError::from(io::Error::from_raw_os_error(libc::EIO)).errno(),
+            libc::EIO
+        );
     }
 
     /// A read that ran off the end of the image is damage to the file system,

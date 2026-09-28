@@ -40,7 +40,7 @@ use super::{
     S_IFMT,
 };
 
-#[derive(Debug, FromPrimitive)]
+#[derive(Clone, Copy, Debug, FromPrimitive)]
 #[cfg_attr(test, derive(Default))]
 pub enum XfsDinodeFmt {
     Dev,

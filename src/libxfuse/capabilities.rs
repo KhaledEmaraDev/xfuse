@@ -84,9 +84,9 @@ pub struct FsCapabilities {
     /// The features that make a read-write mount unsafe right now.
     write_blockers: Vec<&'static str>,
     /// True when the image can be mounted read-write.
-    writable:        bool,
+    writable:       bool,
     /// True when a real-time device is in use.
-    realtime:        bool,
+    realtime:       bool,
 }
 
 impl FsCapabilities {
@@ -198,15 +198,24 @@ mod t {
         for (name, set) in [
             (
                 "reflink",
-                (Sb::set_read_only_compat as fn(&mut Sb, u32), RO_COMPAT_REFLINK),
+                (
+                    Sb::set_read_only_compat as fn(&mut Sb, u32),
+                    RO_COMPAT_REFLINK,
+                ),
             ),
             (
                 "rmapbt",
-                (Sb::set_read_only_compat as fn(&mut Sb, u32), RO_COMPAT_RMAPBT),
+                (
+                    Sb::set_read_only_compat as fn(&mut Sb, u32),
+                    RO_COMPAT_RMAPBT,
+                ),
             ),
             (
                 "bigtime",
-                (Sb::set_read_only_compat as fn(&mut Sb, u32), RO_COMPAT_BIGTIME),
+                (
+                    Sb::set_read_only_compat as fn(&mut Sb, u32),
+                    RO_COMPAT_BIGTIME,
+                ),
             ),
             (
                 "sparse inodes",
@@ -224,7 +233,10 @@ mod t {
                 "metadata directory",
                 (Sb::set_incompat as fn(&mut Sb, u32), INCOMPAT_METADIR),
             ),
-            ("zoned", (Sb::set_incompat as fn(&mut Sb, u32), INCOMPAT_ZONED)),
+            (
+                "zoned",
+                (Sb::set_incompat as fn(&mut Sb, u32), INCOMPAT_ZONED),
+            ),
         ] {
             let mut sb = plain();
             set.0(&mut sb, set.1);

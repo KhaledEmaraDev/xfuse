@@ -83,7 +83,7 @@ use crc::{Crc, CRC_32_ISCSI};
 
 use super::{
     bmbt_rec::BmbtRec,
-    definitions::{XFS_DINODE_MAGIC, XfsFsize, XfsIno},
+    definitions::{XfsFsize, XfsIno, XFS_DINODE_MAGIC},
     error::{FsError, FsResult},
 };
 
@@ -93,6 +93,10 @@ use super::{
 /// simply absent from versions 1 and 2, which is why the version 3 offsets
 /// start again at 100 and the literal area of a version 1 or 2 inode begins
 /// there.
+///
+/// This is a table of the format rather than a set of constants that the code
+/// happens to use, so entries that no caller needs today are still part of it.
+#[allow(dead_code)]
 mod offset {
     pub const MAGIC: usize = 0;
     pub const MODE: usize = 2;
@@ -138,6 +142,7 @@ mod offset {
 
 /// The 64-bit extent count flag, which swaps the width of the extent counts
 /// and of the extent records that go with them.
+#[allow(dead_code)] // Used as soon as a file's extents are changed.
 const FLAGS2_NREXT64: u64 = 1 << 4;
 /// The big-time flag, which changes how timestamps are stored.
 const FLAGS2_BIGTIME: u64 = 1 << 3;
@@ -243,6 +248,8 @@ impl RawDinode {
         BigEndian::read_u16(&self.bytes[offset::MODE..])
     }
 
+    /// Used by the metadata operations, which are a later phase.
+    #[allow(dead_code)]
     pub fn set_mode(&mut self, mode: u16) {
         BigEndian::write_u16(&mut self.bytes[offset::MODE..], mode);
         self.dirty = true;
@@ -252,6 +259,8 @@ impl RawDinode {
         BigEndian::read_u32(&self.bytes[offset::UID..])
     }
 
+    /// Used by the metadata operations, which are a later phase.
+    #[allow(dead_code)]
     pub fn set_uid(&mut self, uid: u32) {
         BigEndian::write_u32(&mut self.bytes[offset::UID..], uid);
         self.dirty = true;
@@ -261,6 +270,8 @@ impl RawDinode {
         BigEndian::read_u32(&self.bytes[offset::GID..])
     }
 
+    /// Used by the metadata operations, which are a later phase.
+    #[allow(dead_code)]
     pub fn set_gid(&mut self, gid: u32) {
         BigEndian::write_u32(&mut self.bytes[offset::GID..], gid);
         self.dirty = true;
@@ -268,6 +279,7 @@ impl RawDinode {
 
     /// The number of names that refer to this inode.  A version 1 inode keeps
     /// this in a 16-bit field that later versions use for something else.
+    #[allow(dead_code)]
     pub fn nlink(&self) -> u32 {
         match self.version {
             1 => u32::from(BigEndian::read_u16(&self.bytes[offset::ONLINK..])),
@@ -275,6 +287,8 @@ impl RawDinode {
         }
     }
 
+    /// Used by the metadata operations, which are a later phase.
+    #[allow(dead_code)]
     pub fn set_nlink(&mut self, nlink: u32) {
         match self.version {
             1 => BigEndian::write_u16(&mut self.bytes[offset::ONLINK..], nlink as u16),
@@ -288,6 +302,7 @@ impl RawDinode {
         BigEndian::read_i64(&self.bytes[offset::SIZE..])
     }
 
+    #[allow(dead_code)]
     pub fn set_size(&mut self, size: XfsFsize) {
         BigEndian::write_i64(&mut self.bytes[offset::SIZE..], size);
         self.dirty = true;
@@ -295,6 +310,7 @@ impl RawDinode {
 
     /// How many file system blocks this inode's forks occupy, counting
     /// indirect blocks and the attribute fork as well as data.
+    #[allow(dead_code)]
     pub fn nblocks(&self) -> u64 {
         BigEndian::read_u64(&self.bytes[offset::NBLOCKS..])
     }
@@ -325,6 +341,7 @@ impl RawDinode {
 
     /// Where the attribute fork begins, as a number of eight-byte units from
     /// the start of the local area.  Zero when there is no attribute fork.
+    #[allow(dead_code)]
     pub fn forkoff(&self) -> u8 {
         self.bytes[offset::FORKOFF]
     }
@@ -337,17 +354,20 @@ impl RawDinode {
 
     /// The format of the attribute fork, in the same numbering as
     /// [`RawDinode::format`].
+    #[allow(dead_code)]
     pub fn aformat(&self) -> u8 {
         self.bytes[offset::AFORMAT]
     }
 
     /// The inode's flags, as defined by the file system format.
+    #[allow(dead_code)]
     pub fn flags(&self) -> u16 {
         BigEndian::read_u16(&self.bytes[offset::FLAGS..])
     }
 
     /// The inode's generation number, which the file system uses to tell an
     /// old inode from a new one that reused its number.
+    #[allow(dead_code)]
     pub fn gen(&self) -> u32 {
         BigEndian::read_u32(&self.bytes[offset::GEN..])
     }
@@ -382,6 +402,7 @@ impl RawDinode {
     }
 
     /// The inode's log sequence number, or zero for a version 1 or 2 inode.
+    #[allow(dead_code)]
     pub fn lsn(&self) -> u64 {
         match self.version {
             3 => BigEndian::read_u64(&self.bytes[offset::LSN..]),
@@ -391,6 +412,7 @@ impl RawDinode {
 
     /// How many times this inode has been modified, as recorded by the file
     /// system itself.
+    #[allow(dead_code)]
     pub fn change_count(&self) -> u64 {
         match self.version {
             3 => BigEndian::read_u64(&self.bytes[offset::CHANGECOUNT..]),
@@ -414,12 +436,13 @@ impl RawDinode {
                 _ => bigtime_epoch() + Duration::from_nanos(nanos as u64),
             }
         } else {
-            let sec = i32::from(BigEndian::read_i32(&self.bytes[at..]));
+            let sec = BigEndian::read_i32(&self.bytes[at..]);
             let nsec = BigEndian::read_u32(&self.bytes[at + 4..]);
             if sec >= 0 {
                 UNIX_EPOCH + Duration::new(sec as u64, nsec)
             } else {
-                UNIX_EPOCH - Duration::new(sec.unsigned_abs() as u64, 0) + Duration::from_nanos(nsec as u64)
+                UNIX_EPOCH - Duration::new(sec.unsigned_abs() as u64, 0)
+                    + Duration::from_nanos(nsec as u64)
             }
         }
     }
@@ -480,6 +503,7 @@ impl RawDinode {
     }
 
     /// Record when the file was last read.
+    #[allow(dead_code)]
     pub fn set_atime(&mut self, time: SystemTime) {
         self.set_timestamp(offset::ATIME, time)
     }
@@ -494,6 +518,7 @@ impl RawDinode {
     /// A data fork in the `extents` format is simply a run of fixed-size extent
     /// records starting at the beginning of the local area, one per extent.
     /// Returns `None` if the fork is not in that format.
+    #[allow(dead_code)] // Used as soon as a file's extents are changed.
     pub fn core_extents(&self) -> Option<Vec<BmbtRec>> {
         if self.format() != 2 {
             return None;
@@ -502,7 +527,10 @@ impl RawDinode {
         let mut out = Vec::with_capacity(n);
         for i in 0..n {
             let at = self.literal_area_offset() + i * EXTENT_REC_SIZE;
-            out.push(decode_extent(&self.bytes[at..at + EXTENT_REC_SIZE], self.nrext64())?);
+            out.push(decode_extent(
+                &self.bytes[at..at + EXTENT_REC_SIZE],
+                self.nrext64(),
+            )?);
         }
         Some(out)
     }
@@ -513,6 +541,7 @@ impl RawDinode {
     /// A fork that is not in the `extents` format is not touched, because a
     /// B+tree's records live in its own blocks and rewriting them here would
     /// throw the tree away.
+    #[allow(dead_code)] // Used as soon as a file's extents are changed.
     pub fn set_core_extents(&mut self, extents: &[BmbtRec]) -> FsResult<()> {
         if self.format() != 2 {
             return Err(FsError::unsupported(format!(
@@ -617,6 +646,12 @@ impl RawDinode {
 
 /// The size, in bytes, of an extent record that is stored in an inode.
 ///
+/// The encoder and the decoder below are the on-disk form of a file's data fork
+/// when the fork is held in the inode.  They are tested now, against both
+/// hand-built and real inodes, so that the format is pinned down before
+/// anything depends on it; the first operation that actually rewrites an
+/// extent list is a later phase.
+///
 /// A record packs the offset within the file, the starting block, the number of
 /// blocks, and the "not written yet" flag into one 128-bit number, big-endian.
 const EXTENT_REC_SIZE: usize = 16;
@@ -625,6 +660,7 @@ const EXTENT_REC_SIZE: usize = 16;
 ///
 /// `nrext64` selects between the narrow record, in which the length is 21 bits,
 /// and the wide one, in which it is 63.
+#[allow(dead_code)] // Used as soon as a file's extents are changed.
 fn decode_extent(bytes: &[u8], nrext64: bool) -> Option<BmbtRec> {
     if bytes.len() < EXTENT_REC_SIZE {
         return None;
@@ -648,6 +684,7 @@ fn decode_extent(bytes: &[u8], nrext64: bool) -> Option<BmbtRec> {
 }
 
 /// Encode one extent record, in the narrow form.
+#[allow(dead_code)] // Used as soon as a file's extents are changed.
 fn encode_extent(bytes: &mut [u8], rec: &BmbtRec) {
     assert!(bytes.len() >= EXTENT_REC_SIZE);
     debug_assert!(rec.br_blockcount < (1 << 21));
@@ -665,6 +702,71 @@ fn encode_extent(bytes: &mut [u8], rec: &BmbtRec) {
 #[cfg(test)]
 mod t {
     use super::*;
+
+    const V3_INODE_HEX: &[&str] = &[
+        "49 4e 81 a4 03 03 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 00",
+        "35 9e f9 f6 b3 2c 31 8f 35 9e f9 f6 d3 d6 07 93",
+        "35 9e f9 f6 d3 d6 07 93 00 00 00 00 00 01 00 00",
+        "00 00 00 00 00 00 00 42 00 00 00 00 00 00 00 40",
+        "00 00 00 02 00 00 00 00 00 00 00 00 25 bf f2 9d",
+        "ff ff ff ff 82 59 b5 a8 00 00 00 00 00 00 01 05",
+        "00 00 00 02 00 00 6e 02 00 00 00 00 00 00 00 08",
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+        "35 9e f9 f6 b3 2c 31 8f 00 00 00 00 00 08 03 33",
+        "4a 83 99 f3 a6 fc 43 4d 80 2a 47 1c d1 0c 26 9c",
+        "00 01 00 02 00 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 1e 00 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 00 00 04 01 a5 00 00 00 00",
+        "00 04 01 a7 00 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+    ];
+
+    const V2_INODE_HEX: &[&str] = &[
+        "49 4e 81 a4 02 03 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 01",
+        "66 7d 8e 53 0e f9 59 56 66 7d 8e 53 2e af 0a 1c",
+        "66 7d 8e 53 2e af 0a 1c 00 00 00 00 00 00 80 00",
+        "00 00 00 00 00 00 00 43 00 00 00 00 00 00 00 40",
+        "00 00 00 02 00 00 00 00 00 00 00 00 b3 cb bf 84",
+        "ff ff ff ff 00 01 00 03 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 1e 00 00 00 00 00 00 00 2d",
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 c4 89 00 00 00 00 00 00 c4 8b",
+        "00 00 00 00 00 00 c4 8d 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+    ];
+
+    /// Turn a list of hex rows into the bytes they describe.
+    fn unhex(rows: &[&str]) -> Vec<u8> {
+        let mut out = Vec::new();
+        for row in rows {
+            for byte in row.split(' ') {
+                out.push(u8::from_str_radix(byte, 16).expect("hex"));
+            }
+        }
+        out
+    }
 
     /// A plausible version 3 inode: 512 bytes, a regular file with a B+tree
     /// data fork, big timestamps, and a checksum that is initially correct.
@@ -744,10 +846,7 @@ mod t {
         assert_eq!(inode.lsn(), 0);
         assert!(inode.verify_crc());
 
-        assert_eq!(
-            inode.mtime(),
-            UNIX_EPOCH + Duration::new(1_700_000_000, 0)
-        );
+        assert_eq!(inode.mtime(), UNIX_EPOCH + Duration::new(1_700_000_000, 0));
     }
 
     /// Timestamps stored in the wide form must survive a round trip.
@@ -784,16 +883,16 @@ mod t {
         let mut inode = RawDinode::from_bytes(bytes.to_vec()).unwrap();
         let extents = [
             BmbtRec {
-                br_startoff: 0,
+                br_startoff:   0,
                 br_startblock: 100,
                 br_blockcount: 4,
-                br_flag: false,
+                br_flag:       false,
             },
             BmbtRec {
-                br_startoff: 4,
+                br_startoff:   4,
                 br_startblock: 200,
                 br_blockcount: 2,
-                br_flag: true,
+                br_flag:       true,
             },
         ];
         inode.set_core_extents(&extents).unwrap();
@@ -869,6 +968,100 @@ mod t {
         assert_eq!(inode.nlink(), 9);
     }
 
+    /// A version 3 inode taken from a real file system must pass its own
+    /// checksum, which is the only thing that proves this implementation
+    /// agrees with the one that wrote it.
+    ///
+    /// The bytes are the inode of an ordinary 64 KiB file with a B+tree data
+    /// fork on a version 5 file system with 1 KiB blocks and 512-byte inodes.
+    #[test]
+    fn real_v3_inode_verifies() {
+        let inode = RawDinode::from_bytes(unhex(V3_INODE_HEX)).unwrap();
+        assert_eq!(inode.version(), 3);
+        assert!(inode.verify_crc(), "checksum of a real inode must verify");
+        assert_eq!(inode.size(), 65536);
+        assert_eq!(inode.nblocks(), 66);
+        assert_eq!(inode.nextents(), 64);
+        assert_eq!(inode.anextents(), 0);
+        assert_eq!(inode.gen(), 633336477);
+        assert_eq!(inode.ino(), Some(525107));
+        assert!(inode.is_bigtime());
+        assert!(!inode.nrext64());
+        assert_eq!(inode.change_count(), 261);
+        assert_eq!(inode.forkoff(), 0);
+        assert_eq!(inode.format(), 3);
+        assert_eq!(inode.aformat(), 2);
+        assert!(!inode.is_realtime());
+    }
+
+    /// The same, for the fields a write changes: a real inode's timestamps must
+    /// come back as the times they are, to the nanosecond.
+    #[test]
+    fn real_v3_inode_timestamps() {
+        let inode = RawDinode::from_bytes(unhex(V3_INODE_HEX)).unwrap();
+        let mtime = inode.mtime();
+        let since = mtime.duration_since(UNIX_EPOCH).expect("after the epoch");
+        assert_eq!(since.as_secs(), 1_716_316_720);
+        assert_eq!(since.subsec_nanos(), 841_754_515);
+        assert_eq!(inode.ctime(), mtime);
+        let atime = inode.atime();
+        let since = atime.duration_since(UNIX_EPOCH).unwrap();
+        assert_eq!(since.as_secs(), 1_716_316_720);
+        assert_eq!(since.subsec_nanos(), 293_753_231);
+    }
+
+    /// A real version 2 inode has no checksum, keeps its link count in the
+    /// 32-bit field, and keeps its timestamps in the narrow form.
+    #[test]
+    fn real_v2_inode() {
+        let inode = RawDinode::from_bytes(unhex(V2_INODE_HEX)).unwrap();
+        assert_eq!(inode.version(), 2);
+        assert!(inode.verify_crc());
+        assert_eq!(inode.size(), 32768);
+        assert_eq!(inode.nblocks(), 67);
+        assert_eq!(inode.nextents(), 64);
+        assert_eq!(inode.anextents(), 0);
+        assert_eq!(inode.gen(), 3_016_474_500);
+        assert_eq!(inode.nlink(), 1);
+        assert!(!inode.is_bigtime());
+        assert_eq!(inode.ino(), None);
+        let mtime = inode.mtime();
+        let since = mtime.duration_since(UNIX_EPOCH).unwrap();
+        assert_eq!(since.as_secs(), 1_719_504_467);
+        assert_eq!(since.subsec_nanos(), 783_223_324);
+    }
+
+    /// Modifying a real version 3 inode must leave it verifiable, and must
+    /// change only the fields it was asked to change plus the three that follow
+    /// from a change.
+    #[test]
+    fn real_v3_inode_survives_a_change() {
+        let mut inode = RawDinode::from_bytes(unhex(V3_INODE_HEX)).unwrap();
+        let before = inode.as_bytes().to_vec();
+        let gen = inode.gen();
+        let uuid = inode.ino();
+        let ino = inode.ino();
+        inode.set_mtime(UNIX_EPOCH + Duration::new(1_700_000_000, 7));
+        inode.finalise();
+        assert!(inode.verify_crc());
+        assert_eq!(inode.gen(), gen);
+        assert_eq!(uuid, ino);
+        // The change counter moved on, the log sequence number was cleared, and
+        // the timestamps were the point of the exercise.
+        assert_eq!(inode.change_count(), 262);
+        assert_eq!(inode.lsn(), 0);
+        let since = inode.mtime().duration_since(UNIX_EPOCH).unwrap();
+        assert_eq!((since.as_secs(), since.subsec_nanos()), (1_700_000_000, 7));
+        // Everything the write did not touch, it did not touch.
+        let after = inode.as_bytes();
+        for i in 0..before.len() {
+            let changed = (32..48).contains(&i) || (100..120).contains(&i);
+            if !changed {
+                assert_eq!(before[i], after[i], "byte {i} changed unexpectedly");
+            }
+        }
+    }
+
     /// Damaged or impossible inodes must be reported, not accepted.
     #[test]
     fn bad_inodes_are_rejected() {
@@ -887,4 +1080,3 @@ mod t {
         assert!(RawDinode::from_bytes(bytes).is_err());
     }
 }
-

@@ -47,6 +47,15 @@ struct App {
     /// Run in the foreground
     #[arg(short)]
     foreground: bool,
+
+    /// Mount read-write.
+    ///
+    /// Experimental: xfuse has no journal yet, so a machine that loses power
+    /// in the middle of a write can leave the filesystem inconsistent.  A
+    /// read-write mount is refused outright if the image uses a feature that
+    /// xfuse cannot keep up to date.
+    #[arg(long = "experimental-rw", short = 'r')]
+    experimental_rw: bool,
 }
 
 fn main() {
@@ -60,8 +69,17 @@ fn main() {
     let mut opts = vec![
         MountOption::FSName("fusefs".to_string()),
         MountOption::Subtype("xfs".to_string()),
-        MountOption::RO,
     ];
+    if app.experimental_rw {
+        eprintln!(
+            "warning: mounting read-write.  This mode is experimental and is NOT crash safe: \
+             xfuse has no log yet, so a machine that loses power in the middle of a write can \
+             leave the filesystem inconsistent.  Use it for testing only."
+        );
+        opts.push(MountOption::RW);
+    } else {
+        opts.push(MountOption::RO);
+    }
     // geteuid is always safe
     if unsafe { libc::geteuid() } == 0 {
         opts.push(MountOption::AllowOther);
@@ -95,7 +113,16 @@ fn main() {
         }
     }
 
-    let vol = Volume::new(&app.device, rtdev.as_ref());
+    // Open the image before going into the background, so that a refusal -- an
+    // unwritable image, an image whose features this build cannot maintain --
+    // is reported to whoever ran the command.
+    let vol = match Volume::new(&app.device, rtdev.as_ref(), app.experimental_rw) {
+        Ok(vol) => vol,
+        Err(e) => {
+            eprintln!("xfs-fuse: {e}");
+            std::process::exit(1);
+        }
+    };
 
     if !app.foreground {
         daemon(false, false).unwrap();

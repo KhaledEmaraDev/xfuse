@@ -3,6 +3,21 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+* Experimental write support.  A read-write mount is now possible, and only
+  overwrites bytes that are already inside an allocated extent of an existing
+  file; everything else is refused with an explanation rather than guessed at.
+  It is behind `--experimental-rw` and is *not* crash safe, because the journal
+  does not exist yet.  A read-write mount of an image that uses a feature the
+  write path cannot maintain is refused, naming the feature.  See
+  `docs/write-support-progress.md`.
+* The device access was split into a positional block device, a block cache, and
+  a transaction, so that all metadata changes go through one place.  The read
+  path is unchanged: the same images mount and read as they always did.
+* `Dinode` gained a serialized form, and the file's extent mapping is now
+  interpreted in one place that both the read and the write path use.
+
 ## [0.7.1] - 2026-07-13
 
 ### Fixed

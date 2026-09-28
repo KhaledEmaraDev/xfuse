@@ -142,11 +142,6 @@ impl BlockDevice {
         self.sectorsize
     }
 
-    /// The access mode this device was opened with.
-    pub const fn access(&self) -> Access {
-        self.access
-    }
-
     /// Can this device be written to?
     pub const fn is_writable(&self) -> bool {
         self.access.is_writable()

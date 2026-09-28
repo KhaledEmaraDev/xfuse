@@ -34,7 +34,7 @@ All files are relative to `src/libxfuse/`.
 | File  | Description       |
 |:-----:|:------------------|
 | definitions       | Contains constants for magic numbers and various type definitions |
-| volume            | Contains the main struct that communicates with the FUSE kernel module |
+| volume            | Contains the main struct that communicates with the FUSE kernel module, and the only place that FUSE operations are implemented |
 | sb                | Contains the Super Block structure and some helper methods |
 | dinode_core       | Contains the Core Inode structure |
 | dinode            | Contains helper methods for the Inode to return a file, dir, attr, or symlink `impl` |
@@ -47,9 +47,14 @@ All files are relative to `src/libxfuse/`.
 | dir3_leaf         | Contains a structure for Extents-based Leaf directories |
 | dir3_node         | Contains a structure for Extents-based Node directories |
 | dir3_bptree       | Contains a structure for B+Tree-based directories |
-| file              | Contains a trait for common file operations and some common structures |
-| file_extent_list  | Contains a structure for Extents-based files |
-| file_btree        | Contains a structure for B+Tree-based files |
+| extent            | Contains `ExtentMap`, the one place that answers where a file's logical block lives |
+| block_device      | Contains the only handle onto the image; everything that reads or writes it goes through here |
+| block_reader      | Contains the read side's seekable window onto the image |
+| block_cache       | Contains the cache of file system blocks that modified blocks live in |
+| transaction       | Contains the object through which the file system changes the image |
+| inode             | Contains `RawDinode`, the serialized form of an inode, and the in-memory state kept alongside it |
+| capabilities      | Contains what this implementation supports for a given image, and what it must refuse |
+| error             | Contains the error type the write path uses instead of panicking |
 | symlink_extent    | Contains a structure for Extents-based symlinks |
 | attr              | Contains a trait for common trait operations and some common structures |
 | attr_shortform    | Contains a structure for Short Form attributes |
@@ -57,3 +62,16 @@ All files are relative to `src/libxfuse/`.
 | attr_node         | Contains a structure for Extents-based Node attributes |
 | attr_bptree       | Contains a structure for B+Tree-based attributes |
 | utils             | Contains common helper functions |
+
+### Writing
+
+`docs/write-support-progress.md` records what the write path does today, and
+`docs/licensing.md` records where the code came from.  Two rules matter when
+adding to it:
+
+* Nothing above `transaction.rs` writes to the image.  A change goes through a
+  `Transaction`, and a metadata change is committed with the data change it
+  belongs to.
+* The XFS format is implemented from its documentation and from the behaviour of
+  native XFS.  No GPL implementation code -- the Linux kernel's, or xfsprogs' --
+  is copied, translated, or adapted.  See `docs/licensing.md`.

@@ -75,16 +75,10 @@ use super::{
 pub enum ExtentMap {
     /// The extents are stored in the inode itself, which is what
     /// `di_format == extents` means.
-    Core {
-        extents: Bmx,
-        size:    XfsFsize,
-    },
+    Core { extents: Bmx, size: XfsFsize },
     /// The extents are stored in a B+tree rooted in the inode, which is what
     /// `di_format == btree` means.
-    Btree {
-        btree: BtreeRoot,
-        size:  XfsFsize,
-    },
+    Btree { btree: BtreeRoot, size: XfsFsize },
 }
 
 impl ExtentMap {
@@ -189,10 +183,10 @@ mod t {
 
     fn rec(startoff: u64, startblock: u64, blockcount: u64) -> BmbtRec {
         BmbtRec {
-            br_startoff: startoff,
+            br_startoff:   startoff,
             br_startblock: startblock,
             br_blockcount: blockcount,
-            br_flag: false,
+            br_flag:       false,
         }
     }
 
@@ -289,6 +283,9 @@ mod t {
         let data = 2 << bs;
         assert_eq!(m.lseek(&mut no_device(), 0, libc::SEEK_DATA), Ok(data));
         assert_eq!(m.lseek(&mut no_device(), 0, libc::SEEK_HOLE), Ok(0));
-        assert_eq!(m.lseek(&mut no_device(), data, libc::SEEK_HOLE), Ok(data + (4 << bs)));
+        assert_eq!(
+            m.lseek(&mut no_device(), data, libc::SEEK_HOLE),
+            Ok(data + (4 << bs))
+        );
     }
 }

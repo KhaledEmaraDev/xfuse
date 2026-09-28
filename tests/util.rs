@@ -48,6 +48,21 @@ macro_rules! require_fusefs {
     };
 }
 
+/// Skip the test if we don't have the ability to mount fuse file systems.
+// Copied from nix.
+#[cfg(target_os = "linux")]
+#[macro_export]
+macro_rules! require_fusefs {
+    () => {
+        if !::std::path::Path::new("/dev/fuse").exists() {
+            skip!(
+                "{} requires the ability to mount fusefs. Skipping test.",
+                ::std::module_path!()
+            );
+        }
+    };
+}
+
 #[macro_export]
 macro_rules! require_root {
     () => {
@@ -112,6 +127,25 @@ pub static GOLDEN_RT1: LazyLock<PathBuf> = LazyLock::new(|| prepare_image("xfs_r
 pub static GOLDEN_RT2: LazyLock<PathBuf> = LazyLock::new(|| prepare_image("xfs_rt2.img"));
 #[allow(unused)] // Not used by benches
 pub static GOLDEN_ATTRV1: LazyLock<PathBuf> = LazyLock::new(|| prepare_image("xfs_xattr_v1.img"));
+
+/// Copy a golden image to a scratch file that a test may modify.
+///
+/// The golden images are shared by every test in the binary, so a test that
+/// writes must never touch the original.  The copy is made in the target
+/// directory, and its name says where it came from.
+pub fn writable_copy(golden: &std::path::Path, tag: &str) -> PathBuf {
+    let name = golden.file_name().expect("golden image has a name");
+    let mut copy = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    copy.push(format!(
+        "write-{}-{}-{tag}",
+        std::process::id(),
+        name.to_string_lossy()
+    ));
+    // Start from the golden image every time, so that a failed test cannot
+    // leave a half-written image behind for the next one.
+    fs::copy(golden, &copy).expect("copying the golden image");
+    copy
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct WaitForError;

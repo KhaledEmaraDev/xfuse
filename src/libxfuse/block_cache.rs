@@ -138,10 +138,7 @@ impl BlockCache {
 
     /// How many blocks currently hold unsaved changes.
     pub fn dirty_count(&self) -> usize {
-        self.blocks
-            .values()
-            .filter(|b| b.state.is_dirty())
-            .count()
+        self.blocks.values().filter(|b| b.state.is_dirty()).count()
     }
 
     /// The state of the block at `offset`, if it is resident.
@@ -170,7 +167,7 @@ impl BlockCache {
     }
 
     fn check_aligned(&self, offset: u64) -> FsResult<()> {
-        if offset % self.blocksize as u64 != 0 {
+        if !offset.is_multiple_of(self.blocksize as u64) {
             return Err(FsError::invalid(
                 libc::EINVAL,
                 format!("block offset {offset} is not a multiple of the block size"),
@@ -187,11 +184,7 @@ impl BlockCache {
                 .order
                 .iter()
                 .copied()
-                .find(|offset| {
-                    self.blocks
-                        .get(offset)
-                        .is_some_and(|b| !b.state.is_dirty())
-                });
+                .find(|offset| self.blocks.get(offset).is_some_and(|b| !b.state.is_dirty()));
             match victim {
                 Some(offset) => {
                     self.blocks.remove(&offset);
@@ -224,10 +217,13 @@ impl BlockCache {
             self.make_room()?;
             let mut data = vec![0u8; self.blocksize];
             device.read_at(&mut data, offset)?;
-            self.blocks.insert(offset, CachedBlock {
-                state: BlockState::Clean,
-                data,
-            });
+            self.blocks.insert(
+                offset,
+                CachedBlock {
+                    state: BlockState::Clean,
+                    data,
+                },
+            );
             self.order.push_back(offset);
         }
         Ok(&self.blocks.get(&offset).expect("just inserted").data)
@@ -243,10 +239,13 @@ impl BlockCache {
             self.make_room()?;
             let mut data = vec![0u8; self.blocksize];
             device.read_at(&mut data, offset)?;
-            self.blocks.insert(offset, CachedBlock {
-                state: BlockState::Clean,
-                data,
-            });
+            self.blocks.insert(
+                offset,
+                CachedBlock {
+                    state: BlockState::Clean,
+                    data,
+                },
+            );
             self.order.push_back(offset);
         }
         let block = self.blocks.get_mut(&offset).expect("just inserted");

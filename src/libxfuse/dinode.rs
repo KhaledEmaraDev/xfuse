@@ -314,9 +314,7 @@ impl Dinode {
     pub fn get_file(&mut self) -> Result<&mut ExtentMap, i32> {
         if self.file.is_none() {
             self.file = Some(match &self.di_u {
-                DiU::Bmx(bmx) => {
-                    ExtentMap::from_core(Bmx::new(bmx), self.di_core.di_size)
-                }
+                DiU::Bmx(bmx) => ExtentMap::from_core(Bmx::new(bmx), self.di_core.di_size),
                 DiU::Bmbt((bmdr, keys, pointers)) => ExtentMap::from_btree(
                     BtreeRoot::new(bmdr.clone(), keys.clone(), pointers.clone()),
                     self.di_core.di_size,
@@ -492,4 +490,3 @@ impl Dinode {
         self.get_file().map(|f| f.size()).unwrap_or(0)
     }
 }
-

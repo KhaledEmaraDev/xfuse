@@ -37,6 +37,13 @@ uuid = "1.0"
 name = "integration"
 path = "tests/integration.rs"
 
+# Write-path tests.  A target of their own so that they can be run on their own,
+# and so that making them runnable on Linux does not depend on the FreeBSD-only
+# integration suite compiling.
+[[test]]
+name = "write"
+path = "tests/write.rs"
+
 [[bench]]
 name = "read-amplification"
 path = "benches/read-amplification.rs"

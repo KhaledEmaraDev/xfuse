@@ -31,8 +31,8 @@ use std::{
     io::Read,
     os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
-    sync::OnceLock,
-    time::Duration,
+    sync::{Arc, OnceLock},
+    time::{Duration, SystemTime},
 };
 
 use fuser::{
@@ -48,24 +48,32 @@ use fuser::{
     KernelConfig,
     ReplyAttr,
     ReplyDirectory,
+    ReplyEmpty,
     ReplyEntry,
     ReplyLseek,
     ReplyOpen,
     ReplyStatfs,
+    ReplyWrite,
     ReplyXattr,
     Request,
     FUSE_ROOT_ID,
 };
-use libc::ERANGE;
-use tracing::warn;
+use libc::{mode_t, ERANGE, S_IFMT, S_IFREG};
+use tracing::{debug, warn};
 
 use super::{
     attr::Attr,
+    block_device::{Access, BlockDevice},
     block_reader::BlockReader,
+    capabilities::FsCapabilities,
     definitions::XfsIno,
     dinode::Dinode,
+    dinode_core::XfsDinodeFmt,
     dir3::Dir3,
+    error::{no_entry, FsError, FsResult},
+    inode::RawDinode,
     sb::Sb,
+    transaction::{CommitMode, Transaction, TransactionContext},
 };
 
 /// We must store the Superblock in a global variable.  This is unfortunate, and limits us to only
@@ -79,27 +87,90 @@ struct OpenInode {
     count:  u64,
 }
 
+/// An open file, as FUSE sees it.
+///
+/// FUSE asks the file system to open a file and then refers to that open file
+/// by the handle it returns.  The handle is what tells a write that it is being
+/// asked to modify a file that was actually opened, rather than a file number
+/// that the kernel made up.
+///
+/// The file's position is not here.  FUSE sends the offset of every read and
+/// write, so the kernel holds the position, and a second copy of it could only
+/// disagree with the first.
+#[derive(Debug)]
+struct OpenFile {
+    ino:   u64,
+    flags: i32,
+}
+
 #[derive(Debug)]
 pub struct Volume {
-    device:     BlockReader,
-    rt_device:  Option<BlockReader>,
-    sb:         Sb,
-    open_files: HashMap<u64, OpenInode>,
-    no_open:    bool,
-    no_opendir: bool,
+    device:      BlockReader,
+    rt_device:   Option<BlockReader>,
+    sb:          Sb,
+    open_files:  HashMap<u64, OpenInode>,
+    /// The files the kernel has open, by handle.
+    handles:     HashMap<u64, OpenFile>,
+    next_handle: u64,
+    /// Where transactions get their device, cache, and superblock.
+    tx:          TransactionContext,
+    /// May this mount change the image?
+    writable:    bool,
+    no_open:     bool,
+    no_opendir:  bool,
 }
 
 impl Volume {
-    // Allow the kernel to cache attributes and entries for an unlimited amount
-    // of time, since nothing will ever change.
-    const TTL: Duration = Duration::from_secs(u64::MAX);
+    const TTL_RO: Duration = Duration::from_secs(u64::MAX);
+    /// How long the kernel may cache an attribute or a directory entry.
+    ///
+    /// A read-only mount can hand out entries that never expire, because
+    /// nothing in it ever changes, and that is what it does.
+    ///
+    /// A read-write mount cannot cache at all.  A write updates the modification
+    /// time of the file it wrote, and the kernel would go on reporting the old
+    /// one out of its own cache.  The proper fix is to tell the kernel to throw
+    /// the inode away when it changes, which needs a notifier that this
+    /// version of the FUSE library does not hand to a file system, so the cache
+    /// is simply switched off.  That costs one round trip per attribute, which
+    /// is the right trade for a file system that is still experimental: being
+    /// right is worth more here than being quick.
+    const TTL_RW: Duration = Duration::ZERO;
 
-    pub fn new(device_name: &Path, rt_device_name: Option<&PathBuf>) -> Volume {
-        let mut device = BlockReader::open(device_name).unwrap();
-        let rt_device = rt_device_name.map(|n| BlockReader::open(n).unwrap());
+    /// Open an image.
+    ///
+    /// `writable` asks for a read-write mount.  It is refused, rather than
+    /// quietly downgraded, if the image has features that this implementation
+    /// cannot keep up to date, because a read-write mount that silently ignores
+    /// a feature corrupts the image.
+    pub fn new(
+        device_name: &Path,
+        rt_device_name: Option<&PathBuf>,
+        writable: bool,
+    ) -> FsResult<Volume> {
+        let access = if writable {
+            Access::ReadWrite
+        } else {
+            Access::ReadOnly
+        };
+        let block_device = Arc::new(BlockDevice::open(device_name, access)?);
+        let mut device = BlockReader::from_device(Arc::clone(&block_device));
+        let rt_device = rt_device_name.map(|n| BlockReader::open(n)).transpose()?;
 
         let superblock = Sb::from(device.by_ref());
-        SUPERBLOCK.set(superblock).unwrap();
+        let capabilities = FsCapabilities::inspect(&superblock, rt_device.is_some());
+        if writable && !capabilities.writable() {
+            return Err(FsError::read_only(capabilities.refusal()));
+        }
+        if superblock.is_read_only() {
+            return Err(FsError::read_only(
+                "the superblock says that this file system is read-only",
+            ));
+        }
+        SUPERBLOCK.set(superblock).map_err(|_| FsError::Corrupt {
+            what: "a second image was opened in the same process".into(),
+        })?;
+
         if let Some(rtdev) = &rt_device {
             // Check that rtdev's size matches superblock.sb_rblocks
             let rtdev_blocks = rtdev.size / u64::from(superblock.sb_blocksize);
@@ -111,6 +182,11 @@ impl Volume {
             }
         }
 
+        if superblock.sb_rootino == 0 {
+            return Err(FsError::Corrupt {
+                what: "the superblock has no root inode".into(),
+            });
+        }
         let root_inode = Dinode::from(device.by_ref(), &superblock, superblock.sb_rootino);
         let mut open_files = HashMap::new();
         // Prepopulate the root inode into the cache, since fusefs never sends a lookup for it.
@@ -122,34 +198,222 @@ impl Volume {
             },
         );
 
-        Volume {
+        debug!(
+            "mounting {device_name:?}: {capabilities}, real-time device: {}, {} allocation \
+             groups, {} bytes per block",
+            capabilities.has_realtime(),
+            superblock.agcount(),
+            superblock.sb_blocksize
+        );
+
+        let mode = if writable {
+            CommitMode::Direct
+        } else {
+            CommitMode::ReadOnly
+        };
+        let tx = TransactionContext::new(block_device, &superblock, mode);
+
+        Ok(Volume {
             device,
             rt_device,
             sb: superblock,
             open_files,
+            handles: HashMap::new(),
+            next_handle: 1,
+            tx,
+            writable,
             no_open: false,
             no_opendir: false,
+        })
+    }
+
+    /// How long the kernel may cache things, given whether this mount can
+    /// change them.
+    /// How long the kernel may cache things, given whether this mount can
+    /// change them.
+    fn ttl(&self) -> Duration {
+        if self.writable {
+            Self::TTL_RW
+        } else {
+            Self::TTL_RO
+        }
+    }
+
+    /// The image's inode number for a FUSE inode number.
+    ///
+    /// FUSE insists that the root directory be inode 1, and XFS does not agree,
+    /// so one file has two names here.  Everything that goes to the image needs
+    /// the XFS one.
+    fn xfs_ino(&self, ino: u64) -> XfsIno {
+        if ino == FUSE_ROOT_ID {
+            self.sb.sb_rootino
+        } else {
+            ino as XfsIno
         }
     }
 
     fn open_inode(&mut self, ino: u64) -> &mut OpenInode {
         let sb = &self.sb;
+        let xfs_ino = if ino == FUSE_ROOT_ID {
+            sb.sb_rootino
+        } else {
+            ino as XfsIno
+        };
         self.open_files
             .entry(ino)
             .and_modify(|e| e.count += 1)
             .or_insert_with(|| {
                 self.device.set_bufsize(sb.inode_size());
-                let dinode = Dinode::from(
-                    self.device.by_ref(),
-                    sb,
-                    if ino == FUSE_ROOT_ID {
-                        sb.sb_rootino
-                    } else {
-                        ino as XfsIno
-                    },
-                );
+                let dinode = Dinode::from(self.device.by_ref(), sb, xfs_ino);
                 OpenInode { dinode, count: 1 }
             })
+    }
+
+    /// Begin a transaction on the data device.
+    fn begin(&mut self) -> Transaction<'_> {
+        self.tx.begin()
+    }
+
+    /// Overwrite part of an existing file.
+    ///
+    /// Only bytes that are already inside a written extent of the file may be
+    /// written.  Anything else -- past the end of the file, into a hole, into
+    /// a preallocated-but-unwritten extent, into a directory -- is refused,
+    /// because answering those needs an allocator, and guessing at one would
+    /// mean writing blocks that belong to nobody.
+    ///
+    /// The whole range is checked before any of it is written, so a write that
+    /// is refused leaves the file exactly as it was.
+    fn write_data(&mut self, ino: u64, offset: u64, data: &[u8]) -> FsResult<u32> {
+        if !self.writable {
+            return Err(FsError::read_only("write"));
+        }
+        let oi = self
+            .open_files
+            .get_mut(&ino)
+            .ok_or_else(|| no_entry(b"an inode the kernel has not looked up"))?;
+
+        if oi.dinode.di_core.di_mode as mode_t & S_IFMT != S_IFREG {
+            return Err(FsError::invalid(
+                libc::EBADF,
+                "only regular files can be written to",
+            ));
+        }
+        if oi.dinode.is_realtime() {
+            return Err(FsError::unsupported(
+                "writing to a file on a real-time device",
+            ));
+        }
+        // The two fork formats that hold a mapping from logical blocks to
+        // physical ones.  Anything else -- a local fork, a device inode -- has
+        // no mapping to consult, and writing into it would be a guess.
+        let format = oi.dinode.di_core.di_format;
+        if !matches!(format, XfsDinodeFmt::Extents | XfsDinodeFmt::Btree) {
+            return Err(FsError::unsupported(format!(
+                "writing to a data fork in format {format:?}"
+            )));
+        }
+
+        let size = u64::try_from(oi.dinode.fsize()).map_err(FsError::from)?;
+        let end = offset
+            .checked_add(data.len() as u64)
+            .ok_or_else(|| FsError::invalid(libc::EFBIG, "write runs past the end of the file"))?;
+        if end > size {
+            return Err(FsError::invalid(
+                libc::EFBIG,
+                format!(
+                    "write at {offset} length {} runs past the end of the file ({size} bytes); \
+                     growing a file is not supported yet",
+                    data.len()
+                ),
+            ));
+        }
+        if data.is_empty() {
+            return Ok(0);
+        }
+
+        // Work out where every block of the write lands before writing any of
+        // it.  A range that straddles a hole is refused whole, because
+        // writing the part that happens to be mapped would leave the caller
+        // believing the whole write happened.
+        let blocksize = u64::from(self.sb.sb_blocksize);
+        let mut runs: Vec<(u64, u64, u64)> = Vec::new();
+        {
+            self.device.set_bufsize(self.sb.inode_size());
+            let file = oi.dinode.get_file().map_err(FsError::from)?;
+            let mut pos = offset;
+            while pos < end {
+                let dblock = pos / blocksize;
+                let within = pos % blocksize;
+                let n = std::cmp::min(blocksize - within, end - pos);
+                let (start, len) = file
+                    .lookup(self.device.by_ref(), &self.sb, dblock)
+                    .map_err(|errno| FsError::invalid(errno, "extent lookup failed"))?;
+                let start = start.ok_or_else(|| {
+                    FsError::invalid(
+                        libc::ENXIO,
+                        format!(
+                            "block {dblock} of the file is a hole; writing into a hole needs an \
+                             allocator"
+                        ),
+                    )
+                })?;
+                // The byte to write is `within` bytes into the block the
+                // logical block starts at.
+                let image_offset = self.sb.fsb_to_offset(start) + within;
+                match runs.last_mut() {
+                    // Keep a run going as long as the next piece of the write
+                    // is the very next byte of the image.
+                    Some(run) if run.0 + run.1 == image_offset && run.1 + n <= len * blocksize => {
+                        run.1 += n;
+                    }
+                    _ => runs.push((image_offset, n, len * blocksize)),
+                }
+                pos += n;
+            }
+        }
+
+        debug!(
+            "writing {len} bytes to inode {ino} at offset {offset}: {runs:?}",
+            len = data.len()
+        );
+
+        let inode_offset = self.sb.inode_offset(self.xfs_ino(ino));
+        let inode_size = self.sb.inode_size();
+        let now = SystemTime::now();
+        let mut tx = self.begin();
+        let mut written = 0u64;
+        for (at, len, _run) in runs {
+            let start = written as usize;
+            let end = start + len as usize;
+            tx.write_data(at, &data[start..end])?;
+            written += len;
+        }
+
+        // The inode records when the file was last written, and when its
+        // metadata last changed.  Both are now.
+        {
+            let raw = tx.read_bytes(inode_offset, inode_size)?;
+            let mut raw = RawDinode::from_bytes(raw)?;
+            raw.set_mtime(now);
+            raw.set_ctime(now);
+            raw.finalise();
+            tx.write_bytes(inode_offset, raw.as_bytes())?;
+        }
+        tx.commit()?;
+
+        // The read side may be holding a copy of a block that has just
+        // changed, and the cached inode holds timestamps that have just
+        // changed.  Both are replaced with what is now on the image.
+        self.device.invalidate();
+        self.device.set_bufsize(self.sb.inode_size());
+        let xfs_ino = self.xfs_ino(ino);
+        let sb = &self.sb;
+        let dinode = Dinode::from(self.device.by_ref(), sb, xfs_ino);
+        if let Some(oi) = self.open_files.get_mut(&ino) {
+            oi.dinode = dinode;
+        }
+        Ok(written as u32)
     }
 }
 
@@ -161,12 +425,13 @@ impl Filesystem for Volume {
         let dir = parent_oi.dinode.get_dir(self.device.by_ref(), &self.sb);
         match dir.lookup(self.device.by_ref(), &self.sb, name) {
             Ok(ino) => {
+                let ttl = self.ttl();
                 let oi = self.open_inode(ino);
                 match oi.dinode.di_core.stat(ino) {
                     Ok(attr) => {
                         // We don't need to report the inode generation since this is a read-only
                         // file system.  But we'll do it anyway.
-                        reply.entry(&Self::TTL, &attr, oi.dinode.di_core.di_gen.into())
+                        reply.entry(&ttl, &attr, oi.dinode.di_core.di_gen.into())
                     }
                     Err(err) => reply.error(err),
                 }
@@ -225,6 +490,7 @@ impl Filesystem for Volume {
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
+        let ttl = self.ttl();
         let attr = self
             .open_files
             .get(&ino)
@@ -234,15 +500,20 @@ impl Filesystem for Volume {
             .stat(ino)
             .expect("Unknown file type");
 
-        reply.attr(&Self::TTL, &attr)
+        reply.attr(&ttl, &attr)
     }
 
     fn init(&mut self, _req: &Request, config: &mut KernelConfig) -> Result<(), i32> {
-        if config.add_capabilities(FUSE_NO_OPEN_SUPPORT).is_ok() {
-            self.no_open = true;
-        }
-        if config.add_capabilities(FUSE_NO_OPENDIR_SUPPORT).is_ok() {
-            self.no_opendir = true;
+        // Open handles are only useful, and only correct, if the kernel sends
+        // them.  A read-only mount has no reason to keep any, so it still asks
+        // for the zero-message form and gets out of the open call entirely.
+        if !self.writable {
+            if config.add_capabilities(FUSE_NO_OPEN_SUPPORT).is_ok() {
+                self.no_open = true;
+            }
+            if config.add_capabilities(FUSE_NO_OPENDIR_SUPPORT).is_ok() {
+                self.no_opendir = true;
+            }
         }
         let _ = config.add_capabilities(FUSE_ASYNC_READ | FUSE_EXPORT_SUPPORT);
         Ok(())
@@ -260,12 +531,100 @@ impl Filesystem for Volume {
         );
     }
 
-    fn open(&mut self, _req: &Request, _ino: u64, _flags: i32, reply: ReplyOpen) {
+    /// Open a file, handing back a handle that later operations use.
+    fn open(&mut self, _req: &Request, ino: u64, flags: i32, reply: ReplyOpen) {
         if self.no_open {
-            reply.error(libc::ENOSYS)
-        } else {
-            reply.opened(0, FOPEN_KEEP_CACHE)
+            reply.error(libc::ENOSYS);
+            return;
         }
+        let handle = self.next_handle;
+        self.next_handle += 1;
+        self.handles.insert(handle, OpenFile { ino, flags });
+        reply.opened(handle, FOPEN_KEEP_CACHE)
+    }
+
+    /// Write into a file that is already open.
+    fn write(
+        &mut self,
+        _req: &Request,
+        ino: u64,
+        fh: u64,
+        offset: i64,
+        data: &[u8],
+        _write_flags: u32,
+        _flags: i32,
+        _lock_owner: Option<u64>,
+        reply: ReplyWrite,
+    ) {
+        // A write has to be against a file the kernel actually opened for
+        // writing.  Anything else is a request that does not make sense, and
+        // answering it would mean writing to a file nobody asked us to write.
+        match self.handles.get(&fh) {
+            Some(of) if of.ino == ino => {
+                if of.flags & libc::O_ACCMODE == libc::O_RDONLY {
+                    reply.error(libc::EBADF);
+                    return;
+                }
+            }
+            Some(_) => {
+                reply.error(libc::EBADF);
+                return;
+            }
+            None => {
+                reply.error(libc::EBADF);
+                return;
+            }
+        }
+        let offset = match u64::try_from(offset) {
+            Ok(offset) => offset,
+            Err(_) => {
+                reply.error(libc::EINVAL);
+                return;
+            }
+        };
+        match self.write_data(ino, offset, data) {
+            Ok(n) => reply.written(n),
+            Err(e) => {
+                warn!(
+                    "write of {} bytes to inode {ino} at {offset} failed: {e}",
+                    data.len()
+                );
+                reply.error(e.errno())
+            }
+        }
+    }
+
+    /// Called on every close of a file descriptor.  Nothing is left to do: each
+    /// write was committed before the kernel was told it had succeeded, so by
+    /// the time the last descriptor is closed there is nothing in flight.
+    fn flush(&mut self, _req: &Request, _ino: u64, _fh: u64, _lock_owner: u64, reply: ReplyEmpty) {
+        reply.ok()
+    }
+
+    /// Flush the image, if the caller wants the data to have reached the
+    /// underlying storage.
+    fn fsync(&mut self, _req: &Request, _ino: u64, _fh: u64, _datasync: bool, reply: ReplyEmpty) {
+        let result = self.tx.device().flush();
+        match result {
+            Ok(()) => reply.ok(),
+            Err(e) => reply.error(e.raw_os_error().unwrap_or(libc::EIO)),
+        }
+    }
+
+    /// Close a file handle.
+    #[allow(clippy::too_many_arguments)]
+    fn release(
+        &mut self,
+        _req: &Request,
+        _ino: u64,
+        fh: u64,
+        _flags: i32,
+        _lock_owner: Option<u64>,
+        _flush: bool,
+        reply: ReplyEmpty,
+    ) {
+        self.handles.remove(&fh);
+        reply.ok()
     }
 
     fn read(
