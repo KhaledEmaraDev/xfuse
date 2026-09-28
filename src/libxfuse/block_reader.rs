@@ -233,15 +233,53 @@ mod t {
     mod seek {
         use super::*;
 
-        const FSIZE: u64 = 1 << 20;
+        /// How many windows' worth of image the tests need.  The furthest any
+        /// of them seeks is `7 * bufsize` plus a window.
+        const WINDOWS: u64 = 8;
 
         fn harness() -> BlockReader {
             let f = tempfile::NamedTempFile::new().unwrap();
-            f.as_file().set_len(FSIZE).unwrap();
-            let br = BlockReader::open(f.path()).unwrap();
-            let bs = br.bufsize();
-            assert!(FSIZE > 2 * bs as u64);
-            br
+            // The reader's window starts out one sector wide, and a regular
+            // file's reported block size differs by platform (4 KiB on Linux,
+            // 128 KiB on FreeBSD), so the image is sized from it rather than
+            // guessed at.
+            let windowsize = BlockReader::open(f.path()).unwrap().bufsize() as u64;
+            f.as_file().set_len(WINDOWS * windowsize).unwrap();
+            BlockReader::open(f.path()).unwrap()
+        }
+
+        /// The seeks must work at a window size this machine does not have.
+        ///
+        /// A regular file's reported block size is a readahead hint and differs
+        /// by platform -- 4 KiB on Linux, 128 KiB on FreeBSD -- so the tests
+        /// above only ever check a few window sizes by accident of the host.
+        /// This runs the same offsets through FreeBSD's size, which is how a
+        /// seek that quietly assumed a 4 KiB window would be caught on the
+        /// machine that has 128 KiB of one.
+        #[test]
+        fn seek_works_at_a_128k_window() {
+            const SS: usize = 128 * 1024;
+            let f = tempfile::NamedTempFile::new().unwrap();
+            f.as_file().set_len(8 * SS as u64).unwrap();
+            let mut br = BlockReader::open(f.path()).unwrap();
+            br.set_bufsize(SS);
+            let bs = br.bufsize() as u64;
+            assert_eq!(bs, SS as u64);
+
+            // Every offset the tests seek to, at that window size.
+            for pos in [0u64, 1, bs - 1, bs, 3 * bs + 17, 7 * bs] {
+                br.seek(SeekFrom::Start(pos)).unwrap();
+                assert_eq!(pos, br.position());
+                assert_eq!(0, br.start % bs);
+            }
+            let initial = bs + (bs >> 2);
+            br.seek(SeekFrom::Start(initial)).unwrap();
+            br.seek(SeekFrom::Current(bs as i64)).unwrap();
+            assert_eq!(initial + bs, br.position());
+            br.seek(SeekFrom::Current(-1)).unwrap();
+            assert_eq!(initial + bs - 1, br.position());
+            br.set_bufsize(bs as usize * 2);
+            assert_eq!(initial + bs - 1, br.position());
         }
 
         /// Seeking to SeekFrom::Current(0) should be a no-op when the target is

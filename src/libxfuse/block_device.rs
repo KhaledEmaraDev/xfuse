@@ -259,12 +259,28 @@ impl BlockDevice {
 mod t {
     use super::*;
 
-    /// A 1 MiB image file with a recognisable pattern in it.
+    /// How many sectors the test image holds.
+    const BLOCKS: u64 = 16;
+
+    /// A test image with a recognisable pattern in each of its sectors.
+    ///
+    /// The image is sized from the sector size the device actually reports,
+    /// because a regular file's reported block size is a readahead hint rather
+    /// than a property of the file system, and it differs by platform: 4 KiB on
+    /// Linux, 128 KiB on FreeBSD.  A test about the device's behaviour should
+    /// not also be a test of the host's idea of a good readahead size.
     fn image() -> tempfile::NamedTempFile {
         let f = tempfile::NamedTempFile::new().unwrap();
-        f.as_file().set_len(1 << 20).unwrap();
+        // The device reports its sector size when it is opened, so the file has
+        // to be the right size before the device that is used for the writes is
+        // opened.  Ask a throwaway one.
+        let sectorsize = BlockDevice::open(f.path(), Access::ReadWrite)
+            .unwrap()
+            .sectorsize() as u64;
+        f.as_file().set_len(BLOCKS * sectorsize).unwrap();
+
         let dev = BlockDevice::open(f.path(), Access::ReadWrite).unwrap();
-        for block in 0..64u64 {
+        for block in 0..BLOCKS {
             let mut buf = vec![0u8; dev.sectorsize()];
             buf[0..8].copy_from_slice(&(block * 7).to_be_bytes());
             dev.write_at(&buf, block * dev.sectorsize() as u64).unwrap();
@@ -277,7 +293,7 @@ mod t {
     fn size_and_sectorsize() {
         let f = image();
         let dev = BlockDevice::open(f.path(), Access::ReadOnly).unwrap();
-        assert_eq!(dev.size(), 1 << 20);
+        assert_eq!(dev.size(), BLOCKS * dev.sectorsize() as u64);
         assert!(dev.sectorsize() > 0);
         assert!(!dev.is_writable());
     }
@@ -289,7 +305,7 @@ mod t {
         let f = image();
         let dev = BlockDevice::open(f.path(), Access::ReadOnly).unwrap();
         let ss = dev.sectorsize() as u64;
-        for block in [63u64, 0, 31, 7, 40] {
+        for block in [BLOCKS - 1, 0, 7, 3, 8] {
             let mut buf = vec![0u8; ss as usize];
             dev.read_at(&mut buf, block * ss).unwrap();
             assert_eq!(&buf[0..8], &(block * 7u64).to_be_bytes());
