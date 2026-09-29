@@ -112,6 +112,19 @@ adapted, or otherwise derived into this repository.  In particular:
   holds and *what* the code does, and they do not reproduce text from any other
   project.
 
+The allocation-group work added a second kind of consultation.  The block
+numbers of the group headers, the field offsets inside them, and the checksum
+convention were settled by the published XFS format documentation and then
+*checked* against the images in `resources/`: the expectations in the unit
+tests are the values `xfs_db` prints for the same structures, so a test failure
+means this code disagrees with the reference implementation rather than with
+itself.  One layout detail worth recording, because it is easy to get wrong and
+would have been wrong in a way no round-trip test would catch: a group's
+headers are at fixed *sectors* within the group, not at fixed block numbers, and
+a sector is the file system's basic block.  All three golden images in the
+repository disagree about the block the group file is in, and all three are
+right.
+
 The distinction used throughout the write path is:
 
 * a **fact about the XFS format** — for example "a v3 inode carries a CRC-32C

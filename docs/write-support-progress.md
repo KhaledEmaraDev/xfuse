@@ -204,6 +204,52 @@ logical block *n* live".  The extent record type used by the write path
 (`Extent`) can be encoded back to its on-disk form, which is the groundwork for
 phase 9.
 
+### Phase 7 — allocation groups, part one: the group header and free list
+
+The first piece of the allocation machinery is the read side of what a group
+knows about itself, because nothing can be allocated until that is understood
+and every offset in it has to be right before anything writes to it.
+
+`src/libxfuse/alloc/` holds it:
+
+* [`agf::Agf`] — the group file.  Where a group's free space is indexed, how
+  many blocks it believes are free, how long its longest free run is, and which
+  slice of the free list is live.
+* [`agfl::Agfl`] — the group free list: a flat array of block numbers known to
+  be free, with the operations an allocator needs (take a block from the front,
+  give one back at the back) and the invariants that go with them.
+
+`Sb` gained the rules for *where* a group's headers are.  They are at fixed
+sectors within the group — the superblock at sector 0, the group file at 1, the
+group inode header at 2, the free list at 3 — and a sector is the file system's
+basic block, which is not always a whole file system block.  A file system with
+4 KiB blocks on 512-byte sectors keeps four headers in its first block.  Getting
+this wrong means reading a group header out of the middle of a file's data, and
+the layout is not something to infer from the block size: it was checked against
+every golden image in the repository.
+
+The two structures keep their own bytes and are changed in place, like an inode,
+so that the fields this code has no opinion about — the reverse-mapping and
+reference-count roots, the reserved space — survive a write by construction.
+A group header is also where the free list's live window lives, and it is kept
+in the same transaction as any change to the list, because a free list entry
+without its window, or a window without its entry, is a group that will hand
+out the same block twice.
+
+Fifteen unit tests decode the real group header and free list of two golden
+images and compare every field with what `xfs_db` prints for the same
+structures, so the expectations come from the reference implementation rather
+than from this code.  The version 5 checksum is covered by the same convention
+the inode and the superblock use: CRC-32C over the whole block with the
+checksum field read as zeroes, stored least significant byte first.
+
+What is *not* here yet is the part that makes an allocation happen: the free
+space btrees, the walk that searches them, and the refill of a group's free
+list from a run found in one.  Freeing a block is not here either; it means
+editing a btree and correcting the group's summaries, and belongs with the
+operations that actually free blocks rather than being written before anything
+calls it.
+
 ### Phase 6 — overwrite, FUSE write path, capability gate
 
 `FsCapabilities` in `src/libxfuse/capabilities.rs` inspects the superblock and
@@ -310,6 +356,8 @@ is the right trade while the write path is experimental.
 | writable mount can be explicitly requested | done |
 | unsupported XFS features cause a read-write mount rejection | done |
 | existing allocated file data can be overwritten | done |
+| a group header and free list can be read and written | done |
+| blocks can be allocated | not started |
 | files can be extended | not started |
 | files can be truncated | not started |
 | sparse files work | read only |

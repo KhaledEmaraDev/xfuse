@@ -223,6 +223,10 @@ pub struct Sb {
     // sb_logsectlog: u8,
     // sb_logsectsize: u16,
     // sb_logsunit: u32,
+    /// The basic block size, which is the granularity of the file system's
+    /// metadata addressing.  It is the sector size the file system was made
+    /// on, and it is not always a whole file system block.
+    sb_sectsize:           u16,
     sb_features2:          SbFeatures2,
     // sb_bad_features2: u32,
     // sb_features_compat: u32,
@@ -237,6 +241,15 @@ pub struct Sb {
 }
 
 impl Sb {
+    /// The sector within an allocation group that holds its free list.
+    #[allow(dead_code)] // The allocator that calls this is the next phase.
+    pub const AGFL_SECTOR: u32 = 3;
+    /// The sector within an allocation group that holds its group file.
+    pub const AGF_SECTOR: u32 = 1;
+    /// The sector within an allocation group that holds its group inode
+    /// header.
+    #[allow(dead_code)] // The allocator that calls this is the next phase.
+    pub const AGI_SECTOR: u32 = 2;
     const BBSHIFT: u8 = 9;
 
     pub fn from<T: BufRead + Seek>(buf_reader: &mut T) -> Sb {
@@ -368,6 +381,7 @@ impl Sb {
             sb_ifree,
             sb_fdblocks,
             sb_dirblklog,
+            sb_sectsize,
             sb_features2,
             sb_features_ro_compat,
             sb_features_incompat,
@@ -423,6 +437,70 @@ impl Sb {
     /// How many allocation groups the file system has.
     pub const fn agcount(&self) -> u32 {
         self.sb_agcount
+    }
+
+    /// The basic block size: the granularity the file system addresses its
+    /// metadata in.  It is the sector size the file system was made on, and it
+    /// is not always a whole file system block -- a file system with 4 KiB
+    /// blocks on 512-byte sectors has four metadata headers in its first block.
+    pub const fn sectsize(&self) -> u16 {
+        self.sb_sectsize
+    }
+
+    /// Does this file system checksum its metadata?
+    ///
+    /// A version 5 file system does, and its metadata carries a checksum that
+    /// has to be recomputed whenever a structure is written.  A version 4 one
+    /// does not, and its metadata has no checksum at all.
+    pub const fn has_crc(&self) -> bool {
+        self.sb_features2.crc()
+    }
+
+    /// The file system's identifier, which every checksummed structure repeats
+    /// so that a block can be checked against the file system it claims.
+    pub const fn uuid(&self) -> [u8; 16] {
+        self.sb_uuid.as_image_bytes()
+    }
+
+    /// The image offset at which an allocation group begins.
+    ///
+    /// The allocation group helpers below are the allocator's entry point, and
+    /// the allocator that uses them is written next; until then they are here to
+    /// be tested rather than to be called.
+    ///
+    /// An allocation group's blocks are numbered from the start of the group,
+    /// and the group's first block is at the image offset implied by the
+    /// superblock's geometry.
+    #[allow(dead_code)] // The allocator that calls this is the next phase.
+    pub fn ag_offset(&self, agno: u32) -> u64 {
+        agno as u64 * self.fsb_to_offset(self.sb_agblocks as u64)
+    }
+
+    /// The image offset of the first block of an allocation group, given as a
+    /// block number within that group.
+    #[allow(dead_code)] // The allocator that calls this is the next phase.
+    pub fn ag_block_offset(&self, agno: u32, agblock: XfsAgblock) -> u64 {
+        self.ag_offset(agno) + self.fsb_to_offset(agblock as u64)
+    }
+
+    /// The image offset of one of an allocation group's three header
+    /// structures.
+    ///
+    /// The headers are at *fixed* places, which is the only part of a XFS file
+    /// system that can be found without walking it: sector 0 of a group holds
+    /// the superblock, and sectors 1, 2 and 3 hold the group file, the group
+    /// inode header, and the group free list.  A *sector* is the file system's
+    /// basic block, which is not always a whole file system block: a file
+    /// system with 4 KiB blocks on 512-byte sectors keeps its superblock in the
+    /// first sector of block 0 and the other headers in the sectors after it,
+    /// so a sector number is a byte offset divided by the sector size rather
+    /// than a block number.
+    ///
+    /// Which sector holds which header is [`agf_sector`], [`agi_sector`] and
+    /// [`agfl_sector`].
+    #[allow(dead_code)] // The allocator that calls this is the next phase.
+    pub fn ag_header_offset(&self, agno: u32, sector: u32) -> u64 {
+        self.ag_offset(agno) + sector as u64 * self.sb_sectsize as u64
     }
 
     /// Get the size of an inode in bytes

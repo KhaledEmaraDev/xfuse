@@ -56,6 +56,8 @@ All files are relative to `src/libxfuse/`.
 | dir3_node         | Contains a structure for Extents-based Node directories |
 | dir3_bptree       | Contains a structure for B+Tree-based directories |
 | extent            | Contains `ExtentMap`, the one place that answers where a file's logical block lives |
+| alloc/agf         | Contains the allocation group header: the group's size, its free space, and its free list window |
+| alloc/agfl        | Contains the allocation group free list: a flat array of blocks that are known to be free |
 | block_device      | Contains the only handle onto the image; everything that reads or writes it goes through here |
 | block_reader      | Contains the read side's seekable window onto the image |
 | block_cache       | Contains the cache of file system blocks that modified blocks live in |

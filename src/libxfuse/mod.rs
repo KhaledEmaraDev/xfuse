@@ -25,6 +25,11 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+// The allocation machinery is a facility: the allocator that reads these
+// structures is written next, and until then they are here to be tested against
+// real images rather than used.
+#[allow(dead_code)]
+mod alloc;
 mod attr;
 mod attr_bptree;
 mod attr_leaf;

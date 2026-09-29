@@ -71,6 +71,11 @@ impl Uuid {
     pub const fn from_u128(x: u128) -> Self {
         Self(uuid::Uuid::from_u128(x))
     }
+
+    /// The identifier's 16 bytes, in the order they are stored on an image.
+    pub const fn as_image_bytes(&self) -> [u8; 16] {
+        *self.0.as_bytes()
+    }
 }
 
 impl<Ctx> bincode_next::Decode<Ctx> for Uuid {
