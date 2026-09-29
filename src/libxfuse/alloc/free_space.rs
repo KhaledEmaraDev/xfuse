@@ -420,13 +420,88 @@ const MAX_TREE_DEPTH: usize = 8;
 ///
 /// # Order
 ///
-/// The runs come back in the order the leaves are reached, which is the order the
-/// tree holds them: the root's children in order, each child's subtree in order.
-/// A caller that wants them sorted sorts them; a caller that is searching does
-/// not want them sorted.
+/// The runs come back in the order the leaves are reached, which is the order
+/// the tree holds them, and for each of the two trees that is a different order
+/// on purpose: the tree keyed by start block is in increasing block order, and
+/// the tree keyed by run length is in increasing length order.  A caller
+/// searching for a run follows the tree that answers its question.
 pub fn walk<F>(root: XfsAgblock, geometry: GroupGeometry, mut fetch: F) -> FsResult<Vec<FreeRun>>
 where
     F: FnMut(XfsAgblock) -> FsResult<Box<[u8]>>,
+{
+    let mut out = Vec::new();
+    visit_runs(root, &geometry, &mut fetch, |run| {
+        out.push(*run);
+        std::ops::ControlFlow::Continue(())
+    })?;
+    Ok(out)
+}
+
+/// The first run in a group's free space, at or after a given block.
+///
+/// This is the question the tree keyed by start block answers, and it is the
+/// question an allocation that wants a particular block asks.  The runs arrive
+/// in increasing block order, so the first one that starts at or after the
+/// block asked for is the answer.
+pub fn first_run_from<F>(
+    root: XfsAgblock,
+    geometry: GroupGeometry,
+    from: XfsAgblock,
+    mut fetch: F,
+) -> FsResult<Option<FreeRun>>
+where
+    F: FnMut(XfsAgblock) -> FsResult<Box<[u8]>>,
+{
+    visit_runs(root, &geometry, &mut fetch, |run| {
+        if run.start >= from {
+            std::ops::ControlFlow::Break(*run)
+        } else {
+            std::ops::ControlFlow::Continue(())
+        }
+    })
+}
+
+/// The first run in a group's free space that is at least a given length.
+///
+/// This is the question the tree keyed by run length answers, and the runs
+/// arrive in increasing length order, so the first one long enough is the
+/// answer.
+///
+/// It is a scan rather than a descent, and deliberately so.  A node's key says
+/// the *first* run under it in that tree's order, so a subtree whose first run
+/// is short may still hold a long one further in -- and taking it would be right
+/// only if nothing to the left of it is long enough, which is exactly what a
+/// scan establishes and a descent cannot.  Making this a descent needs the
+/// free space *bins*, which summarise the sizes of the runs under a subtree;
+/// that is a later change, and the scan is correct without it.
+pub fn first_run_of_at_least<F>(
+    root: XfsAgblock,
+    geometry: GroupGeometry,
+    len: u32,
+    mut fetch: F,
+) -> FsResult<Option<FreeRun>>
+where
+    F: FnMut(XfsAgblock) -> FsResult<Box<[u8]>>,
+{
+    visit_runs(root, &geometry, &mut fetch, |run| {
+        if run.len >= len {
+            std::ops::ControlFlow::Break(*run)
+        } else {
+            std::ops::ControlFlow::Continue(())
+        }
+    })
+}
+
+/// Hand every run of a tree to `visit`, stopping early if it says so.
+fn visit_runs<F, V>(
+    root: XfsAgblock,
+    geometry: &GroupGeometry,
+    fetch: &mut F,
+    mut visit: V,
+) -> FsResult<Option<FreeRun>>
+where
+    F: FnMut(XfsAgblock) -> FsResult<Box<[u8]>>,
+    V: FnMut(&FreeRun) -> std::ops::ControlFlow<FreeRun, ()>,
 {
     if root == NULL_AGBLOCK || root >= geometry.agblocks {
         return Err(FsError::corrupt(format!(
@@ -434,10 +509,88 @@ where
             geometry.agblocks
         )));
     }
-    let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
-    walk_node(root, &geometry, &mut fetch, 0, &mut seen, &mut out)?;
-    Ok(out)
+    let node = node_at(root, geometry, fetch)?;
+    visit_node(root, &node, geometry, fetch, 0, &mut seen, &mut visit)
+}
+
+/// Read one node, and check that it is a node of the tree being walked.
+fn node_at<F>(block: XfsAgblock, geometry: &GroupGeometry, fetch: &mut F) -> FsResult<FreeSpaceNode>
+where
+    F: FnMut(XfsAgblock) -> FsResult<Box<[u8]>>,
+{
+    if block >= geometry.agblocks {
+        return Err(FsError::corrupt(format!(
+            "a free space btree in a group of {} blocks points at block {block}",
+            geometry.agblocks
+        )));
+    }
+    let bytes = fetch(block)?;
+    let node = FreeSpaceNode::from_bytes(bytes, geometry.has_crc, geometry.by_block)?;
+    if !node.verify_crc() {
+        return Err(FsError::corrupt(format!(
+            "the free space btree node in block {block} fails its checksum"
+        )));
+    }
+    Ok(node)
+}
+
+fn visit_node<F, V>(
+    block: XfsAgblock,
+    node: &FreeSpaceNode,
+    geometry: &GroupGeometry,
+    fetch: &mut F,
+    depth: usize,
+    seen: &mut std::collections::HashSet<XfsAgblock>,
+    visit: &mut V,
+) -> FsResult<Option<FreeRun>>
+where
+    F: FnMut(XfsAgblock) -> FsResult<Box<[u8]>>,
+    V: FnMut(&FreeRun) -> std::ops::ControlFlow<FreeRun, ()>,
+{
+    if depth > MAX_TREE_DEPTH {
+        return Err(FsError::corrupt(format!(
+            "a free space btree is more than {MAX_TREE_DEPTH} levels deep"
+        )));
+    }
+    if !seen.insert(block) {
+        return Err(FsError::corrupt(format!(
+            "a free space btree visits block {block} twice"
+        )));
+    }
+    let _ = block;
+    if node.is_leaf() {
+        for run in node.runs()? {
+            if let std::ops::ControlFlow::Break(found) = visit(&run) {
+                return Ok(Some(found));
+            }
+        }
+        return Ok(None);
+    }
+    for child in node.children()? {
+        // The child about to be descended into has to be one level shallower, and
+        // checking it means reading it.  Only the children the walk actually
+        // reaches are checked, because a search that stops at its answer should
+        // not have read the rest of the tree to get there -- and a child it
+        // never reads cannot mislead it.
+        {
+            let child_node = node_at(child, geometry, fetch)?;
+            if child_node.level() + 1 != node.level() {
+                return Err(FsError::corrupt(format!(
+                    "a free space btree node in block {child} is at level {} under a parent at \
+                     level {}",
+                    child_node.level(),
+                    node.level()
+                )));
+            }
+            if let Some(found) =
+                visit_node(child, &child_node, geometry, fetch, depth + 1, seen, visit)?
+            {
+                return Ok(Some(found));
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// What a walk needs to know about the group it is walking.
@@ -716,10 +869,28 @@ mod t {
         }
     }
 
-    /// Build a leaf holding `runs`, as a version 4 free space node.
+    /// The same group, and the tree keyed by run length.
+    fn size_geometry() -> GroupGeometry {
+        GroupGeometry {
+            by_block: false,
+            ..geometry()
+        }
+    }
+
+    /// Build a leaf holding `runs`, as a version 4 free space node of the tree
+    /// keyed by start block.
     fn leaf(runs: &[(XfsAgblock, u32)]) -> Vec<u8> {
+        leaf_of(XFS_ABTB_MAGIC, runs)
+    }
+
+    /// The same, for the tree keyed by run length.
+    fn size_leaf(runs: &[(XfsAgblock, u32)]) -> Vec<u8> {
+        leaf_of(XFS_ABTC_MAGIC, runs)
+    }
+
+    fn leaf_of(magic: u32, runs: &[(XfsAgblock, u32)]) -> Vec<u8> {
         let mut b = vec![0u8; BS];
-        BigEndian::write_u32(&mut b[0..], XFS_ABTB_MAGIC);
+        BigEndian::write_u32(&mut b[0..], magic);
         BigEndian::write_u16(&mut b[4..], 0); // a leaf
         BigEndian::write_u16(&mut b[6..], runs.len() as u16);
         BigEndian::write_u32(&mut b[8..], NULL_AGBLOCK);
@@ -936,5 +1107,98 @@ mod t {
         let mut node = FreeSpaceNode::from_bytes(bytes, true, true).unwrap();
         node.update_crc();
         assert!(node.verify_crc());
+    }
+
+    /// The block-ordered tree answers "is there a run at or after this block",
+    /// and it answers it in block order, so the answer is the first run that
+    /// starts at or after where we asked.
+    #[test]
+    fn the_first_run_from_a_block() {
+        let mut blocks = HashMap::new();
+        blocks.insert(10u32, leaf(&[(5, 3), (40, 7)]));
+        blocks.insert(11, leaf(&[(100, 1), (200, 62)]));
+        blocks.insert(4, interior(1, &[(5, 3), (100, 1)], &[10, 11]));
+        let g = geometry();
+
+        assert_eq!(
+            first_run_from(4, g, 0, group(blocks.clone())).unwrap(),
+            Some(FreeRun { start: 5, len: 3 }),
+        );
+        assert_eq!(
+            first_run_from(4, g, 6, group(blocks.clone())).unwrap(),
+            Some(FreeRun {
+                start: 40,
+                len:   7,
+            }),
+        );
+        // A run that has to be found past a whole leaf.
+        assert_eq!(
+            first_run_from(4, g, 60, group(blocks.clone())).unwrap(),
+            Some(FreeRun {
+                start: 100,
+                len:   1,
+            }),
+        );
+        // Past the last run there is nothing, which is how an allocator learns
+        // to look in another group.
+        assert_eq!(first_run_from(4, g, 201, group(blocks)).unwrap(), None);
+    }
+
+    /// The size-ordered tree answers "is there a run this long", and it answers
+    /// it in length order.  The two trees answer different questions, which is
+    /// why a search has to be told which one it is walking.
+    #[test]
+    fn the_first_run_of_a_given_length() {
+        let mut blocks = HashMap::new();
+        blocks.insert(10u32, size_leaf(&[(5, 1), (40, 3), (100, 62)]));
+        // The size-ordered tree: one leaf, one key.
+        let mut root = interior(1, &[(5, 1)], &[10]);
+        BigEndian::write_u32(&mut root[0..], XFS_ABTC_MAGIC);
+        blocks.insert(4, root);
+
+        assert_eq!(
+            first_run_of_at_least(4, size_geometry(), 1, group(blocks.clone())).unwrap(),
+            Some(FreeRun { start: 5, len: 1 }),
+        );
+        assert_eq!(
+            first_run_of_at_least(4, size_geometry(), 4, group(blocks.clone())).unwrap(),
+            Some(FreeRun {
+                start: 100,
+                len:   62,
+            }),
+        );
+        assert_eq!(
+            first_run_of_at_least(4, size_geometry(), 63, group(blocks)).unwrap(),
+            None,
+        );
+    }
+
+    /// A search that stops early must not read the rest of the tree, or an
+    /// allocation in a group with a hundred thousand runs would read all of them.
+    #[test]
+    fn a_search_stops_at_its_answer() {
+        let mut blocks = HashMap::new();
+        blocks.insert(10u32, leaf(&[(5, 3), (40, 7)]));
+        // A second leaf that is fetched on demand, and must not be.
+        blocks.insert(11, leaf(&[(100, 1)]));
+        blocks.insert(4, interior(1, &[(5, 3), (100, 1)], &[10, 11]));
+        let mut fetched: Vec<XfsAgblock> = Vec::new();
+        let mut counting = |bno: XfsAgblock| -> FsResult<Box<[u8]>> {
+            fetched.push(bno);
+            blocks
+                .get(&bno)
+                .cloned()
+                .map(Vec::into_boxed_slice)
+                .ok_or_else(|| FsError::corrupt(format!("no block {bno}")))
+        };
+        let found = first_run_from(4, geometry(), 6, &mut counting).unwrap();
+        assert_eq!(
+            found,
+            Some(FreeRun {
+                start: 40,
+                len:   7,
+            })
+        );
+        assert_eq!(fetched, vec![4, 10], "the second leaf should not be read");
     }
 }

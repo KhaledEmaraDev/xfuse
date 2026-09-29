@@ -376,6 +376,8 @@ is the right trade while the write path is experimental.
 | a group header and free list can be read and written | done |
 | a free space btree node can be read | done |
 | a whole free space btree can be walked | done |
+| a free space btree can be searched for a run | done |
+| blocks can be allocated | not started |
 | blocks can be allocated | not started |
 | files can be extended | not started |
 | files can be truncated | not started |
