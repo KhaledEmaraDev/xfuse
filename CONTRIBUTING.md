@@ -71,6 +71,18 @@ All files are relative to `src/libxfuse/`.
 | attr_bptree       | Contains a structure for B+Tree-based attributes |
 | utils             | Contains common helper functions |
 
+### Copyright headers
+
+Every file that already has a header keeps the one it has, unchanged.  A new
+file gets the project's BSD 2-Clause header with
+
+```
+ * Copyright (c) <year>, Pedro Giffuni
+```
+
+and no "All rights reserved." line: it is old legalese, and contributors are
+not a legal entity that can hold a copyright.
+
 ### Writing
 
 `docs/write-support-progress.md` records what the write path does today, and
