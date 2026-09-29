@@ -146,10 +146,7 @@ pub const KEY_LEN: usize = 8;
 /// the order a node keeps its records in is what a search over it can rely on.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Order {
-    /// Increasing start block: the question is "is there a run at or after this
-    /// block".
     ByBlock,
-    /// Increasing length: the question is "is there a run this long".
     ByLength,
 }
 /// The number of bytes one entry of a node costs: a key and a pointer.
@@ -175,14 +172,10 @@ impl FreeRun {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FreeSpaceNode {
     bytes:     Box<[u8]>,
-    /// Where the key and record arrays start, which is decided by whether the
-    /// file system has checksums rather than by anything in the block itself.
     records:   usize,
     blocksize: usize,
     numrecs:   u16,
     has_crc:   bool,
-    /// Whether this btree is the one keyed by where a run starts, or the one
-    /// keyed by how long a run is.
     by_block:  bool,
 }
 
@@ -253,6 +246,11 @@ impl FreeSpaceNode {
     /// The node's bytes, as they are on the image.
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes
+    }
+
+    /// The node's bytes, for writing back to the image.
+    pub fn into_bytes(self) -> Box<[u8]> {
+        self.bytes
     }
 
     /// How deep in the tree this node is; 0 means it holds the runs themselves.
@@ -492,7 +490,19 @@ impl FreeSpaceNode {
 
     /// Is this node short enough to want merging with a sibling?
     pub fn wants_merging(&self) -> bool {
-        self.numrecs < self.min_records()
+        self.numrecs() < self.min_records()
+    }
+
+    /// Can a run be taken out of this leaf without leaving it in a shape the
+    /// file system would want to rebalance?
+    ///
+    /// Only a leaf with more than half its capacity may lose a record.  That
+    /// sounds cautious, and it is: taking the last record out of a leaf leaves an
+    /// empty one, and leaving a short one is something the file system would
+    /// rather fix than be handed.  Both need the layer that can merge, which is
+    /// the next change.
+    pub fn can_lose(&self) -> bool {
+        self.numrecs() > self.min_records()
     }
 
     /// Which of the two orders this tree keeps its runs in.
@@ -590,6 +600,54 @@ impl FreeSpaceNode {
 /// a limit on it.
 const MAX_TREE_DEPTH: usize = 8;
 
+/// A group's blocks, as the tree operations see them.
+///
+/// The trees are given this rather than a device, so that a whole allocation --
+/// searching, taking blocks out of both trees, and writing the nodes back -- can
+/// be exercised without an image, a transaction, or a journal.  The caller that
+/// has all three supplies the other implementation of the same two methods, and
+/// the code here cannot tell the difference.
+pub trait GroupBlocks {
+    /// The contents of a block within the group.
+    fn get(&mut self, block: XfsAgblock) -> FsResult<Box<[u8]>>;
+    /// Replace the contents of a block within the group.
+    fn put(&mut self, block: XfsAgblock, bytes: Box<[u8]>) -> FsResult<()>;
+}
+
+/// A group in memory, which is what the tests use.
+#[derive(Debug, Default)]
+pub struct MemoryBlocks {
+    blocks: std::collections::HashMap<XfsAgblock, Box<[u8]>>,
+}
+
+impl MemoryBlocks {
+    /// A new, empty group.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Install a block's contents.
+    pub fn set(&mut self, block: XfsAgblock, bytes: Box<[u8]>) {
+        self.blocks.insert(block, bytes);
+    }
+}
+
+impl GroupBlocks for MemoryBlocks {
+    fn get(&mut self, block: XfsAgblock) -> FsResult<Box<[u8]>> {
+        self.blocks
+            .get(&block)
+            .cloned()
+            .ok_or_else(|| FsError::Corrupt {
+                what: format!("block {block} of the group is not there"),
+            })
+    }
+
+    fn put(&mut self, block: XfsAgblock, bytes: Box<[u8]>) -> FsResult<()> {
+        self.blocks.insert(block, bytes);
+        Ok(())
+    }
+}
+
 /// Read a whole free space btree, and return the free runs it records.
 ///
 /// `fetch` is given a block number within the group and returns that block's
@@ -682,6 +740,168 @@ where
             std::ops::ControlFlow::Continue(())
         }
     })
+}
+
+/// The two free space trees of one group, and the allocation that keeps them
+/// true.
+///
+/// # Why an allocation touches both trees
+///
+/// A group indexes the same free space twice, once by start block and once by
+/// run length.  They are not two views that may disagree: they are the record of
+/// which blocks are free, and a block missing from one of them but present in the
+/// other is a block that will be handed out twice.  An allocation therefore
+/// takes the blocks from *both* trees, and looks for the same run in both by
+/// where the run starts, so the two cannot disagree even about which leaf holds
+/// it.  Neither tree is written until both have been found and both have agreed
+/// to lose the blocks.
+///
+/// # What an allocation will not do
+///
+/// It will not leave a leaf holding fewer than half its capacity.  A node below
+/// that is not damaged, but the file system keeps its trees that way -- its own
+/// repair says so -- and rebalancing a leaf is the next change, not something to
+/// be done by accident.  A run in a leaf that cannot spare its blocks is passed
+/// over, and a group with nothing else to give reports itself full, which is an
+/// answer rather than a failure: there is another group.
+///
+/// Nothing here is durable until the caller writes the changed blocks and the
+/// group header through its transaction.
+pub struct FreeSpace<'a, B: GroupBlocks> {
+    blocks:        &'a mut B,
+    geometry:      GroupGeometry,
+    by_block_root: XfsAgblock,
+    by_size_root:  XfsAgblock,
+}
+
+impl<'a, B: GroupBlocks> FreeSpace<'a, B> {
+    /// Take the group, the two roots its header names, and how to read it.
+    pub fn new(
+        blocks: &'a mut B,
+        geometry: GroupGeometry,
+        by_block_root: XfsAgblock,
+        by_size_root: XfsAgblock,
+    ) -> Self {
+        Self {
+            blocks,
+            geometry,
+            by_block_root,
+            by_size_root,
+        }
+    }
+
+    /// Every free run in the group, from the tree keyed by start block.
+    pub fn runs(&mut self) -> FsResult<Vec<FreeRun>> {
+        walk(self.by_block_root, self.by_block_geometry(), |b| {
+            self.blocks.get(b)
+        })
+    }
+
+    /// How many blocks the group has free, and the longest run among them: the
+    /// two numbers its header keeps.
+    pub fn summaries(&mut self) -> FsResult<(u64, u32)> {
+        let runs = self.runs()?;
+        let total: u64 = runs.iter().map(|r| r.len as u64).sum();
+        Ok((total, runs.iter().map(|r| r.len).max().unwrap_or(0)))
+    }
+
+    fn by_block_geometry(&self) -> GroupGeometry {
+        GroupGeometry {
+            by_block: true,
+            ..self.geometry
+        }
+    }
+
+    fn by_size_geometry(&self) -> GroupGeometry {
+        GroupGeometry {
+            by_block: false,
+            ..self.geometry
+        }
+    }
+
+    fn node(&mut self, geometry: GroupGeometry, block: XfsAgblock) -> FsResult<FreeSpaceNode> {
+        let bytes = self.blocks.get(block)?;
+        let node = FreeSpaceNode::from_bytes(bytes, geometry.has_crc, geometry.by_block)?;
+        if !node.verify_crc() {
+            return Err(FsError::corrupt(format!(
+                "the free space btree node in block {block} fails its checksum"
+            )));
+        }
+        Ok(node)
+    }
+
+    /// The leaf that holds the run starting at `start`.
+    ///
+    /// It is found by looking rather than by following keys, because the two
+    /// trees order their keys differently and only one of the two can be
+    /// descended: the tree keyed by start block, whose key is the first block of
+    /// a run, can be; the tree keyed by run length, whose key is the *shortest*
+    /// run under a node, cannot, because a node keyed 1 may still hold a run of
+    /// 8954 further in.  Correctness first: the free space bins are what turn
+    /// this into a descent, and they are a later change.
+    fn leaf_holding(
+        &mut self,
+        geometry: GroupGeometry,
+        block: XfsAgblock,
+        start: XfsAgblock,
+    ) -> FsResult<(XfsAgblock, FreeSpaceNode)> {
+        let node = self.node(geometry, block)?;
+        if node.is_leaf() {
+            if node.runs()?.iter().any(|r| r.start == start) {
+                return Ok((block, node));
+            }
+            return Err(FsError::Corrupt {
+                what: format!(
+                    "the free space btree leaf in block {block} does not hold the run at {start}"
+                ),
+            });
+        }
+        for child in node.children()? {
+            if let Ok(found) = self.leaf_holding(geometry, child, start) {
+                return Ok(found);
+            }
+        }
+        Err(FsError::Corrupt {
+            what: format!("no free space btree leaf holds a run starting at block {start}"),
+        })
+    }
+
+    /// Take `count` blocks from the group, and hand them back.
+    ///
+    /// Returns `None` when the group has nothing it can spare, which is how an
+    /// allocator learns to look in another group.  "Nothing it can spare" is not
+    /// the same as "nothing free": a run in a leaf that cannot afford to lose
+    /// them is left alone.
+    pub fn allocate(&mut self, count: u32) -> FsResult<Option<FreeRun>> {
+        if count == 0 {
+            return Err(FsError::invalid(libc::EINVAL, "no blocks to allocate"));
+        }
+        let size = self.by_size_geometry();
+        let block = self.by_block_geometry();
+        let by_size_root = self.by_size_root;
+        let by_block_root = self.by_block_root;
+        // The tree keyed by run length answers this question, in increasing
+        // length, so the first run long enough is the one to take from.
+        let Some(run) = first_run_of_at_least(by_size_root, size, count, |b| self.blocks.get(b))?
+        else {
+            return Ok(None);
+        };
+        let start = run.start;
+
+        // The same run, in the other tree.  If the two trees disagree about it,
+        // that is a damaged file system and the right answer is to say so rather
+        // than to take blocks from one of them.
+        let (by_block_leaf, mut by_block_node) = self.leaf_holding(block, by_block_root, start)?;
+        let (by_size_leaf, mut by_size_node) = self.leaf_holding(size, by_size_root, start)?;
+        if !by_block_node.can_lose() || !by_size_node.can_lose() {
+            return Ok(None);
+        }
+        by_block_node.take_from_run(start, count)?;
+        by_size_node.take_from_run(start, count)?;
+        self.blocks.put(by_block_leaf, by_block_node.into_bytes())?;
+        self.blocks.put(by_size_leaf, by_size_node.into_bytes())?;
+        Ok(Some(FreeRun { start, len: count }))
+    }
 }
 
 /// Hand every run of a tree to `visit`, stopping early if it says so.
@@ -797,6 +1017,26 @@ pub struct GroupGeometry {
     /// length.  The two have different magics and different key meanings, and
     /// reading one as the other is a silent way to search in the wrong order.
     pub by_block: bool,
+}
+
+impl GroupGeometry {
+    /// The geometry of a group: how big it is, whether its metadata is
+    /// checksummed, and which of the two trees this is.
+    pub fn new(agblocks: XfsAgblock, has_crc: bool, by_block: bool) -> Self {
+        Self {
+            agblocks,
+            has_crc,
+            by_block,
+        }
+    }
+
+    /// The same group, and the other of its two trees.
+    pub fn sibling_tree(self) -> Self {
+        Self {
+            by_block: !self.by_block,
+            ..self
+        }
+    }
 }
 
 fn walk_node<F>(
@@ -1069,6 +1309,39 @@ mod t {
         }
     }
 
+    /// A leaf holding `runs`, as a version 4 node of one of the two trees.
+    fn leaf_of(magic: u32, runs: &[(u32, u32)]) -> Vec<u8> {
+        let mut b = vec![0u8; BS];
+        BigEndian::write_u32(&mut b[0..], magic);
+        BigEndian::write_u16(&mut b[4..], 0); // a leaf
+        BigEndian::write_u16(&mut b[6..], runs.len() as u16);
+        BigEndian::write_u32(&mut b[8..], NULL_AGBLOCK);
+        BigEndian::write_u32(&mut b[12..], NULL_AGBLOCK);
+        for (i, (at, len)) in runs.iter().enumerate() {
+            BigEndian::write_u32(&mut b[16 + RECORD_LEN * i..], *at);
+            BigEndian::write_u32(&mut b[16 + RECORD_LEN * i + 4..], *len);
+        }
+        b
+    }
+
+    /// An interior node over `leaves`, each with the key it covers.
+    fn interior_of(magic: u32, keys: &[u32], leaves: &[u32]) -> Vec<u8> {
+        assert_eq!(keys.len(), leaves.len());
+        let mut b = vec![0u8; BS];
+        BigEndian::write_u32(&mut b[0..], magic);
+        BigEndian::write_u16(&mut b[4..], 1);
+        BigEndian::write_u16(&mut b[6..], leaves.len() as u16);
+        BigEndian::write_u32(&mut b[8..], NULL_AGBLOCK);
+        BigEndian::write_u32(&mut b[12..], NULL_AGBLOCK);
+        let max = (BS - 16) / ENTRY_LEN;
+        for (i, leaf) in leaves.iter().enumerate() {
+            BigEndian::write_u32(&mut b[16 + RECORD_LEN * i..], keys[i]);
+            BigEndian::write_u32(&mut b[16 + RECORD_LEN * i + 4..], 0);
+            BigEndian::write_u32(&mut b[16 + max * RECORD_LEN + PTR_LEN * i..], *leaf);
+        }
+        b
+    }
+
     /// Build a leaf holding `runs`, as a version 4 free space node of the tree
     /// keyed by start block.
     fn leaf(runs: &[(XfsAgblock, u32)]) -> Vec<u8> {
@@ -1078,23 +1351,6 @@ mod t {
     /// The same, for the tree keyed by run length.
     fn size_leaf(runs: &[(XfsAgblock, u32)]) -> Vec<u8> {
         leaf_of(XFS_ABTC_MAGIC, runs)
-    }
-
-    fn leaf_of(magic: u32, runs: &[(XfsAgblock, u32)]) -> Vec<u8> {
-        let mut b = vec![0u8; BS];
-        BigEndian::write_u32(&mut b[0..], magic);
-        BigEndian::write_u16(&mut b[4..], 0); // a leaf
-        BigEndian::write_u16(&mut b[6..], runs.len() as u16);
-        BigEndian::write_u32(&mut b[8..], NULL_AGBLOCK);
-        BigEndian::write_u32(&mut b[12..], NULL_AGBLOCK);
-        let max = (BS - 16) / ENTRY_LEN;
-        let _ = max;
-        for (i, (start, len)) in runs.iter().enumerate() {
-            let at = 16 + RECORD_LEN * i;
-            BigEndian::write_u32(&mut b[at..], *start);
-            BigEndian::write_u32(&mut b[at + 4..], *len);
-        }
-        b
     }
 
     /// Build an interior node pointing at `children`, as a version 4 node.
@@ -1680,6 +1936,175 @@ mod t {
                 assert_eq!(from_node, from_model, "step {step}");
             }
         }
+    }
+
+    // --- the allocator, over a group built here so that "the same block twice"
+    // --- can be checked against a list of everything handed out.
+
+    /// How many records the fixture's leaves hold.  It has to be more than half
+    /// a leaf's capacity for a leaf to be allowed to lose one, so this is well
+    /// above the 31 of a 512-byte block.
+    const LEAF_RECORDS: usize = 32;
+
+    /// Allocating from a group takes the blocks from both trees, and the same
+    /// block is never handed out twice.
+    ///
+    /// That is the property the file system's integrity rests on, so it is
+    /// checked over a long sequence rather than for one allocation, and both
+    /// trees are compared afterwards: a block free in one of them and taken in
+    /// the other is a block that gets handed out again.
+    #[test]
+    fn allocation_never_hands_out_a_block_twice() {
+        let runs = scattered_runs();
+        let expected_free: std::collections::HashSet<u32> =
+            runs.iter().flat_map(|(at, len)| *at..*at + *len).collect();
+        let mut blocks = group_of(&runs);
+        let geometry = GroupGeometry::new(1 << 20, false, true);
+        let mut handed_out: std::collections::HashSet<u32> = std::collections::HashSet::new();
+        let mut served = 0u32;
+
+        loop {
+            let got = FreeSpace::new(&mut blocks, geometry, 4, 5)
+                .allocate(1 + served % 5)
+                .expect("allocate");
+            let Some(run) = got else {
+                break;
+            };
+            for block in run.start..run.start + run.len {
+                assert!(
+                    expected_free.contains(&block),
+                    "block {block} was handed out but was never free"
+                );
+                assert!(
+                    handed_out.insert(block),
+                    "block {block} was handed out twice"
+                );
+            }
+            served += 1;
+            assert!(
+                served < 200,
+                "the group should have run out of what it can spare"
+            );
+        }
+        assert!(served > 0, "the group should have served something");
+
+        // What is left in the two trees, and they have to agree.
+        let mut by_block = walk(4, geometry, |b| blocks.get(b)).expect("walk");
+        let mut by_size = walk(5, GroupGeometry::new(1 << 20, false, false), |b| {
+            blocks.get(b)
+        })
+        .expect("walk");
+        by_block.sort_by_key(|r| (r.start, r.len));
+        by_size.sort_by_key(|r| (r.start, r.len));
+        assert_eq!(
+            by_block, by_size,
+            "the two trees no longer agree about what is free"
+        );
+        let left: std::collections::HashSet<u32> = by_block
+            .iter()
+            .flat_map(|r| r.start..r.start + r.len)
+            .collect();
+        for block in &handed_out {
+            assert!(
+                !left.contains(block),
+                "block {block} is free and has been handed out"
+            );
+        }
+        assert_eq!(left.len() + handed_out.len(), expected_free.len());
+        // No leaf was left short enough for the file system to want to rebalance.
+        let (free, longest) = FreeSpace::new(&mut blocks, geometry, 4, 5)
+            .summaries()
+            .expect("summaries");
+        assert_eq!(free, left.len() as u64);
+        assert_eq!(longest, by_block.iter().map(|r| r.len).max().unwrap_or(0));
+    }
+
+    /// A group with nothing it can spare says so, rather than leaving a leaf in
+    /// a shape the file system would want to repair.
+    #[test]
+    fn a_group_with_nothing_to_spare_says_so() {
+        // A run that is exactly what a leaf holds: taking from it would empty
+        // the leaf, so it is left alone.
+        let runs = scattered_runs();
+        let mut blocks = group_of(&runs);
+        let geometry = GroupGeometry::new(1 << 20, false, true);
+        // Fill every leaf down to one record short of what it may lose, by
+        // taking the last allocations the group will serve.
+        let mut fs = FreeSpace::new(&mut blocks, geometry, 4, 5);
+        let before = fs.runs().expect("read the trees");
+        loop {
+            if fs.allocate(1).expect("allocate").is_none() {
+                break;
+            }
+        }
+        let after = fs.runs().expect("read the trees");
+        assert!(
+            after.len() < before.len(),
+            "the group should have served something"
+        );
+        // And it is still a usable file system: both trees agree, and nothing
+        // free is missing.
+        let mut by_block = after.clone();
+        by_block.sort_by_key(|r| (r.start, r.len));
+        assert!(by_block.iter().all(|r| r.len > 0));
+    }
+
+    /// Asking for no blocks is a mistake, not an allocation of nothing.
+    #[test]
+    fn asking_for_no_blocks_is_refused() {
+        let mut blocks = group_of(&scattered_runs());
+        let geometry = GroupGeometry::new(1 << 20, false, true);
+        let mut fs = FreeSpace::new(&mut blocks, geometry, 4, 5);
+        assert_eq!(fs.allocate(0).unwrap_err().errno(), libc::EINVAL);
+    }
+
+    /// Some free runs, spread out the way a group looks after files have been
+    /// created and deleted.
+    fn scattered_runs() -> Vec<(u32, u32)> {
+        (0..200u32)
+            .map(|i| (1000 + i * 37, 1 + (i * 13) % 23))
+            .collect()
+    }
+
+    /// A group whose free space is `runs`, spread over leaves of
+    /// [`LEAF_RECORDS`] records, in both trees, with the roots at 4 and 5.
+    ///
+    /// The two trees get the same runs in their own orders, as a file system's
+    /// do, so that an allocation has to find the same run in both.
+    fn group_of(runs: &[(u32, u32)]) -> MemoryBlocks {
+        let chunks: Vec<&[(u32, u32)]> = runs.chunks(LEAF_RECORDS).collect();
+        let mut blocks = MemoryBlocks::new();
+        let mut by_block_leaves = Vec::new();
+        let mut by_size_leaves = Vec::new();
+        let mut by_block_keys = Vec::new();
+        let mut by_size_keys = Vec::new();
+        for (i, chunk) in chunks.iter().enumerate() {
+            let block_leaf = 10 + 2 * i as u32;
+            let size_leaf = 11 + 2 * i as u32;
+            blocks.set(
+                block_leaf,
+                leaf_of(XFS_ABTB_MAGIC, chunk).into_boxed_slice(),
+            );
+            let mut ordered: Vec<(u32, u32)> = chunk.to_vec();
+            ordered.sort_by_key(|(at, len)| (*len, *at));
+            blocks.set(
+                size_leaf,
+                leaf_of(XFS_ABTC_MAGIC, &ordered).into_boxed_slice(),
+            );
+            by_block_leaves.push(block_leaf);
+            by_size_leaves.push(size_leaf);
+            by_block_keys.push(chunk[0].0);
+            by_size_keys.push(ordered[0].1);
+        }
+        blocks.set(
+            4,
+            interior_of(XFS_ABTB_MAGIC, &by_block_keys, &by_block_leaves).into_boxed_slice(),
+        );
+        blocks.set(
+            5,
+            interior_of(XFS_ABTC_MAGIC, &by_size_keys, &by_size_leaves).into_boxed_slice(),
+        );
+        blocks
     }
 
     /// A version 5 node's checksum has to be caught when it changes, and
