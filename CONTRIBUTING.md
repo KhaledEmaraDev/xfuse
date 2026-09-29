@@ -77,7 +77,7 @@ Every file that already has a header keeps the one it has, unchanged.  A new
 file gets the project's BSD 2-Clause header with
 
 ```
- * Copyright (c) <year>, Pedro Giffuni
+ * Copyright (c) <year>, "Contributor's name"
 ```
 
 and no "All rights reserved." line: it is old legalese, and contributors are
