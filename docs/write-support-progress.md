@@ -243,12 +243,29 @@ than from this code.  The version 5 checksum is covered by the same convention
 the inode and the superblock use: CRC-32C over the whole block with the
 checksum field read as zeroes, stored least significant byte first.
 
-What is *not* here yet is the part that makes an allocation happen: the free
-space btrees, the walk that searches them, and the refill of a group's free
-list from a run found in one.  Freeing a block is not here either; it means
-editing a btree and correcting the group's summaries, and belongs with the
-operations that actually free blocks rather than being written before anything
-calls it.
+* [`free_space::FreeSpaceNode`] — one node of a btree of free space, and the
+  runs it holds.
+
+The free space itself is not a bitmap but a list of *runs*, kept in a B+tree, and
+there are two of them per group: one keyed by where each run starts, one keyed by
+how long each run is.  They answer the two questions an allocation actually
+asks.  A node's header, its records, and its checksum are read here.
+
+That header is a different size on different file systems, which is the kind of
+detail that is easy to get wrong: a version 4 node's records start sixteen bytes
+into the block, a version 5 node's fifty-six bytes in, because the checksum, the
+owner and the file system's identifier are in between.  Both were checked against
+the free space `xfs_db` reports for the same group, and the tests in that module
+use those runs as their expectations, so a failure means this code disagrees
+with the reference implementation rather than with itself.
+
+What is *not* here yet is the part that makes an allocation happen: walking from
+a root down through the interior nodes to the leaf that covers a given block,
+refilling a group's free list from a run found in one, and taking a run *out* of
+a btree.  Freeing a block is not here either; it means inserting a run, merging
+it with its neighbours, and correcting the group's count and longest-run
+summaries, and it belongs with the operations that free blocks rather than being
+written before anything calls it.
 
 ### Phase 6 — overwrite, FUSE write path, capability gate
 
@@ -357,6 +374,7 @@ is the right trade while the write path is experimental.
 | unsupported XFS features cause a read-write mount rejection | done |
 | existing allocated file data can be overwritten | done |
 | a group header and free list can be read and written | done |
+| a free space btree node can be read | done |
 | blocks can be allocated | not started |
 | files can be extended | not started |
 | files can be truncated | not started |
