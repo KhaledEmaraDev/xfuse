@@ -123,11 +123,21 @@ mod offset {
     pub const RECORDS: usize = 56;
 }
 
-/// The size of a record: where a run starts, and how long it is.
+/// The size of a free space record, and of the key that indexes a subtree: both
+/// are two 32-bit numbers.
 pub const RECORD_LEN: usize = 8;
-/// The size of a key: where a run starts, how long it is, and how far into it
-/// this node begins.
-pub const KEY_LEN: usize = 12;
+/// The size of a pointer to a child node, which is a 32-bit block number within
+/// the group.
+///
+/// A short-format tree is laid out as its header, then the key array, then the
+/// pointer array, and the two are *not* interleaved into records.  The key
+/// identifies the first thing reachable through the matching child, and what
+/// that key means differs between the two trees: the tree keyed by start block
+/// indexes on where a free run begins, and the tree keyed by size indexes on how
+/// long one is.
+pub const PTR_LEN: usize = 4;
+/// The number of bytes one entry of a node costs: a key and a pointer.
+pub const ENTRY_LEN: usize = RECORD_LEN + PTR_LEN;
 
 /// One run of free blocks within a group.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -148,15 +158,16 @@ impl FreeRun {
 /// One node of a group's free space btree.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FreeSpaceNode {
-    bytes:    Box<[u8]>,
-    /// Where the records start, which is decided by whether the file system has
-    /// checksums rather than by anything in the block itself.
-    records:  usize,
-    numrecs:  u16,
-    has_crc:  bool,
+    bytes:     Box<[u8]>,
+    /// Where the key and record arrays start, which is decided by whether the
+    /// file system has checksums rather than by anything in the block itself.
+    records:   usize,
+    blocksize: usize,
+    numrecs:   u16,
+    has_crc:   bool,
     /// Whether this btree is the one keyed by where a run starts, or the one
     /// keyed by how long a run is.
-    by_block: bool,
+    by_block:  bool,
 }
 
 impl FreeSpaceNode {
@@ -194,18 +205,29 @@ impl FreeSpaceNode {
         } else {
             offset::RECORDS_NO_CRC
         };
-        if records + RECORD_LEN * numrecs as usize > bytes.len() {
+        let blocksize = bytes.len();
+        if records + RECORD_LEN * numrecs as usize > blocksize {
             return Err(FsError::corrupt(format!(
                 "free space btree node says it holds {numrecs} records but the block is too small"
             )));
         }
-        Ok(Self {
+        let node = Self {
             bytes: bytes.into_boxed_slice(),
             records,
+            blocksize,
             numrecs,
             has_crc,
             by_block,
-        })
+        };
+        // The pointer array has to fit as well, and where it begins depends on
+        // how many records the block could hold rather than on how many it does.
+        let end = node.pointers_offset() + PTR_LEN * node.max_records() as usize;
+        if end > blocksize {
+            return Err(FsError::corrupt(
+                "free space btree node's pointer array does not fit in the block",
+            ));
+        }
+        Ok(node)
     }
 
     /// The node's bytes, as they are on the image.
@@ -276,9 +298,39 @@ impl FreeSpaceNode {
         Ok(out)
     }
 
-    /// The blocks this node points at, which is what an interior node's records
-    /// hold: the first field of each record is the block, and the second is
-    /// meaningless there.
+    /// The most records this block's size allows, which is where the pointer
+    /// array starts: the key array is sized for the *capacity*, not for the
+    /// number of keys in use.  A tree that grew or shrank moves its keys within
+    /// a fixed-size key region and its pointers after it.
+    pub fn max_records(&self) -> u16 {
+        let room = self.blocksize.saturating_sub(self.records);
+        (room / ENTRY_LEN) as u16
+    }
+
+    /// Where this node's pointer array begins.
+    pub fn pointers_offset(&self) -> usize {
+        self.records + self.max_records() as usize * RECORD_LEN
+    }
+
+    /// The keys of this node, each a start block and a block count.
+    ///
+    /// What those two numbers mean depends on which of the two trees this is: for
+    /// the tree keyed by start block the first is where a run begins, and for the
+    /// tree keyed by size the second is how long a run is.  Nothing in the block
+    /// says which, which is why [`FreeSpaceNode::from_bytes`] is told.
+    pub fn keys(&self) -> Vec<(u32, u32)> {
+        (0..self.numrecs as usize)
+            .map(|i| {
+                let at = self.records + RECORD_LEN * i;
+                (
+                    BigEndian::read_u32(&self.bytes[at..]),
+                    BigEndian::read_u32(&self.bytes[at + 4..]),
+                )
+            })
+            .collect()
+    }
+
+    /// The blocks holding this node's children.
     pub fn children(&self) -> FsResult<Vec<XfsAgblock>> {
         if self.is_leaf() {
             return Err(FsError::invalid(
@@ -286,10 +338,22 @@ impl FreeSpaceNode {
                 "a leaf holds free runs, not subtrees",
             ));
         }
+        let at0 = self.pointers_offset();
         let mut out = Vec::with_capacity(self.numrecs as usize);
         for i in 0..self.numrecs as usize {
-            let at = self.records + RECORD_LEN * i;
-            out.push(BigEndian::read_u32(&self.bytes[at..]));
+            let at = at0 + PTR_LEN * i;
+            if at + PTR_LEN > self.bytes.len() {
+                return Err(FsError::corrupt(
+                    "free space btree node's pointer array runs past the block",
+                ));
+            }
+            let child = BigEndian::read_u32(&self.bytes[at..]);
+            if child == NULL_AGBLOCK {
+                return Err(FsError::corrupt(
+                    "a free space btree node points at the null block",
+                ));
+            }
+            out.push(child);
         }
         Ok(out)
     }
@@ -324,6 +388,133 @@ impl FreeSpaceNode {
         let crc = self.computed_crc();
         LittleEndian::write_u32(&mut self.bytes[offset::CRC..], crc);
     }
+}
+
+/// The most blocks deep a free space btree may be.
+///
+/// A group is at most a few hundred thousand blocks, so a tree that claims to
+/// be deeper than this is damaged, and following it would read blocks that have
+/// nothing to do with free space.  The bound is a check on the file system, not
+/// a limit on it.
+const MAX_TREE_DEPTH: usize = 8;
+
+/// Read a whole free space btree, and return the free runs it records.
+///
+/// `fetch` is given a block number within the group and returns that block's
+/// bytes.  Passing a closure rather than a device keeps the walk testable and
+/// keeps this module free of any knowledge of where blocks come from.
+///
+/// # What it checks along the way
+///
+/// The point of a walk like this is that a mistake is silent, so each of these
+/// is a hard error rather than a warning:
+///
+/// * the root and every child must be a node of the *expected* one of the two
+///   free space trees, so that the tree keyed by run size cannot be read as the
+///   one keyed by start block;
+/// * every child must be one level shallower than its parent, and the walk must
+///   reach level 0;
+/// * every child pointer must be inside the group, and a node must not be
+///   visited twice, which is what a corrupt tree that pointed at itself would
+///   otherwise do.
+///
+/// # Order
+///
+/// The runs come back in the order the leaves are reached, which is the order the
+/// tree holds them: the root's children in order, each child's subtree in order.
+/// A caller that wants them sorted sorts them; a caller that is searching does
+/// not want them sorted.
+pub fn walk<F>(root: XfsAgblock, geometry: GroupGeometry, mut fetch: F) -> FsResult<Vec<FreeRun>>
+where
+    F: FnMut(XfsAgblock) -> FsResult<Box<[u8]>>,
+{
+    if root == NULL_AGBLOCK || root >= geometry.agblocks {
+        return Err(FsError::corrupt(format!(
+            "a group's free space btree points outside the group: block {root} of {}",
+            geometry.agblocks
+        )));
+    }
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    walk_node(root, &geometry, &mut fetch, 0, &mut seen, &mut out)?;
+    Ok(out)
+}
+
+/// What a walk needs to know about the group it is walking.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GroupGeometry {
+    /// How many blocks the group has, which bounds every pointer.
+    pub agblocks: XfsAgblock,
+    /// Whether the file system checksums its metadata, which decides the size of a
+    /// node's header and so where its keys and pointers begin.
+    pub has_crc:  bool,
+    /// Which of the two free space trees this is, keyed by start block or by run
+    /// length.  The two have different magics and different key meanings, and
+    /// reading one as the other is a silent way to search in the wrong order.
+    pub by_block: bool,
+}
+
+fn walk_node<F>(
+    block: XfsAgblock,
+    geometry: &GroupGeometry,
+    fetch: &mut F,
+    depth: usize,
+    seen: &mut std::collections::HashSet<XfsAgblock>,
+    out: &mut Vec<FreeRun>,
+) -> FsResult<()>
+where
+    F: FnMut(XfsAgblock) -> FsResult<Box<[u8]>>,
+{
+    if depth > MAX_TREE_DEPTH {
+        return Err(FsError::corrupt(format!(
+            "a free space btree is more than {MAX_TREE_DEPTH} levels deep"
+        )));
+    }
+    if !seen.insert(block) {
+        return Err(FsError::corrupt(format!(
+            "a free space btree visits block {block} twice"
+        )));
+    }
+    let bytes = fetch(block)?;
+    let node = FreeSpaceNode::from_bytes(bytes, geometry.has_crc, geometry.by_block)?;
+    if !node.verify_crc() {
+        return Err(FsError::corrupt(format!(
+            "the free space btree node in block {block} fails its checksum"
+        )));
+    }
+    if node.is_leaf() {
+        out.extend(node.runs()?);
+        return Ok(());
+    }
+    let children = node.children()?;
+    for child in &children {
+        if *child >= geometry.agblocks {
+            return Err(FsError::corrupt(format!(
+                "a free space btree in a group of {} blocks points at block {child}",
+                geometry.agblocks
+            )));
+        }
+    }
+    // Every child has to be one level shallower, and that means reading each of
+    // them before deciding to descend.  A tree that is not consistent is damaged,
+    // and an allocator that walked it anyway would be reading free space out of
+    // whatever happened to be in those blocks.
+    for child in &children {
+        let bytes = fetch(*child)?;
+        let child_node = FreeSpaceNode::from_bytes(bytes, geometry.has_crc, geometry.by_block)?;
+        if child_node.level() + 1 != node.level() {
+            return Err(FsError::corrupt(format!(
+                "a free space btree node in block {child} is at level {} under a parent at level \
+                 {}",
+                child_node.level(),
+                node.level()
+            )));
+        }
+    }
+    for child in children {
+        walk_node(child, geometry, fetch, depth + 1, seen, out)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -506,6 +697,225 @@ mod t {
         // And a leaf is not a subtree.
         let leaf = FreeSpaceNode::from_bytes(block_of(V4_NODE, 512), false, true).unwrap();
         assert_eq!(leaf.children().unwrap_err().errno(), libc::EINVAL);
+    }
+
+    // --- the tree walk, on a tree built here so that every way of reading it
+    // --- wrong is a test that fails.
+
+    use std::collections::HashMap;
+
+    const BS: usize = 512;
+    const AGBLOCKS: XfsAgblock = 4096;
+
+    /// A 512-byte-block, version 4 group.
+    fn geometry() -> GroupGeometry {
+        GroupGeometry {
+            agblocks: AGBLOCKS,
+            has_crc:  false,
+            by_block: true,
+        }
+    }
+
+    /// Build a leaf holding `runs`, as a version 4 free space node.
+    fn leaf(runs: &[(XfsAgblock, u32)]) -> Vec<u8> {
+        let mut b = vec![0u8; BS];
+        BigEndian::write_u32(&mut b[0..], XFS_ABTB_MAGIC);
+        BigEndian::write_u16(&mut b[4..], 0); // a leaf
+        BigEndian::write_u16(&mut b[6..], runs.len() as u16);
+        BigEndian::write_u32(&mut b[8..], NULL_AGBLOCK);
+        BigEndian::write_u32(&mut b[12..], NULL_AGBLOCK);
+        let max = (BS - 16) / ENTRY_LEN;
+        for (i, (start, len)) in runs.iter().enumerate() {
+            let at = 16 + RECORD_LEN * i;
+            BigEndian::write_u32(&mut b[at..], *start);
+            BigEndian::write_u32(&mut b[at + 4..], *len);
+            // Keys: the same pair, which is what the tree's key region holds.
+            let k = 16 + RECORD_LEN * (max + i);
+            BigEndian::write_u32(&mut b[k..], *start);
+            BigEndian::write_u32(&mut b[k + 4..], *len);
+        }
+        b
+    }
+
+    /// Build an interior node pointing at `children`, as a version 4 node.
+    fn interior(level: u16, keys: &[(u32, u32)], children: &[XfsAgblock]) -> Vec<u8> {
+        assert_eq!(keys.len(), children.len());
+        let mut b = vec![0u8; BS];
+        BigEndian::write_u32(&mut b[0..], XFS_ABTB_MAGIC);
+        BigEndian::write_u16(&mut b[4..], level);
+        BigEndian::write_u16(&mut b[6..], children.len() as u16);
+        BigEndian::write_u32(&mut b[8..], NULL_AGBLOCK);
+        BigEndian::write_u32(&mut b[12..], NULL_AGBLOCK);
+        let max = (BS - 16) / ENTRY_LEN;
+        for (i, (start, count)) in keys.iter().enumerate() {
+            let at = 16 + RECORD_LEN * i;
+            BigEndian::write_u32(&mut b[at..], *start);
+            BigEndian::write_u32(&mut b[at + 4..], *count);
+        }
+        // The pointers live after the *whole* key region, not after the keys in
+        // use.  This is the layout the tree depends on.
+        for (i, child) in children.iter().enumerate() {
+            let at = 16 + max * RECORD_LEN + PTR_LEN * i;
+            BigEndian::write_u32(&mut b[at..], *child);
+        }
+        b
+    }
+
+    /// A group holding `blocks`, addressed by block number.
+    fn group(
+        blocks: HashMap<XfsAgblock, Vec<u8>>,
+    ) -> impl FnMut(XfsAgblock) -> FsResult<Box<[u8]>> {
+        move |bno| {
+            blocks
+                .get(&bno)
+                .cloned()
+                .map(Vec::into_boxed_slice)
+                .ok_or_else(|| FsError::corrupt(format!("no block {bno}")))
+        }
+    }
+
+    /// A two-level tree must produce every run its leaves hold, in tree order.
+    #[test]
+    fn a_two_level_tree_yields_every_run() {
+        let mut blocks = HashMap::new();
+        blocks.insert(10u32, leaf(&[(5, 3), (40, 7)]));
+        blocks.insert(11, leaf(&[(100, 1), (200, 62)]));
+        blocks.insert(4, interior(1, &[(5, 3), (100, 1)], &[10, 11]));
+        let runs = walk(4, geometry(), group(blocks)).unwrap();
+        assert_eq!(
+            runs,
+            vec![
+                FreeRun { start: 5, len: 3 },
+                FreeRun {
+                    start: 40,
+                    len:   7,
+                },
+                FreeRun {
+                    start: 100,
+                    len:   1,
+                },
+                FreeRun {
+                    start: 200,
+                    len:   62,
+                },
+            ]
+        );
+    }
+
+    /// A three-level tree has to descend twice, and each level's keys have to
+    /// match the runs under it for a search to work later.
+    #[test]
+    fn a_three_level_tree_descends() {
+        let mut blocks = HashMap::new();
+        blocks.insert(20u32, leaf(&[(7, 1)]));
+        blocks.insert(21, leaf(&[(9, 2)]));
+        blocks.insert(10, interior(1, &[(7, 1), (9, 2)], &[20, 21]));
+        blocks.insert(4, interior(2, &[(7, 3)], &[10]));
+        let runs = walk(4, geometry(), group(blocks)).unwrap();
+        assert_eq!(
+            runs,
+            vec![FreeRun { start: 7, len: 1 }, FreeRun { start: 9, len: 2 },]
+        );
+    }
+
+    /// A single-node tree, which is what a small group has, is the easy case and
+    /// has to keep working.
+    #[test]
+    fn a_single_node_tree_works() {
+        let mut blocks = HashMap::new();
+        blocks.insert(4u32, leaf(&[(1, 1), (3, 4), (900, 30)]));
+        let runs = walk(4, geometry(), group(blocks)).unwrap();
+        assert_eq!(runs.len(), 3);
+        assert_eq!(
+            runs[2],
+            FreeRun {
+                start: 900,
+                len:   30,
+            }
+        );
+    }
+
+    /// The keys are the indexing keys, not the leaf's records, and the pointer
+    /// array starts after the whole key region.  Both are read out here so that
+    /// a change to either is a test that fails.
+    #[test]
+    fn keys_and_pointers_are_separate_arrays() {
+        let b = interior(1, &[(5, 3), (100, 1)], &[10, 11]);
+        let node = FreeSpaceNode::from_bytes(b.clone(), false, true).unwrap();
+        assert_eq!(node.keys(), vec![(5, 3), (100, 1)]);
+        assert_eq!(node.children().unwrap(), vec![10, 11]);
+        // The pointer array is after the key region sized for the block's
+        // capacity, which for a 512 byte block is 41 keys.
+        assert_eq!(node.max_records(), 41);
+        assert_eq!(node.pointers_offset(), 16 + 41 * 8);
+        assert_eq!(node.pointers_offset(), 344);
+
+        // Reading the pointers from where the *used* keys end picks up the empty
+        // part of the key region instead, which is the mistake this catches.
+        let wrong = 16 + 2 * RECORD_LEN;
+        assert_eq!(
+            BigEndian::read_u32(&b[wrong..]),
+            0,
+            "that is not a child block"
+        );
+        assert_eq!(BigEndian::read_u32(&b[344..]), 10);
+    }
+
+    /// A child that is not one level shallower means the tree is not what it
+    /// claims, and walking it would read free space out of whatever is there.
+    #[test]
+    fn a_child_at_the_wrong_level_is_refused() {
+        let mut blocks = HashMap::new();
+        blocks.insert(10u32, leaf(&[(5, 3)]));
+        blocks.insert(11, interior(1, &[], &[]));
+        blocks.insert(4, interior(1, &[(5, 3), (9, 2)], &[10, 11]));
+        let err = walk(4, geometry(), group(blocks)).unwrap_err();
+        assert!(matches!(err, FsError::Corrupt { .. }), "{err}");
+    }
+
+    /// A pointer outside the group would be a read of something that is not
+    /// free space.
+    #[test]
+    fn a_pointer_outside_the_group_is_refused() {
+        let mut blocks = HashMap::new();
+        blocks.insert(10u32, leaf(&[(5, 3)]));
+        // A child past the end of the group.
+        blocks.insert(4, interior(1, &[(5, 3)], &[AGBLOCKS + 1]));
+        let err = walk(4, geometry(), group(blocks)).unwrap_err();
+        assert!(matches!(err, FsError::Corrupt { .. }), "{err}");
+    }
+
+    /// A tree that points at itself would otherwise be walked for ever.
+    #[test]
+    fn a_tree_that_loops_is_refused() {
+        let mut blocks = HashMap::new();
+        blocks.insert(4u32, interior(1, &[(5, 3)], &[4]));
+        let err = walk(4, geometry(), group(blocks)).unwrap_err();
+        assert!(matches!(err, FsError::Corrupt { .. }), "{err}");
+    }
+
+    /// The root itself has to be inside the group, and a tree that is not
+    /// there is not a tree to walk.
+    #[test]
+    fn a_root_outside_the_group_is_refused() {
+        let err = walk(AGBLOCKS, geometry(), group(HashMap::new())).unwrap_err();
+        assert!(matches!(err, FsError::Corrupt { .. }), "{err}");
+        let err = walk(NULL_AGBLOCK, geometry(), group(HashMap::new())).unwrap_err();
+        assert!(matches!(err, FsError::Corrupt { .. }), "{err}");
+    }
+
+    /// The tree keyed by run size must not be read as the one keyed by start
+    /// block: a walk that got that wrong would search the wrong order.
+    #[test]
+    fn the_wrong_tree_is_refused() {
+        let mut blocks = HashMap::new();
+        blocks.insert(10u32, leaf(&[(5, 3)]));
+        let mut root = interior(1, &[(5, 3)], &[10]);
+        // The root is the size-ordered tree; the leaf is the block-ordered one.
+        BigEndian::write_u32(&mut root[0..], XFS_ABTC_MAGIC);
+        blocks.insert(4, root);
+        let err = walk(4, geometry(), group(blocks)).unwrap_err();
+        assert!(matches!(err, FsError::Corrupt { .. }), "{err}");
     }
 
     /// A version 5 node's checksum has to be caught when it changes, and
