@@ -136,6 +136,22 @@ pub const RECORD_LEN: usize = 8;
 /// indexes on where a free run begins, and the tree keyed by size indexes on how
 /// long one is.
 pub const PTR_LEN: usize = 4;
+/// The size of a key: a run's start and its length, which is also the size of
+/// a leaf's record.
+pub const KEY_LEN: usize = 8;
+
+/// Which of the two orders a tree keeps its runs in.
+///
+/// The two free space trees index the same free space in different orders, and
+/// the order a node keeps its records in is what a search over it can rely on.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Order {
+    /// Increasing start block: the question is "is there a run at or after this
+    /// block".
+    ByBlock,
+    /// Increasing length: the question is "is there a run this long".
+    ByLength,
+}
 /// The number of bytes one entry of a node costs: a key and a pointer.
 pub const ENTRY_LEN: usize = RECORD_LEN + PTR_LEN;
 
@@ -219,13 +235,17 @@ impl FreeSpaceNode {
             has_crc,
             by_block,
         };
-        // The pointer array has to fit as well, and where it begins depends on
-        // how many records the block could hold rather than on how many it does.
-        let end = node.pointers_offset() + PTR_LEN * node.max_records() as usize;
-        if end > blocksize {
-            return Err(FsError::corrupt(
-                "free space btree node's pointer array does not fit in the block",
-            ));
+        // An interior node's pointer array has to fit as well, and where it
+        // begins depends on how many entries the block could hold rather than on
+        // how many it has.  A leaf has no pointer array, and its capacity is
+        // twice an interior node's, so the same arithmetic does not apply to it.
+        if !node.is_leaf() {
+            let end = node.pointers_offset() + PTR_LEN * node.capacity() as usize;
+            if end > blocksize {
+                return Err(FsError::corrupt(
+                    "free space btree node's pointer array does not fit in the block",
+                ));
+            }
         }
         Ok(node)
     }
@@ -274,6 +294,136 @@ impl FreeSpaceNode {
         self.by_block
     }
 
+    /// Where a run belongs among this node's runs, in this tree's order.
+    fn position_for(&self, run: &FreeRun) -> FsResult<usize> {
+        let runs = self.runs()?;
+        let key = |r: &FreeRun| match self.order() {
+            Order::ByBlock => (r.start, r.len),
+            Order::ByLength => (r.len, r.start),
+        };
+        Ok(runs
+            .iter()
+            .position(|r| key(r) > key(run))
+            .unwrap_or(runs.len()))
+    }
+
+    /// Take `count` blocks out of the run that starts at `start`.
+    ///
+    /// Returns the part of the run that is left, or `None` if the whole run was
+    /// taken.  Taking from the front of a run leaves the rest where it was, so
+    /// its neighbours do not have to move: the only thing that changes is where
+    /// the run begins.
+    ///
+    /// This is the change an allocation makes, and it is the change that must
+    /// not be wrong.  A block that is still in a tree after it has been written
+    /// to will be handed out a second time, and two files will overwrite each
+    /// other.
+    pub fn take_from_run(&mut self, start: XfsAgblock, count: u32) -> FsResult<Option<FreeRun>> {
+        if !self.is_leaf() {
+            return Err(FsError::invalid(
+                libc::EINVAL,
+                "only a leaf holds runs to take blocks from",
+            ));
+        }
+        let mut runs = self.runs()?;
+        let index = runs.iter().position(|r| r.start == start).ok_or_else(|| {
+            FsError::invalid(
+                libc::ENOENT,
+                format!("no free run in this node starts at block {start}"),
+            )
+        })?;
+        if count == 0 || count > runs[index].len {
+            return Err(FsError::invalid(
+                libc::EINVAL,
+                format!(
+                    "cannot take {count} blocks from a run of {}",
+                    runs[index].len
+                ),
+            ));
+        }
+        let left = if count == runs[index].len {
+            runs.remove(index);
+            None
+        } else {
+            runs[index].start += count;
+            runs[index].len -= count;
+            Some(runs[index])
+        };
+        self.set_runs(&runs)?;
+        Ok(left)
+    }
+
+    /// Put a run back.
+    ///
+    /// A node that is full cannot take another run, and saying so is better than
+    /// dropping the run: a run that is in a tree but not in the image would be
+    /// handed out again.
+    pub fn put_run(&mut self, run: FreeRun) -> FsResult<()> {
+        if !self.is_leaf() {
+            return Err(FsError::invalid(libc::EINVAL, "only a leaf holds runs"));
+        }
+        if run.len == 0 {
+            return Err(FsError::invalid(
+                libc::EINVAL,
+                "a run of no blocks is not a run",
+            ));
+        }
+        if self.overlaps(&run) {
+            return Err(FsError::invalid(
+                libc::EINVAL,
+                format!(
+                    "the run {}..{} overlaps a run already in this node",
+                    run.start,
+                    run.end()
+                ),
+            ));
+        }
+        let at = self.position_for(&run)?;
+        let mut runs = self.runs()?;
+        if runs.len() as u16 >= self.capacity() {
+            return Err(FsError::NoSpace);
+        }
+        runs.insert(at, run);
+        self.set_runs(&runs)?;
+        Ok(())
+    }
+
+    /// Does this node hold a run that shares a block with `run`?
+    fn overlaps(&self, run: &FreeRun) -> bool {
+        self.runs()
+            .map(|runs| {
+                runs.iter()
+                    .any(|r| (r.start as u64) < run.end() && (run.start as u64) < r.end())
+            })
+            .unwrap_or(false)
+    }
+
+    /// Replace this leaf's records.
+    ///
+    /// A leaf holds records and nothing else.  A 512-byte block spends its
+    /// region on 62 of them, which is as many as fit, so a leaf has no separate
+    /// key array to keep in step -- the keys of a tree live in its interior
+    /// nodes, where a search descends through them.  A node with room to spare
+    /// has the rest of its region left as it found it.
+    fn set_runs(&mut self, runs: &[FreeRun]) -> FsResult<()> {
+        if runs.len() > self.capacity() as usize {
+            return Err(FsError::NoSpace);
+        }
+        // The count lives in two places -- in the bytes, and in the field this
+        // struct was built with -- and they have to move together, or every
+        // reader of the node would be reading a different number of records than
+        // the one that wrote it.
+        self.numrecs = runs.len() as u16;
+        BigEndian::write_u16(&mut self.bytes[offset::NUMRECS..], self.numrecs);
+        for (i, run) in runs.iter().enumerate() {
+            let at = self.records + RECORD_LEN * i;
+            BigEndian::write_u32(&mut self.bytes[at..], run.start);
+            BigEndian::write_u32(&mut self.bytes[at + 4..], run.len);
+        }
+        self.update_crc();
+        Ok(())
+    }
+
     /// The free runs this node holds.
     ///
     /// Only meaningful for a leaf: in an interior node the same records hold the
@@ -298,18 +448,60 @@ impl FreeSpaceNode {
         Ok(out)
     }
 
-    /// The most records this block's size allows, which is where the pointer
-    /// array starts: the key array is sized for the *capacity*, not for the
-    /// number of keys in use.  A tree that grew or shrank moves its keys within
-    /// a fixed-size key region and its pointers after it.
-    pub fn max_records(&self) -> u16 {
+    /// How many records this node can hold.
+    ///
+    /// It depends what kind of node it is.  A leaf spends the whole region on
+    /// records, so a 512-byte block holds 62 of them; an interior node spends
+    /// eight bytes on a key and four on a pointer for each entry, so it holds
+    /// 41.  Getting this backwards would leave a leaf thinking it was full when
+    /// it was not, or an interior node pointing its array past the block.
+    pub fn capacity(&self) -> u16 {
         let room = self.blocksize.saturating_sub(self.records);
-        (room / ENTRY_LEN) as u16
+        let per = if self.is_leaf() {
+            RECORD_LEN
+        } else {
+            ENTRY_LEN
+        };
+        (room / per) as u16
     }
 
-    /// Where this node's pointer array begins.
+    /// Where this node's key region ends, which is where an interior node's
+    /// pointer array begins.
+    ///
+    /// The key region is sized for the node's *capacity*, not for the number of
+    /// keys in use: a tree that grew or shrank moves its keys within a
+    /// fixed-size key region and its pointers after it.
     pub fn pointers_offset(&self) -> usize {
-        self.records + self.max_records() as usize * RECORD_LEN
+        self.records + self.capacity() as usize * RECORD_LEN
+    }
+
+    /// The fewest records a node should hold.
+    ///
+    /// A node below this is not damaged -- every run in it is still a free run,
+    /// and a search still finds it -- but the tree is no longer the shape the
+    /// file system keeps, and the next writer will rebalance it.  A node that
+    /// drops this far below should be merged with a sibling, or, if it is the
+    /// root, collapsed into its only child.
+    ///
+    /// The rule is half the capacity, and it is visible in what the file system's
+    /// own repair says: a 512-byte block holds 62 records, and one holding 30 is
+    /// reported as short of the 31 it wants.
+    pub fn min_records(&self) -> u16 {
+        self.capacity().div_ceil(2)
+    }
+
+    /// Is this node short enough to want merging with a sibling?
+    pub fn wants_merging(&self) -> bool {
+        self.numrecs < self.min_records()
+    }
+
+    /// Which of the two orders this tree keeps its runs in.
+    pub fn order(&self) -> Order {
+        if self.by_block {
+            Order::ByBlock
+        } else {
+            Order::ByLength
+        }
     }
 
     /// The keys of this node, each a start block and a block count.
@@ -896,14 +1088,11 @@ mod t {
         BigEndian::write_u32(&mut b[8..], NULL_AGBLOCK);
         BigEndian::write_u32(&mut b[12..], NULL_AGBLOCK);
         let max = (BS - 16) / ENTRY_LEN;
+        let _ = max;
         for (i, (start, len)) in runs.iter().enumerate() {
             let at = 16 + RECORD_LEN * i;
             BigEndian::write_u32(&mut b[at..], *start);
             BigEndian::write_u32(&mut b[at + 4..], *len);
-            // Keys: the same pair, which is what the tree's key region holds.
-            let k = 16 + RECORD_LEN * (max + i);
-            BigEndian::write_u32(&mut b[k..], *start);
-            BigEndian::write_u32(&mut b[k + 4..], *len);
         }
         b
     }
@@ -1017,7 +1206,18 @@ mod t {
         assert_eq!(node.children().unwrap(), vec![10, 11]);
         // The pointer array is after the key region sized for the block's
         // capacity, which for a 512 byte block is 41 keys.
-        assert_eq!(node.max_records(), 41);
+        assert_eq!(
+            node.capacity(),
+            41,
+            "an interior node holds key-and-pointer entries"
+        );
+        assert_eq!(
+            FreeSpaceNode::from_bytes(leaf(&[(1, 1)]), false, true)
+                .unwrap()
+                .capacity(),
+            62,
+            "a leaf holds records"
+        );
         assert_eq!(node.pointers_offset(), 16 + 41 * 8);
         assert_eq!(node.pointers_offset(), 344);
 
@@ -1087,6 +1287,399 @@ mod t {
         blocks.insert(4, root);
         let err = walk(4, geometry(), group(blocks)).unwrap_err();
         assert!(matches!(err, FsError::Corrupt { .. }), "{err}");
+    }
+
+    /// What the node's records should look like after a change, checked against a
+    /// plain list rather than against the node's own idea of its contents.
+    fn records_of(node: &FreeSpaceNode) -> Vec<FreeRun> {
+        node.runs().unwrap()
+    }
+
+    /// The first key of a node, which is what a search descending through it
+    /// compares against: the first record under it, in that tree's order.
+    fn first_key_of(node: &FreeSpaceNode) -> (u32, u32) {
+        let runs = records_of(node);
+        runs.first().map(|r| (r.start, r.len)).unwrap_or((0, 0))
+    }
+
+    /// Taking blocks out of the middle of a run keeps what is left where it was.
+    #[test]
+    fn taking_from_the_front_of_a_run() {
+        let mut node =
+            FreeSpaceNode::from_bytes(leaf(&[(100, 10), (200, 5)]), false, true).unwrap();
+        let left = node.take_from_run(100, 4).unwrap();
+        assert_eq!(
+            left,
+            Some(FreeRun {
+                start: 104,
+                len:   6,
+            })
+        );
+        assert_eq!(
+            records_of(&node),
+            vec![
+                FreeRun {
+                    start: 104,
+                    len:   6,
+                },
+                FreeRun {
+                    start: 200,
+                    len:   5,
+                }
+            ]
+        );
+    }
+
+    /// Taking a whole run removes it, and the ones after it move up.
+    #[test]
+    fn taking_a_whole_run_removes_it() {
+        let mut node =
+            FreeSpaceNode::from_bytes(leaf(&[(100, 4), (200, 5), (300, 1)]), false, true).unwrap();
+        assert_eq!(node.take_from_run(200, 5).unwrap(), None);
+        assert_eq!(
+            records_of(&node),
+            vec![
+                FreeRun {
+                    start: 100,
+                    len:   4,
+                },
+                FreeRun {
+                    start: 300,
+                    len:   1,
+                }
+            ]
+        );
+    }
+
+    /// Asking for blocks that are not there, or more than there are, has to be an
+    /// error: an allocation that silently took the wrong blocks would be the
+    /// worst bug in this file system.
+    #[test]
+    fn taking_what_is_not_there_is_refused() {
+        let mut node = FreeSpaceNode::from_bytes(leaf(&[(100, 4)]), false, true).unwrap();
+        assert!(node.take_from_run(101, 1).is_err(), "no such run");
+        assert!(
+            node.take_from_run(100, 5).is_err(),
+            "more than the run holds"
+        );
+        assert!(node.take_from_run(100, 0).is_err(), "none at all");
+        // And the node is unchanged, which matters: a failed allocation must not
+        // have half-taken a run.
+        assert_eq!(
+            records_of(&node),
+            vec![FreeRun {
+                start: 100,
+                len:   4,
+            }]
+        );
+    }
+
+    /// An interior node holds subtrees, not runs, and saying so beats reading
+    /// its keys as free space.
+    #[test]
+    fn only_a_leaf_holds_runs() {
+        let mut node =
+            FreeSpaceNode::from_bytes(interior(1, &[(5, 3), (100, 1)], &[10, 11]), false, true)
+                .unwrap();
+        assert_eq!(node.take_from_run(5, 1).unwrap_err().errno(), libc::EINVAL);
+        assert_eq!(
+            node.put_run(FreeRun { start: 7, len: 1 })
+                .unwrap_err()
+                .errno(),
+            libc::EINVAL
+        );
+        assert!(node.runs().is_err());
+    }
+
+    /// A run goes back where its tree's order says it belongs.
+    #[test]
+    fn a_run_goes_where_its_order_says() {
+        // The tree keyed by start block, inserting out of order.
+        let mut by_block =
+            FreeSpaceNode::from_bytes(leaf(&[(100, 1), (200, 1)]), false, true).unwrap();
+        by_block
+            .put_run(FreeRun {
+                start: 50,
+                len:   3,
+            })
+            .unwrap();
+        by_block
+            .put_run(FreeRun {
+                start: 150,
+                len:   2,
+            })
+            .unwrap();
+        assert_eq!(
+            records_of(&by_block),
+            vec![
+                FreeRun {
+                    start: 50,
+                    len:   3,
+                },
+                FreeRun {
+                    start: 100,
+                    len:   1,
+                },
+                FreeRun {
+                    start: 150,
+                    len:   2,
+                },
+                FreeRun {
+                    start: 200,
+                    len:   1,
+                },
+            ]
+        );
+
+        // The tree keyed by run length: the same runs come out in a different
+        // order, which is the whole point of having two trees.
+        let mut by_len =
+            FreeSpaceNode::from_bytes(size_leaf(&[(100, 1), (200, 9)]), false, false).unwrap();
+        by_len
+            .put_run(FreeRun {
+                start: 150,
+                len:   4,
+            })
+            .unwrap();
+        assert_eq!(
+            records_of(&by_len),
+            vec![
+                FreeRun {
+                    start: 100,
+                    len:   1,
+                },
+                FreeRun {
+                    start: 150,
+                    len:   4,
+                },
+                FreeRun {
+                    start: 200,
+                    len:   9,
+                },
+            ]
+        );
+        assert_eq!(by_len.order(), Order::ByLength);
+    }
+
+    /// Two runs may not share a block, or the same block would be handed out
+    /// twice.  A node that would end up overlapping is refused.
+    #[test]
+    fn an_overlapping_run_is_refused() {
+        let mut node = FreeSpaceNode::from_bytes(leaf(&[(100, 10)]), false, true).unwrap();
+        assert!(node
+            .put_run(FreeRun {
+                start: 105,
+                len:   1,
+            })
+            .is_err());
+        assert!(node
+            .put_run(FreeRun {
+                start: 90,
+                len:   20,
+            })
+            .is_err());
+        // Touching end to end is not overlapping: that is how a run grows.
+        node.put_run(FreeRun {
+            start: 90,
+            len:   10,
+        })
+        .unwrap();
+        node.put_run(FreeRun {
+            start: 110,
+            len:   10,
+        })
+        .unwrap();
+        assert_eq!(records_of(&node).len(), 3);
+    }
+
+    /// A leaf that is full says so rather than dropping a run on the floor.
+    #[test]
+    fn a_full_leaf_refuses_another_run() {
+        let runs: Vec<(XfsAgblock, u32)> = (0..62u32).map(|i| (i * 2, 1)).collect();
+        let mut node = FreeSpaceNode::from_bytes(leaf(&runs), false, true).unwrap();
+        assert_eq!(node.capacity(), 62);
+        assert_eq!(node.numrecs(), 62);
+        assert_eq!(
+            node.put_run(FreeRun {
+                start: 5000,
+                len:   1,
+            })
+            .unwrap_err()
+            .errno(),
+            libc::ENOSPC
+        );
+        // And taking one out makes room for one.
+        node.take_from_run(0, 1).unwrap();
+        node.put_run(FreeRun {
+            start: 5000,
+            len:   1,
+        })
+        .unwrap();
+        assert_eq!(node.numrecs(), 62);
+    }
+
+    /// What a search descending through a node compares against is its first
+    /// record, so taking the first run out of a node has to change what that is.
+    #[test]
+    fn a_nodes_first_record_follows_its_runs() {
+        let mut node =
+            FreeSpaceNode::from_bytes(leaf(&[(100, 4), (200, 1), (300, 9)]), false, true).unwrap();
+        assert_eq!(first_key_of(&node), (100, 4));
+        node.take_from_run(100, 4).unwrap();
+        assert_eq!(first_key_of(&node), (200, 1), "the first record moved");
+        node.put_run(FreeRun {
+            start: 150,
+            len:   2,
+        })
+        .unwrap();
+        assert_eq!(
+            first_key_of(&node),
+            (150, 2),
+            "the first record moved again"
+        );
+    }
+
+    /// A node that is more than half empty is one the file system would want to
+    /// merge with a sibling, and a node with one entry is one that has no
+    /// business being a separate level of the tree.
+    #[test]
+    fn how_full_a_node_has_to_be() {
+        let full: Vec<(XfsAgblock, u32)> = (0..62u32).map(|i| (i * 2, 1)).collect();
+        let node = FreeSpaceNode::from_bytes(leaf(&full), false, true).unwrap();
+        assert_eq!(node.capacity(), 62);
+        assert_eq!(node.min_records(), 31);
+        assert!(!node.wants_merging(), "a full node is not short");
+
+        let mut node = FreeSpaceNode::from_bytes(leaf(&full), false, true).unwrap();
+        for _ in 0..31 {
+            node.take_from_run(node.runs().unwrap()[0].start, 1)
+                .unwrap();
+        }
+        assert_eq!(node.numrecs(), 31);
+        assert!(
+            !node.wants_merging(),
+            "half full is the boundary, not below it"
+        );
+        node.take_from_run(node.runs().unwrap()[0].start, 1)
+            .unwrap();
+        assert_eq!(node.numrecs(), 30);
+        assert!(
+            node.wants_merging(),
+            "below half full is what repair complains about"
+        );
+
+        // The same half-full rule applies to an interior node's entries, though
+        // whether one should be merged depends on whether it has a sibling to
+        // merge with, which only the layer that knows the tree's shape can say.
+        let interior =
+            FreeSpaceNode::from_bytes(interior(1, &[(5, 3), (100, 1)], &[10, 11]), false, true)
+                .unwrap();
+        assert_eq!(interior.capacity(), 41);
+        assert_eq!(interior.min_records(), 21);
+    }
+
+    /// A whole file system's worth of take and give, against a plain list of
+    /// what should be left.
+    ///
+    /// This is the shape of test that catches a mutation that is right for one
+    /// record and wrong for two hundred: random operations in a random order,
+    /// with the node's contents compared against a list kept alongside it.
+    #[test]
+    fn take_and_give_against_a_model() {
+        // A small deterministic sequence, so a failure can be reproduced: the
+        // numbers are a linear congruential sequence, not a random source that
+        // would differ from run to run.
+        for (by_block, seed_start) in [(true, 1u64), (false, 9u64)] {
+            let start_run = (1000u32, 40u32);
+            let mut seed = seed_start;
+            let mut next = move || {
+                seed = seed
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                (seed >> 33) as u32
+            };
+            let mut node = FreeSpaceNode::from_bytes(
+                if by_block {
+                    leaf(&[start_run])
+                } else {
+                    size_leaf(&[start_run])
+                },
+                false,
+                by_block,
+            )
+            .unwrap();
+            let mut model: Vec<(XfsAgblock, u32)> = vec![(1000, 40)];
+            for step in 0..200 {
+                if model.is_empty() {
+                    // Everything has been taken.  An allocation that finds the
+                    // group empty has to look in another group, so what matters
+                    // is that the node says so.
+                    assert!(node.runs().unwrap().is_empty());
+                    break;
+                }
+                let at = (next() as usize) % model.len();
+                let (start, len) = model[at];
+                let count = 1 + next() % len;
+                // What is left behind, worked out before the model is touched:
+                // taking from the front of a run moves where the rest begins and
+                // takes the length off it, and the run disappears when that was
+                // all of it.
+                let expected_left = if count == len {
+                    None
+                } else {
+                    Some((start + count, len - count))
+                };
+                let left = node.take_from_run(start, count).expect("take");
+                if count == len {
+                    model.remove(at);
+                } else {
+                    model[at].0 += count;
+                    model[at].1 -= count;
+                }
+                assert_eq!(
+                    left.map(|r| (r.start, r.len)),
+                    expected_left,
+                    "step {step}: what was left behind does not match the model"
+                );
+                assert_eq!(
+                    records_of(&node).len(),
+                    model.len(),
+                    "step {step}: {model:?}"
+                );
+                // Half the time, give a run back.
+                if next() % 2 == 0 {
+                    let newlen = 1 + next() % 12;
+                    let newstart = 1 + next() % 20000;
+                    if model.iter().all(|(s, l)| {
+                        newstart as u64 + newlen as u64 <= *s as u64
+                            || *s as u64 + *l as u64 <= newstart as u64
+                    }) {
+                        node.put_run(FreeRun {
+                            start: newstart,
+                            len:   newlen,
+                        })
+                        .expect("put");
+                        model.push((newstart, newlen));
+                        model.sort_by_key(|(s, _)| *s);
+                    }
+                }
+                // The node and the model must hold exactly the same runs.  That
+                // they are *in* each tree's order is a separate question, and it
+                // is asked directly by a_run_goes_where_its_order_says, where a
+                // mistake is easier to read off.
+                let mut from_node = records_of(&node);
+                let mut from_model: Vec<FreeRun> = model
+                    .iter()
+                    .map(|(s, l)| FreeRun {
+                        start: *s,
+                        len:   *l,
+                    })
+                    .collect();
+                from_node.sort_by_key(|r| (r.start, r.len));
+                from_model.sort_by_key(|r| (r.start, r.len));
+                assert_eq!(from_node, from_model, "step {step}");
+            }
+        }
     }
 
     /// A version 5 node's checksum has to be caught when it changes, and

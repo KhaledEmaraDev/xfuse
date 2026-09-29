@@ -259,13 +259,70 @@ the free space `xfs_db` reports for the same group, and the tests in that module
 use those runs as their expectations, so a failure means this code disagrees
 with the reference implementation rather than with itself.
 
-What is *not* here yet is the part that makes an allocation happen: walking from
-a root down through the interior nodes to the leaf that covers a given block,
-refilling a group's free list from a run found in one, and taking a run *out* of
-a btree.  Freeing a block is not here either; it means inserting a run, merging
-it with its neighbours, and correcting the group's count and longest-run
-summaries, and it belongs with the operations that free blocks rather than being
-written before anything calls it.
+Two things about the tree's shape were settled by the format documentation and
+then confirmed against the images.  An interior node is a key array followed by
+a pointer array, and the pointer array begins after the key region sized for the
+block's *maximum* record count -- which lands at 344 in a 512-byte version 4
+block and 696 in a 1024-byte version 5 one, exactly where the arithmetic says.
+`free_space::walk` follows those pointers to every leaf, checking that each
+child is one level shallower, and the result was checked against each group's
+own record of its free space, which is a stronger witness than any tool:
+
+```text
+xfsv4.img    AG1   29 children  1713 runs  10729 blocks  longest 8954
+                       the group header says freeblks=10729, longest=8954
+xfs1024.img  AG2    7 children   785 runs  86722 blocks  longest 85879
+                       the group header says freeblks=86722, longest=85879
+```
+
+`first_run_from` and `first_run_of_at_least` are the two questions an allocation
+asks, asked of the two different trees, and each comes back in its own tree's
+order.  A node's key is its first record *in that order*, which is why a search
+is a scan and not a descent: the size tree's last child in the test group holds
+a run of 8954 blocks while its key says 1, the shortest run beneath it.  Taking
+it would be right only if nothing to its left were long enough, which is what
+the scan establishes; a descent would need the free space bins.
+
+What is *not* here yet is the part that makes an allocation happen: taking a run
+out of a tree *through* it, and freeing blocks.  The leaf-level half of the
+first is now done -- `take_from_run` and `put_run` add, remove and re-order a
+leaf's records, keep the node's count right, refuse an overlapping run, and
+refuse a full node rather than dropping the run on the floor.  A model test runs
+two hundred random takes and puts against a plain list of what should be left
+and compares the whole set after every one, which is where a mutation that is
+right for one record and wrong for two hundred shows up; it found three mistakes
+in this code before it was finished.
+
+Three things about real trees came out of experiments on the test images, and
+all three are now written down in the code rather than in someone's head:
+
+* A leaf in a 512-byte block holds at most 62 records, and `xfs_repair` complains
+  of one holding 30, so the rule is half: below that a node wants merging with a
+  sibling, and one left with a single entry wants the root collapsed.
+* A leaf holds records and *nothing else* -- 62 of them fill the region exactly
+  -- so a tree's keys live only in its interior nodes.  The first version of the
+  leaf writer kept a second array of keys there, on the assumption that a leaf
+  and an interior node differ only in what the records mean, and wrote past the
+  end of the block.
+* A node's record count lives in two places, the bytes and the field the struct
+  was built with, and they have to move together.  That is invisible in a test
+  that reads a node back through the same struct that wrote it, and only shows
+  up against the image.
+
+Still missing, and it is what decides whether an allocation is safe: recording a
+change in *both* trees.  They index the same free space, so an allocation that
+updates one of them leaves the other handing out a block that is already in
+use.  That means descent, a parent's key and pointer changing when a child
+empties, merging a node that falls below half, and collapsing a root left with
+one child; then the group header's count and longest run, in the same
+transaction; then the allocator's own interface.  Freeing a block -- inserting a
+run and merging it with its neighbours -- is with them, and belongs with the
+operations that free blocks rather than being written before anything calls it.
+
+One thing worth recording about the free lists: in the v4 test image none of the
+four groups has an initialised free list at all, while every group header still
+names a window in one.  A file system whose free lists are empty is normal, so
+the trees are what an allocator has to be able to read.
 
 ### Phase 6 — overwrite, FUSE write path, capability gate
 
@@ -377,6 +434,7 @@ is the right trade while the write path is experimental.
 | a free space btree node can be read | done |
 | a whole free space btree can be walked | done |
 | a free space btree can be searched for a run | done |
+| a leaf's records can be added and removed | done |
 | blocks can be allocated | not started |
 | blocks can be allocated | not started |
 | files can be extended | not started |
