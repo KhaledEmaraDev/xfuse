@@ -576,6 +576,91 @@ impl RawDinode {
         Ok(())
     }
 
+    /// Add a run of blocks to a data fork that holds its extents in the inode.
+    ///
+    /// The extents of a file never overlap, and a run that lands against one
+    /// already there is joined to it rather than stored beside it: two extents
+    /// that touch are one extent.  A file written a block at a time would
+    /// otherwise fill the inode's local area with a run of one-block extents and
+    /// need a B+tree far sooner than it should.
+    pub fn add_extent(&mut self, run: crate::libxfuse::alloc::free_space::FreeRun) -> FsResult<()> {
+        if run.len == 0 {
+            return Err(FsError::invalid(
+                libc::EINVAL,
+                "a run of no blocks is not an extent",
+            ));
+        }
+        let mut extents = self.core_extents().ok_or_else(|| {
+            FsError::unsupported(format!(
+                "adding an extent to a data fork in format {}",
+                self.format()
+            ))
+        })?;
+        let start = u64::from(run.start);
+        let end = run.end();
+        if extents
+            .iter()
+            .any(|e| e.br_startblock < end && start < e.br_startblock + e.br_blockcount)
+        {
+            return Err(FsError::invalid(
+                libc::EEXIST,
+                format!(
+                    "the run {}..{end} overlaps an extent the file already has",
+                    run.start
+                ),
+            ));
+        }
+        // The extents the run touches: at most one below it and one above.
+        let mut touching: Vec<usize> = extents
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.br_startblock + e.br_blockcount == start || end == e.br_startblock)
+            .map(|(i, _)| i)
+            .collect();
+        touching.sort_unstable();
+        match touching.len() {
+            0 => {
+                let at = extents
+                    .iter()
+                    .position(|e| e.br_startblock > start)
+                    .unwrap_or(extents.len());
+                extents.insert(
+                    at,
+                    BmbtRec {
+                        br_startoff:   start,
+                        br_startblock: start,
+                        br_blockcount: u64::from(run.len),
+                        br_flag:       false,
+                    },
+                );
+            }
+            1 => {
+                let e = &mut extents[touching[0]];
+                if e.br_startblock + e.br_blockcount == start {
+                    // The run continues the extent below it.
+                    e.br_blockcount += u64::from(run.len);
+                } else {
+                    // The run continues the extent above it.
+                    e.br_startoff = start;
+                    e.br_startblock = start;
+                    e.br_blockcount += u64::from(run.len);
+                }
+            }
+            _ => {
+                // The run bridges two extents, so they become one.
+                let low = touching[0];
+                let high = *touching.last().expect("at least one");
+                let low_start = extents[low].br_startblock;
+                let high_end = extents[high].br_startblock + extents[high].br_blockcount;
+                extents[low].br_startoff = low_start;
+                extents[low].br_startblock = low_start;
+                extents[low].br_blockcount = high_end - low_start;
+                extents.drain(low + 1..=high);
+            }
+        }
+        self.set_core_extents(&extents)
+    }
+
     /// Where the attribute fork begins, in bytes, if there is one.
     pub fn attribute_fork_offset(&self) -> Option<usize> {
         match self.forkoff() {

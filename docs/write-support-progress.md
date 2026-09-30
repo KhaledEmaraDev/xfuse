@@ -309,10 +309,41 @@ all three are now written down in the code rather than in someone's head:
   that reads a node back through the same struct that wrote it, and only shows
   up against the image.
 
-Still missing, and it is what decides whether an allocation is safe: recording a
-change in *both* trees.  They index the same free space, so an allocation that
-updates one of them leaves the other handing out a block that is already in
-use.  That means descent, a parent's key and pointer changing when a child
+An allocation is now bound to a transaction and to the group header.  Every
+allocation changes three things -- a leaf in each of the two trees, and the
+header's count of what is left -- and all three go into the caller's one
+transaction, because a header that says a block is free when its tree says it is
+taken is a block that gets handed out twice.  Nothing writes to the image: the
+caller commits, or the image is as it was.
+
+The header is read and written as bytes at a computed offset rather than as a
+block, and that is not a detail to tidy up later.  A group header sits in the
+second *sector* of its group, and with 1 KiB blocks and 512-byte sectors that is
+half way through a block -- and in the first group that half of the block is
+the superblock.  Reading the header as a block and writing it back as a block
+takes the superblock with it; the first version of this did exactly that.
+
+The other half of making a file bigger is an extent, and `RawDinode::add_extent`
+adds one: it refuses a run that overlaps a block the file already has, keeps the
+list in order, and *joins* a run that lands against an extent to it rather than
+storing it beside.  Two extents that touch are one extent, and a file written a
+block at a time would otherwise fill the inode with one-block extents and need a
+B+tree far sooner than it should.  The same model test as the free space
+trees' covers it: three hundred runs in a deterministic order, with the fork
+compared against a map of which block belongs where after every one.
+
+Still missing for file extension, and it is the rest of the operation rather
+than a detail of it: the volume has to ask the allocator for the blocks, write
+the data *and* the new extent list *and* the new size in one transaction, and
+line the allocation up on a file system block boundary so that a write starting
+part way into a block does not leave the earlier part of that block unwritten.  A
+file whose data fork is a B+tree cannot be extended yet either, because that is
+the extent mutation of the next phase; such a file is refused with a message
+that says so rather than half-written.
+
+Merging a short leaf into a sibling is also still missing, and it is what stops
+a group looking fuller than it is: a leaf that has fallen below half full is
+passed over, and its space is not reclaimed until the merge that reclaims it.  That means descent, a parent's key and pointer changing when a child
 empties, merging a node that falls below half, and collapsing a root left with
 one child; then the group header's count and longest run, in the same
 transaction; then the allocator's own interface.  Freeing a block -- inserting a
@@ -435,6 +466,9 @@ is the right trade while the write path is experimental.
 | a whole free space btree can be walked | done |
 | a free space btree can be searched for a run | done |
 | a leaf's records can be added and removed | done |
+| blocks can be allocated, through a transaction | done |
+| an extent can be added to a file | done |
+| files can be extended | not started |
 | blocks can be allocated | not started |
 | blocks can be allocated | not started |
 | files can be extended | not started |
