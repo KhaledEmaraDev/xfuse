@@ -42,6 +42,7 @@
 //! | [`agf`] | the group file: the group's size, its free space, and where that free space is indexed |
 //! | [`agfl`] | the group free list: a small, pre-extracted supply of free blocks |
 //! | [`free_space`] | the btrees the group's free space is indexed in, one node of them |
+//! | [`allocator`] | handing out blocks out of a group, through a transaction |
 //!
 //! # Why a group has two free space indexes
 //!
@@ -81,4 +82,5 @@
 
 pub mod agf;
 pub mod agfl;
+pub mod allocator;
 pub mod free_space;

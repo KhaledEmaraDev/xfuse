@@ -356,6 +356,22 @@ impl Agf {
         self.set_u32_at(offset::FLCOUNT, count);
     }
 
+    /// Record how many blocks the group now has free.
+    ///
+    /// This is a summary of the free space btrees, kept so that a group can be
+    /// passed over without being read.  It is not a second record of the same
+    /// fact: the trees are, and this is a copy that can disagree if the trees
+    /// are changed without it.  That is why every change to the trees changes
+    /// this in the same transaction.
+    pub fn set_free_blocks(&mut self, free: u32) {
+        self.set_u32_at(offset::FREEBLKS, free);
+    }
+
+    /// Record the length of the group's longest run of free blocks.
+    pub fn set_longest_free(&mut self, longest: u32) {
+        self.set_u32_at(offset::LONGEST, longest);
+    }
+
     /// Is the group's free list window consistent with itself?
     ///
     /// A group that has never handed out a block has no window, and neither
@@ -584,6 +600,22 @@ mod t {
             agf.free_list_window_is_sane(),
             "an empty window is not a mistake"
         );
+    }
+
+    /// The two numbers a group keeps so that a group can be passed over
+    /// without being read, and which move with the trees.
+    #[test]
+    fn the_group_records_what_is_left() {
+        let mut agf = Agf::from_bytes(block_of(V4_AGF, 512), 512).unwrap();
+        assert_eq!(agf.free_blocks(), 30144);
+        assert_eq!(agf.longest_free(), 29528);
+        agf.set_free_blocks(30000);
+        agf.set_longest_free(20000);
+        assert_eq!(agf.free_blocks(), 30000);
+        assert_eq!(agf.longest_free(), 20000);
+        // And the bytes it was decoded from are the bytes that changed, so that
+        // writing it back writes what was set.
+        assert_eq!(agf, Agf::from_bytes(agf.as_bytes().to_vec(), 512).unwrap());
     }
 
     /// Anything that is not a group header has to be refused rather than read.

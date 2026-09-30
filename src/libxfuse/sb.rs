@@ -447,6 +447,29 @@ impl Sb {
         self.sb_sectsize
     }
 
+    /// A superblock with nothing but geometry in it.
+    ///
+    /// Only for tests: an image is decoded by reading one, and a test that
+    /// wants an allocator over a group has no image yet.
+    #[cfg(test)]
+    pub fn for_tests(
+        blocksize: u32,
+        sectsize: u16,
+        agblocks: u32,
+        agcount: u32,
+        inodesize: u16,
+    ) -> Self {
+        let mut sb: Sb = unsafe { std::mem::zeroed() };
+        sb.sb_blocksize = blocksize;
+        sb.sb_sectsize = sectsize;
+        sb.sb_agblocks = agblocks;
+        sb.sb_agcount = agcount;
+        sb.sb_inodesize = inodesize;
+        sb.sb_blocklog = blocksize.trailing_zeros() as u8;
+        sb.sb_agblklog = agblocks.trailing_zeros() as u8;
+        sb
+    }
+
     /// Does this file system checksum its metadata?
     ///
     /// A version 5 file system does, and its metadata carries a checksum that
