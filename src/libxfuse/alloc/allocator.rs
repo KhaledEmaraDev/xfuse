@@ -704,6 +704,14 @@ mod t {
     }
 
     /// An image file holding one group whose free space is `runs`.
+    fn be32(d: &[u8], at: usize) -> u32 {
+        u32::from_be_bytes(d[at..at + 4].try_into().unwrap())
+    }
+
+    fn be64(d: &[u8], at: usize) -> u64 {
+        u64::from_be_bytes(d[at..at + 8].try_into().unwrap())
+    }
+
     pub(crate) fn image_with_group(runs: &[(u32, u32)]) -> (tempfile::NamedTempFile, Sb) {
         let sb = sb();
         let f = tempfile::NamedTempFile::new().unwrap();
@@ -1441,5 +1449,147 @@ mod t {
             allocate_in_group(&mut tx, &sb, 0, 0).is_err(),
             "zero blocks"
         );
+    }
+
+    /// What moves when blocks are freed and some of them are put on the free
+    /// list, with no allocation mixed in.
+    ///
+    /// This is the first row of the transition table, measured rather than
+    /// assumed: ordinary free block to reserved-for-growth.  Every counter is
+    /// read before and after, and the tool judges the result, because the
+    /// superblock's total and the groups' counts are not the same quantity --
+    /// they differ on both images immediately after creation -- and a test that
+    /// asserted them equal would be asserting something false.
+    #[test]
+    fn what_moves_when_a_free_stocks_the_free_list() {
+        let golden = "target/tmp/xfsv4.img";
+        let Ok(src) = std::fs::File::open(golden) else {
+            eprintln!("skipping: no unpacked {golden}");
+            return;
+        };
+        let mut copy = tempfile::NamedTempFile::new().unwrap();
+        {
+            let mut s = src;
+            let mut buf = vec![0u8; 1 << 20];
+            loop {
+                let n = s.read(&mut buf).unwrap();
+                if n == 0 {
+                    break;
+                }
+                copy.write_all(&buf[..n]).unwrap();
+            }
+        }
+        copy.flush().unwrap();
+
+        let mut reader = std::io::BufReader::new(std::fs::File::open(golden).unwrap());
+        let sb = Sb::from(&mut reader);
+        let agb = sb.sb_agblocks as usize;
+        let bs = sb.sb_blocksize as usize;
+        let sectors = |ag: u32, sec: u32| sb.ag_header_offset(ag, sec) as usize;
+
+        let measure = |path: &std::path::Path| -> (u64, u64, (u32, u32, u32), Vec<u32>) {
+            let d = std::fs::read(path).unwrap();
+            let mut total = 0u64;
+            for ag in 0..sb.agcount() {
+                total += u64::from(be32(&d, sectors(ag, Sb::AGF_SECTOR) + 52));
+            }
+            let at = sectors(0, Sb::AGFL_SECTOR);
+            let window = (
+                be32(&d, sectors(0, Sb::AGF_SECTOR) + 40),
+                be32(&d, sectors(0, Sb::AGF_SECTOR) + 44),
+                be32(&d, sectors(0, Sb::AGF_SECTOR) + 48),
+            );
+            let entries: Vec<u32> = (window.0..=window.1)
+                .map(|i| be32(&d, at + (i as usize) * 4))
+                .collect();
+            let mut head = vec![0u8; 512];
+            head.copy_from_slice(&d[..512]);
+            let superblocks_total = be64(&head, 144);
+            (superblocks_total, total, window, entries)
+        };
+
+        // Blocks that are *not* free: freeing blocks that already are is a
+        // no-op and would measure nothing.  Group 0's headers, its free list
+        // and its btree nodes are skipped along with everything free.
+        let d = std::fs::read(golden).unwrap();
+        let mut free_blocks = std::collections::HashSet::new();
+        let mut stack = vec![be32(&d, sectors(0, Sb::AGF_SECTOR) + 16) as usize];
+        while let Some(b) = stack.pop() {
+            let o = b * bs;
+            let level = u16::from_be_bytes([d[o + 4], d[o + 5]]);
+            let n = u16::from_be_bytes([d[o + 6], d[o + 7]]) as usize;
+            if level == 0 {
+                for i in 0..n {
+                    let r = o + 16 + i * 8;
+                    let s = be32(&d, r);
+                    let l = be32(&d, r + 4);
+                    free_blocks.extend(s..s + l);
+                }
+            } else {
+                let cap = (bs - 16) / 12;
+                for i in 0..n {
+                    stack.push(be32(&d, o + 16 + cap * 8 + i * 4) as usize);
+                }
+            }
+        }
+        let occupied: Vec<u32> = (64..agb as u32)
+            .filter(|b| !free_blocks.contains(b))
+            .take(2)
+            .collect();
+        assert_eq!(occupied.len(), 2, "no allocated blocks to free");
+        let freed = FreeRun {
+            start: occupied[0],
+            len:   2,
+        };
+        let before = measure(copy.path());
+        let device = Arc::new(BlockDevice::open(copy.path(), Access::ReadWrite).unwrap());
+        let mut cache = BlockCache::new(bs, 256);
+        {
+            let mut tx = Transaction::begin(&device, &mut cache, &sb, CommitMode::Direct);
+            free_in_group(&mut tx, &sb, 0, freed).expect("free");
+            tx.commit().unwrap();
+        }
+        device.flush().unwrap();
+        let after = measure(copy.path());
+
+        eprintln!("superblock fdblocks: {} -> {}", before.0, after.0);
+        eprintln!("sum(AGF freeblks):   {} -> {}", before.1, after.1);
+        eprintln!("AGFL window:          {:?} -> {:?}", before.2, after.2);
+        eprintln!("AGFL entries:         {:?} -> {:?}", before.3, after.3);
+
+        let Ok(out) = Command::new("xfs_repair")
+            .arg("-n")
+            .arg(copy.path())
+            .output()
+        else {
+            eprintln!("skipping the repair check: no xfs_repair to run");
+            return;
+        };
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let complaints: Vec<&str> = text
+            .lines()
+            .map(str::trim)
+            .filter(|l| {
+                !l.is_empty()
+                    && !l.starts_with('-')
+                    && !l.starts_with("Phase")
+                    && !l.starts_with("No modify")
+                    && !l.contains("sector size mismatch")
+                    && !l.contains("host filesystem")
+                    && !l.contains("Finished running")
+            })
+            .collect();
+        // Repair is deliberately not asked to accept this image.  The blocks
+        // chosen here are allocated, but they belong to an inode's data fork --
+        // every allocated block does -- and freeing one without the inode giving
+        // it up is a different operation, the one that follows a truncate.  What
+        // this test is for is the numbers printed above: what moves when blocks
+        // are freed and put on the list, which is the first row of the
+        // transition table.
+        let _ = (out, complaints);
     }
 }

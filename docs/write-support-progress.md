@@ -699,6 +699,31 @@ Two things followed from that, and both are now fixed:
 With both fixed the refill hands back a real free block and the list survives
 being written, which it did not before.
 
+### The first row of the AGFL transition table, measured
+
+Freeing blocks and putting them on the free list was measured rather than
+assumed, on a real image, with no allocation mixed in:
+
+```text
+                    before        after
+superblock fdblocks  90624         90624     unchanged
+sum(AGF freeblks)    90277         90277     unchanged
+AGFL window          (1, 4, 4)     (1, 6, 6)
+AGFL entries         [7,8,9,10]    [7,8,9,10,64,65]
+```
+
+So the blocks go **straight onto the list and never enter the trees at all**.
+Neither count moves, the window grows by the number stocked, and the blocks are
+the group's to use but spoken for.  That is what a reservation is, and it is not
+what this code was doing -- it freed into the trees and then took them back out,
+which arrives at the same numbers by two steps instead of one and is why the
+superblock and the trees kept disagreeing by the amount stocked.
+
+The remaining rows are not measured, and the same test cannot measure them: every
+allocated block belongs to an inode's data fork, so freeing one without the inode
+giving it up is the operation that follows a truncate, which is not built.  The
+only free a real image can take honestly is one of the blocks just taken.
+
 ### The superblock's total is device-wide, not the groups' sum
 
 Checked on both images, with the group *file* field rather than the group inode
