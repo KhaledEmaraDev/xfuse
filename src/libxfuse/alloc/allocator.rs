@@ -69,6 +69,7 @@ use super::{
     free_space::{
         first_run_from,
         free_in_both_trees,
+        remove_range_in_tree,
         take_from_both_trees,
         FreeRun,
         FreeSpace,
@@ -354,6 +355,131 @@ pub fn allocate_in_group(
     Ok(Some(run))
 }
 
+/// Move blocks from the group's free space onto its free list, so the list has
+/// something in it.
+///
+/// The list is reserved space for growing the free space btrees, and it is
+/// stocked from the group's own free space: blocks are freed into the trees and
+/// some of them are then moved onto the list.  That is what makes a split able
+/// to get a node without reaching into the trees it is in the middle of
+/// changing -- and the group header, which is written once at the end of the
+/// operation, is no use for finding them part way through.
+///
+/// A block on the list is in neither of the two places `agf_freeblks` counts:
+/// not a free extent in the trees, and not yet a live node.  It is still the
+/// group's to use, just spoken for.
+/// The file system's identifier, which a free list written here must carry.
+fn uuid_of(agf: &Agf) -> [u8; 16] {
+    agf.uuid()
+}
+
+/// **Not wired up, and not working.**  It was tried twice and taken back twice;
+/// this is the record of the second attempt, so the next one starts from facts
+/// rather than from the code.
+///
+/// What it got right: the window handling for a list that has never been written.
+/// Asking the list whether it has been written, and starting from an empty window
+/// when it has not, is what stops the header's stale window from naming entries
+/// that are all null.
+///
+/// What is wrong, from `xfs_repair -n` on a real image after taking two blocks
+/// and giving them back -- which is the same operation the passing tests do, so
+/// this is what stocking changed:
+///
+/// ```text
+/// bad agbno 1480672844 in agfl, agno 0
+/// bad agbno 0 in agfl, agno 0
+/// sb_fdblocks 90622, counted 90620
+/// ```
+///
+/// Two faults, and they are separate.  The entries written are not the blocks
+/// that were moved: one reads as a block number and the other as zero, so either
+/// they went to the wrong slots or `give_back` was handed a window that does not
+/// describe the array it is writing.
+///
+/// And the trees lost four more blocks than were freed.  Two were freed and two
+/// were stocked, so the trees should be back where they started at 90624 and the
+/// superblock with them; the trees read 90620 and the superblock 90622.  Both are
+/// short, and they disagree with each other by exactly the number stocked, which
+/// says the removal is happening twice over rather than once.
+///
+/// That is where this stopped.  It is a matter of `Agfl`'s window and of how the
+/// removal is sequenced, not of the idea -- stocking is still what the free list
+/// is for, and the refill that reaches for the group header mid-split is still
+/// blocked on roots that have not been written yet.
+#[allow(dead_code)]
+fn stock_the_free_list(
+    transaction: &mut Transaction<'_>,
+    sb: &Sb,
+    agno: u32,
+    agf: &mut Agf,
+    from: FreeRun,
+) -> FsResult<u32> {
+    if from.len == 0 {
+        return Ok(0);
+    }
+    let at = sb.ag_header_offset(agno, Sb::AGFL_SECTOR);
+    let blocksize = sb.sb_blocksize as usize;
+    let bytes = transaction
+        .read_bytes(at, blocksize)
+        .map_err(|_| FsError::corrupt("the group free list could not be read"))?;
+    let mut agfl = Agfl::from_bytes(bytes, sb.has_crc())?;
+
+    // Whether the list has ever been written decides what its window means.
+    // A list block that was never written holds zeroes rather than null entries,
+    // and the header's window over it names entries that are not there.  Taking
+    // that window at its word is how the list came to claim block 0.
+    let written = agfl.is_written();
+    if !written {
+        agfl.initialise(agf.seqno(), &uuid_of(agf));
+    }
+    let mut window = if written {
+        agfl.window(
+            agf.free_list_first(),
+            agf.free_list_last(),
+            agf.free_list_count(),
+        )
+    } else {
+        agfl.window(0, 0, 0)
+    };
+    let room = agfl.capacity().saturating_sub(window.count).min(from.len);
+    let want = room;
+    if want == 0 {
+        return Ok(0);
+    }
+
+    // They come off the end of what was freed, so the blocks stay in the order
+    // the group would hand them out.
+    let first = from.start + (from.len - want);
+    let mut store = TransactionBlocks::new(transaction, sb, agno);
+    let block_geometry = GroupGeometry::new(sb.sb_agblocks, sb.has_crc(), true);
+    let size_geometry = GroupGeometry::new(sb.sb_agblocks, sb.has_crc(), false);
+    remove_range_in_tree(
+        &mut store,
+        block_geometry,
+        agf.block_btree_root(),
+        first,
+        want,
+    )?;
+    remove_range_in_tree(
+        &mut store,
+        size_geometry,
+        agf.extent_btree_root(),
+        first,
+        want,
+    )?;
+    for b in first..first + want {
+        window = agfl.give_back(&mut window, b)?;
+    }
+    agfl.update_crc();
+    // The store borrows the transaction, so it has to be finished with before
+    // the transaction can be written through directly.
+    let _ = store;
+    transaction.write_bytes(at, agfl.as_bytes())?;
+    agf.set_free_list_window(window.first, window.last, window.count);
+    Ok(want)
+}
+
 /// Give a run of blocks back to a group.
 ///
 /// This is the shape of an allocation run backwards, and it has the same three
@@ -581,7 +707,7 @@ mod t {
     }
 
     /// An image file holding one group whose free space is `runs`.
-    fn image_with_group(runs: &[(u32, u32)]) -> (tempfile::NamedTempFile, Sb) {
+    pub(crate) fn image_with_group(runs: &[(u32, u32)]) -> (tempfile::NamedTempFile, Sb) {
         let sb = sb();
         let f = tempfile::NamedTempFile::new().unwrap();
         f.as_file().set_len(AGBLOCKS as u64 * BS as u64).unwrap();
