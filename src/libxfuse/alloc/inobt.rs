@@ -84,9 +84,51 @@ pub struct InobtNode {
 /// both are zero and the range is wholly used.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct InoRange {
+    /// The first inode number this chunk covers.
     pub start:      u64,
+    /// How many of the chunk's inodes are free, which is the number of set bits
+    /// in [`Self::free`] and is checked against it.
     pub free_count: u32,
-    pub first_free: u32,
+    /// Which of the chunk's inodes are free, one bit per inode.
+    pub free:       u64,
+}
+
+/// How many inode numbers one chunk covers, which is the width of the mask.
+pub const INODES_PER_CHUNK: u64 = 64;
+
+impl InoRange {
+    /// The lowest free inode in this chunk, if it has one.
+    ///
+    /// The lowest set bit rather than any set bit, so that allocation does not
+    /// skip over the free inodes at the bottom of a chunk and leave them to be
+    /// found all over again next time.
+    pub fn first_free_ino(&self) -> Option<u64> {
+        if self.free == 0 {
+            return None;
+        }
+        Some(self.start + u64::from(self.free.trailing_zeros()))
+    }
+
+    /// Every free inode in this chunk, lowest first.
+    pub fn free_inos(&self) -> Vec<u64> {
+        let mut out = Vec::with_capacity(self.free_count as usize);
+        let mut bits = self.free;
+        while bits != 0 {
+            let bit = bits.trailing_zeros();
+            out.push(self.start + u64::from(bit));
+            bits &= bits - 1;
+        }
+        out
+    }
+
+    /// Whether the chunk's free count agrees with its mask.
+    ///
+    /// They are two copies of one fact, and the format documentation says so, so
+    /// a chunk where they disagree is a chunk that cannot be believed -- and
+    /// there is no way to tell from here which of the two is the wrong one.
+    pub fn count_agrees(&self) -> bool {
+        self.free.count_ones() == self.free_count
+    }
 }
 
 /// Every range of inode numbers a tree says are in use, in the order the tree
@@ -138,6 +180,12 @@ impl InobtNode {
             numrecs: u16::from_be_bytes(bytes[NUMRECS..NUMRECS + 2].try_into().unwrap()),
             bytes:   bytes.into_boxed_slice(),
         })
+    }
+
+    fn u64_at(&self, at: usize) -> u64 {
+        let mut v = [0u8; 8];
+        v.copy_from_slice(&self.bytes[at..at + 8]);
+        u64::from_be_bytes(v)
     }
 
     fn u32_at(&self, at: usize) -> u32 {
@@ -202,7 +250,7 @@ impl InobtNode {
                 Ok(InoRange {
                     start:      u64::from(self.u32_at(at)),
                     free_count: self.u32_at(at + 4),
-                    first_free: self.u32_at(at + 8),
+                    free:       self.u64_at(at + 8),
                 })
             })
             .collect()
@@ -240,6 +288,8 @@ mod t {
     use crate::libxfuse::{alloc::agi::Agi, error::FsResult, sb::Sb};
 
     const GOLDEN: &str = "target/tmp/xfsv4.img";
+    /// A file system made by mkfs, whose inode numbers agree with its own headers.
+    const FRESH: &str = "target/tmp/xfs_writable.img";
 
     /// The values `xfs_db` prints inside brackets, as in `1:[32,0,0]`.
     ///
@@ -401,6 +451,77 @@ mod t {
         assert_eq!(after_colon("1:6 2:11"), vec![6, 11]);
     }
 
+    /// A chunk's free count is the number of free inodes in its mask.
+    ///
+    /// The format documentation says these are one fact written twice, so this is
+    /// the invariant to hold them to: a chunk whose count disagrees with its mask
+    /// cannot be believed, and nothing here can say which of the two is wrong.
+    ///
+    /// It is also the strongest check available on reading a chunk, because it
+    /// ties the eight byte mask to the four byte count beside it.  A reader that
+    /// had the mask's offset wrong would still produce a plausible count, and
+    /// would fail here -- which is how a sixteen byte record that shows three
+    /// printed fields turns out to be three printed fields and a mask.
+    #[test]
+    fn a_chunks_free_count_is_the_number_of_free_inodes_in_its_mask() {
+        // Only the freshly made image.  The hand-built one's inode tree does not
+        // resolve from its own headers -- walking it runs into a block that is
+        // not a node of that tree -- which is the same disagreement about inode
+        // numbers that the count check below runs into.  It is a good image for
+        // most things and cannot be asked about inodes.
+        for golden in [FRESH] {
+            let Ok(bytes) = std::fs::read(golden) else {
+                eprintln!("skipping {golden}: no unpacked image");
+                continue;
+            };
+            let mut reader = std::io::BufReader::new(std::fs::File::open(golden).unwrap());
+            let sb = Sb::from(&mut reader);
+            let bs = sb.sb_blocksize as usize;
+            let fetch = |block: u32| -> FsResult<Box<[u8]>> {
+                let at = block as usize * bs;
+                Ok(bytes[at..at + bs].to_vec().into_boxed_slice())
+            };
+            let mut checked = 0usize;
+            for agno in 0..sb.agcount() {
+                let at = sb.ag_header_offset(agno, Sb::AGI_SECTOR) as usize;
+                let Ok(agi) = Agi::from_bytes(bytes[at..at + bs].to_vec(), sb.has_crc()) else {
+                    continue;
+                };
+                for chunk in ranges_in_tree(agi.inobt_root(), fetch).expect("the chunks") {
+                    assert!(
+                        chunk.count_agrees(),
+                        "{golden} ag{agno}: the chunk at inode {} claims {} free inodes but its \
+                         mask has {} bits set",
+                        chunk.start,
+                        chunk.free_count,
+                        chunk.free.count_ones()
+                    );
+                    assert_eq!(
+                        chunk.free_inos().len() as u32,
+                        chunk.free_count,
+                        "{golden} ag{agno}: the chunk does not name as many free inodes as it says"
+                    );
+                    for ino in chunk.free_inos() {
+                        assert!(
+                            (chunk.start..chunk.start + INODES_PER_CHUNK).contains(&ino),
+                            "{golden} ag{agno}: inode {ino} is outside the chunk that claims it"
+                        );
+                    }
+                    if chunk.free_count > 0 {
+                        assert!(
+                            chunk.first_free_ino().is_some(),
+                            "{golden} ag{agno}: a chunk with free inodes cannot name one"
+                        );
+                    }
+                    checked += 1;
+                }
+            }
+            if checked > 0 {
+                eprintln!("{golden}: {checked} chunks checked");
+            }
+        }
+    }
+
     /// The header's free inode count is the ranges' own free counts, added up.
     ///
     /// This is the check the walk rests on, and it settles two things at once:
@@ -473,14 +594,17 @@ mod t {
         let ranges = node.ranges().expect("ranges");
         assert_eq!(ranges.len(), node.numrecs() as usize);
 
-        let printed: Vec<(u64, u32, u32)> = shown(leaf, "recs")
+        let printed: Vec<(u64, u32, u64)> = shown(leaf, "recs")
             .expect("xfs_db prints the ranges")
             .iter()
             .flat_map(|l| bracketed(l))
             .collect::<Vec<u64>>()
             .chunks(3)
             .filter_map(|c| match c {
-                [a, b, c] => Some((*a, *b as u32, *c as u32)),
+                // The third field is a sixty-four bit mask, and the tool prints
+                // it as one; a reader that took it as thirty-two bits would
+                // disagree with the tool here, which is the point.
+                [a, b, c] => Some((*a, *b as u32, *c)),
                 _ => None,
             })
             .collect();
@@ -491,7 +615,7 @@ mod t {
         );
         for (ours, theirs) in ranges.iter().zip(printed.iter()) {
             assert_eq!(
-                (ours.start, ours.free_count, ours.first_free),
+                (ours.start, ours.free_count, ours.free),
                 *theirs,
                 "a range disagrees with xfs_db"
             );
