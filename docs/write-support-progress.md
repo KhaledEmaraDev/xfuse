@@ -666,6 +666,39 @@ to recover.  The tree was right and the model was wrong.  A false alarm is the
 cheapest kind of model-test failure, because it is found by reading the
 difference.
 
+### The free list has no header
+
+The list that the refill kept failing on turned out not to be the problem.  In
+**every file system in this repository the free list is a bare array of block
+numbers with no header at all**: the tool types the block as an array of one
+hundred and twenty-eight slots, and reading group 0 of the hand-built image gives
+
+```text
+bno[0-127] = 0:null 1:7 2:8 3:9 4:10 5:null ...
+```
+
+Slots one to four hold blocks seven to ten, which is exactly the window the group
+header names -- so the list was never empty, it had four usable blocks on it.
+
+Two things followed from that, and both are now fixed:
+
+* **Reading the list assumed a header that is not there.**  The array was taken
+  to start thirty-two bytes in, so a block written through this code puts its own
+  header where entry zero belongs.  Repair read the magic back as an entry --
+  `bad agbno 1480672844`, which is `0x5841464c`, the list's own magic spelled out
+  as a block number -- and the sequence number as the next one.  A list now says
+  whether it carries a header rather than assuming one, and initialising a list
+  with no header does not put one there.
+* **The block-zero hazard came back through a different door.**  With no header,
+  a list block that was never written reads as zeroes, and a zero entry is
+  **block 0** -- the first block of the group, which holds its headers and is
+  never free space.  Asking whether the list has been *written* says no to a list
+  that is full of usable blocks; what has to be asked is whether a slot holds a
+  block that could be used, which is neither the null block nor zero.
+
+With both fixed the refill hands back a real free block and the list survives
+being written, which it did not before.
+
 ### Where a split's new block comes from
 
 A node that fills up has to become two, and the second needs a block nothing else

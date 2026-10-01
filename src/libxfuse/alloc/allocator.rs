@@ -211,8 +211,11 @@ impl<'a, 't, 's> GroupBlocks for TransactionBlocks<'a, 't, 's> {
         // would hand out the block at the very start of the file system -- the
         // superblock.  `is_written` is the check that says the header of a list
         // is there at all.
-        let usable = agfl.is_written()
-            && (window.first..=window.last).any(|i| agfl.entry(i) != super::agf::NULL_AGBLOCK);
+        // Whether the list has anything to give is the window's business, not
+        // the block's: a free list in these file systems is a bare array with no
+        // header at all, so asking whether it has been *written* says no to a
+        // list that is full of usable blocks.
+        let usable = (window.first..=window.last).any(|i| agfl.holds_block(i));
         if usable {
             let block = agfl.take_front(&mut window)?;
             agfl.update_crc();
@@ -425,32 +428,27 @@ fn stock_the_free_list(
         .map_err(|_| FsError::corrupt("the group free list could not be read"))?;
     let mut agfl = Agfl::from_bytes(bytes, sb.has_crc())?;
 
-    // Whether the list has ever been written decides what its window means.
-    // A list block that was never written holds zeroes rather than null entries,
-    // and the header's window over it names entries that are not there.  Taking
-    // that window at its word is how the list came to claim block 0.
-    let written = agfl.is_written();
-    if !written {
-        agfl.initialise(agf.seqno(), &uuid_of(agf));
-    }
-    let mut window = if written {
-        agfl.window(
-            agf.free_list_first(),
-            agf.free_list_last(),
-            agf.free_list_count(),
-        )
-    } else {
-        agfl.window(0, 0, 0)
-    };
+    // The window is the header's, and it names the slots that are live.  Anything
+    // outside it is stale -- a block that was a list once and is being written
+    // as one again must not have its old contents read as free blocks.
+    //
+    // A list is not required to carry a header: in every file system here it is
+    // a bare array, so whether one belongs is decided by reading the block rather
+    // than assumed, and writing one where none belongs would put a header on top
+    // of entry zero.
+    let mut window = agfl.window(
+        agf.free_list_first(),
+        agf.free_list_last(),
+        agf.free_list_count(),
+    );
     let room = agfl.capacity().saturating_sub(window.count).min(from.len);
-    let want = room;
-    if want == 0 {
+    if room == 0 {
         return Ok(0);
     }
 
-    // They come off the end of what was freed, so the blocks stay in the order
-    // the group would hand them out.
-    let first = from.start + (from.len - want);
+    // They come off the end of what was freed, so the list keeps the order the
+    // group would hand the blocks out in.
+    let first = from.start + (from.len - room);
     let mut store = TransactionBlocks::new(transaction, sb, agno);
     let block_geometry = GroupGeometry::new(sb.sb_agblocks, sb.has_crc(), true);
     let size_geometry = GroupGeometry::new(sb.sb_agblocks, sb.has_crc(), false);
@@ -459,25 +457,24 @@ fn stock_the_free_list(
         block_geometry,
         agf.block_btree_root(),
         first,
-        want,
+        room,
     )?;
     remove_range_in_tree(
         &mut store,
         size_geometry,
         agf.extent_btree_root(),
         first,
-        want,
+        room,
     )?;
-    for b in first..first + want {
+    for b in first..first + room {
         window = agfl.give_back(&mut window, b)?;
     }
+    agfl.blank_beyond(window.last);
     agfl.update_crc();
-    // The store borrows the transaction, so it has to be finished with before
-    // the transaction can be written through directly.
     let _ = store;
     transaction.write_bytes(at, agfl.as_bytes())?;
     agf.set_free_list_window(window.first, window.last, window.count);
-    Ok(want)
+    Ok(room)
 }
 
 /// Give a run of blocks back to a group.

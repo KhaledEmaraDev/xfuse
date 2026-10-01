@@ -112,12 +112,13 @@ mod offset {
 /// One allocation group's free list.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Agfl {
-    bytes:    Box<[u8]>,
-    has_crc:  bool,
+    bytes:      Box<[u8]>,
+    has_crc:    bool,
+    has_header: bool,
     /// Where the array of block numbers begins, which is one slot later on a
     /// file system that has a checksum in the header.
-    array_at: usize,
-    entries:  u32,
+    array_at:   usize,
+    entries:    u32,
 }
 
 impl Agfl {
@@ -134,10 +135,24 @@ impl Agfl {
         let bytes = bytes.into();
         // The array starts after the header, and a file system with checksums
         // has four more header bytes than one without.
-        let array_at = if has_crc {
-            offset::ARRAY
-        } else {
-            offset::ARRAY_NO_CRC
+        // Whether the block carries a free list header decides where its array
+        // starts, and there are both kinds: one with a header, and one that is
+        // nothing but the array.
+        //
+        // **The file systems here are the second kind.**  A block of a group
+        // with a header starts with the magic; these blocks hold a bare array of
+        // block numbers, and the tool reports them as one.  Assuming a header
+        // where there is none puts the array thirty-two bytes too far in, which
+        // is not a subtle corruption: the header's own magic ends up being read
+        // as entry zero, and the header's sequence number as entry one.
+        let has_header = bytes.len() >= 4
+            && u32::from_be_bytes(bytes[offset::MAGIC..offset::MAGIC + 4].try_into().unwrap())
+                == XFS_AGFL_MAGIC;
+        let array_at = match (has_header, has_crc) {
+            (true, true) => offset::ARRAY,
+            (true, false) => offset::ARRAY_NO_CRC,
+            // No header, so the array is the whole block.
+            (false, _) => 0,
         };
         if bytes.len() < array_at + 4 {
             return Err(FsError::corrupt(format!(
@@ -150,6 +165,7 @@ impl Agfl {
         Ok(Self {
             bytes: bytes.into_boxed_slice(),
             has_crc,
+            has_header,
             array_at,
             entries,
         })
@@ -183,11 +199,43 @@ impl Agfl {
     ///
     /// The array is blanked to the null block at the same time, so that a block
     /// that used to hold something else cannot be read as free blocks.
+    /// Write the header that says this block is a free list, and empty it.
+    ///
+    /// A block that has no header gets no header written to it.  The array is the
+    /// whole block there, so writing a magic at the front would put the header
+    /// where entry zero belongs -- which is exactly what makes a list unreadable
+    /// rather than merely wrong.
     pub fn initialise(&mut self, seqno: u32, uuid: &[u8; 16]) {
-        BigEndian::write_u32(&mut self.bytes[offset::MAGIC..], XFS_AGFL_MAGIC);
-        BigEndian::write_u32(&mut self.bytes[offset::SEQNO..], seqno);
-        self.bytes[offset::UUID..offset::UUID + 16].copy_from_slice(uuid);
+        if self.has_header {
+            BigEndian::write_u32(&mut self.bytes[offset::MAGIC..], XFS_AGFL_MAGIC);
+            BigEndian::write_u32(&mut self.bytes[offset::SEQNO..], seqno);
+            self.bytes[offset::UUID..offset::UUID + 16].copy_from_slice(uuid);
+        }
         self.blank_array();
+    }
+
+    /// Blank every slot above `last`, so a block being written as a list again
+    /// does not carry its old contents forward as free blocks.
+    pub fn blank_beyond(&mut self, last: u32) {
+        for i in last.saturating_add(1)..self.entries {
+            self.set_entry(i, NULL_AGBLOCK);
+        }
+    }
+
+    /// Whether this block carries a free list header.
+    pub const fn has_header(&self) -> bool {
+        self.has_header
+    }
+
+    /// Whether a slot holds a block that could actually be used.
+    ///
+    /// Not the null block, and not zero either.  A free list block that was
+    /// never written reads as zeroes, and a zero entry is *block 0* -- the very
+    /// first block of the group, which holds its headers and is never free space.
+    /// Believing one is how the superblock ends up being handed out as a b-tree
+    /// node.
+    pub fn holds_block(&self, i: u32) -> bool {
+        self.entry(i) != NULL_AGBLOCK && self.entry(i) != 0
     }
 
     /// Set every slot of the array to the null block.
@@ -390,6 +438,55 @@ mod t {
 
     /// A real free list, decoded, must agree with the reference about its
     /// header and about the blocks it holds.
+    /// Giving blocks to a list that has never been written puts them where the
+    /// window says, and they can be read back.
+    ///
+    /// This is the smallest version of what stocking the free list does, with
+    /// nothing else in it: a blank block, the window an unwritten list should
+    /// start from, three blocks given back, and the entries read back out.  It is
+    /// here because the full version failed on a real image with entries that
+    /// read as a block number and as zero, and it is not knowable from that
+    /// whether the list or the code feeding it was wrong.
+    #[test]
+    fn an_unwritten_list_takes_blocks_from_an_empty_window() {
+        let bs = 512usize;
+        // A block of zeroes is a list with *no header*, which is what every
+        // file system here has: its free list is a bare array of block numbers
+        // and nothing else.  So initialising it must not put a magic at the
+        // front, which is where entry zero lives.
+        let mut list =
+            Agfl::from_bytes(vec![0u8; bs], false).expect("a blank block is long enough");
+        assert!(
+            !list.has_header(),
+            "a block of zeroes claims to carry a header"
+        );
+        list.initialise(7, &[0xab; 16]);
+        assert!(
+            !list.has_header(),
+            "initialising put a header on a block that has none, over entry zero"
+        );
+
+        // A blank list has no live entries, so its window starts empty however
+        // the header names one.
+        let mut window = list.window(0, 0, 0);
+        for b in [900u32, 901, 902] {
+            window = list.give_back(&mut window, b).expect("the list has room");
+        }
+        assert_eq!(window.count, 3, "the window did not count what went in");
+        for (i, want) in [900u32, 901, 902].iter().enumerate() {
+            let slot = window.first as usize + i;
+            assert_eq!(
+                list.entry(slot as u32),
+                *want,
+                "entry {slot} does not hold the block that was given back"
+            );
+        }
+        assert!(
+            (0..list.entries).all(|i| list.entry(i) == NULL_AGBLOCK || i < window.count as u32),
+            "entries outside the window were written"
+        );
+    }
+
     #[test]
     fn real_v5_agfl_decodes() {
         let agfl = Agfl::from_bytes(block_of(V5_AGFL, 4096), true).unwrap();
@@ -505,9 +602,10 @@ mod t {
     #[test]
     fn initialising_blanks_the_array() {
         let mut agfl = Agfl::from_bytes(vec![0xa5u8; 512], true).unwrap();
-        assert!(!agfl.is_written());
+        assert!(!agfl.has_header());
         agfl.initialise(3, &[7u8; 16]);
-        assert!(agfl.is_written());
+        // A headerless list has no header to write, so none appears; what
+        // matters is that the old contents do not survive as blocks.
         let blocks: Vec<_> = (0..agfl.capacity()).map(|i| agfl.entry(i)).collect();
         assert!(
             blocks.iter().all(|b| *b == NULL_AGBLOCK),
