@@ -727,6 +727,55 @@ because that is the only way to reach it here: it checks that the blocks taken
 are the ones the list held and in order, that the header's window followed them,
 and that the list no longer offers what was taken.
 
+### Finding a free inode: what is known, and what is not
+
+A chunk is sixty-four consecutive inode numbers with a sixty-four bit mask saying
+which are free, and its count is the number of set bits in that mask.  Measured on
+a freshly made image:
+
+```text
+startino = 32   freecount = 57   free = 0xffffffffffffff80
+popcount(free) = 57               -- so the two agree
+```
+
+57 free inodes are 39 to 95; 32 to 38 are allocated.  The chunk's `freecount` and
+the header's `freecount` are one fact, so summing the chunks' counts gives the
+header's count exactly, and the check that ties the eight byte mask to the four
+byte count beside it is the strongest thing available for catching a wrong
+offset: a reader with the offset wrong still produces a plausible count and fails
+there instead.
+
+Two things that look contradictory are not:
+
+* `agi_length` is the group's size **in blocks** (153600), not its number of
+  inodes.  `agi_count` is the inodes (64).  Reading the length as a count of
+  inodes is what makes a chunk of inodes appear to run past the group, when in
+  fact two inodes fit in a block.
+* The candidates for allocation are **the set bits of the mask, and nothing
+  else**.  Not the gaps between chunks, and not any interval worked out from a
+  group's inode numbers -- those begin below the group's first chunk and are
+  reserved, and synthesising candidates from that interval is how inode zero gets
+  handed to somebody.  `agi_newino` is a hint about where to look, not the first
+  allocatable number.
+
+Where an inode number lives in the image is now known for the first group of both
+images, by finding the inode magic rather than guessing at it:
+
+* the magic is `0x494e`, not the `0x4944` first assumed, which is why looking for
+  it found nothing;
+* inodes are two to a block, at offsets 0 and 256;
+* inode 32 -- the root directory, whose mode the tool agrees on -- is at block 16,
+  offset 0, and 33 and 34 follow at 256, 0 and so on.
+
+**What is not established is the layout of a group's inode area for a group with
+more than one chunk of inodes.**  In the hand-built image the blocks holding
+inodes are not contiguous: the first thirty-two, then a gap, then thirty-two
+again, and so on.  Something is interleaved with them and the rule is not
+evident from what is here.  So the arithmetic that turns a free inode number into
+a block is known for one chunk and not for a group, and guessing at the rest of
+the pattern would be exactly the kind of plausible-looking wrong answer this
+section exists to avoid.
+
 ### Two things that are allocator policy, not format rules
 
 **A take does not have to come from the head of a run.**  The format describes
