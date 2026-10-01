@@ -310,6 +310,13 @@ impl RawDinode {
     /// How many file system blocks this inode's forks occupy, counting
     /// indirect blocks and the attribute fork as well as data.
     #[allow(dead_code)]
+    /// Record how many blocks the file's forks occupy, which has to follow the
+    /// extents: a reader -- or `xfs_repair` -- that finds the two disagreeing
+    /// will call the inode corrupt.
+    pub fn set_nblocks(&mut self, blocks: u64) {
+        BigEndian::write_u64(&mut self.bytes[offset::NBLOCKS..], blocks);
+    }
+
     pub fn nblocks(&self) -> u64 {
         BigEndian::read_u64(&self.bytes[offset::NBLOCKS..])
     }
@@ -576,15 +583,22 @@ impl RawDinode {
         Ok(())
     }
 
-    /// Add a run of blocks to a data fork that holds its extents in the inode.
+    /// Add a run to a data fork that holds its extents in the inode.
     ///
-    /// The extents of a file never overlap, and a run that lands against one
-    /// already there is joined to it rather than stored beside it: two extents
-    /// that touch are one extent.  A file written a block at a time would
-    /// otherwise fill the inode's local area with a run of one-block extents and
-    /// need a B+tree far sooner than it should.
-    pub fn add_extent(&mut self, run: crate::libxfuse::alloc::free_space::FreeRun) -> FsResult<()> {
-        if run.len == 0 {
+    /// A run is named twice, in two different spaces: the blocks it covers *in
+    /// the file*, and the blocks they live at *on the image*.  They are the same
+    /// number only by accident, and treating them as one is how a file ends up
+    /// with an extent that says its data is at the wrong place -- which reads
+    /// back as zeroes and writes over whatever is really there.
+    ///
+    /// The extents of a file never cover the same file block twice, so a run that
+    /// overlaps one is refused, and a run that lands against an extent is
+    /// *joined* to it rather than stored beside it: two extents that touch are
+    /// one extent.  A file written a block at a time would otherwise fill the
+    /// inode's local area with one-block extents and need a B+tree far sooner
+    /// than it should.
+    pub fn add_extent(&mut self, dblock: u64, fsb: u64, len: u32) -> FsResult<()> {
+        if len == 0 {
             return Err(FsError::invalid(
                 libc::EINVAL,
                 "a run of no blocks is not an extent",
@@ -596,25 +610,30 @@ impl RawDinode {
                 self.format()
             ))
         })?;
-        let start = u64::from(run.start);
-        let end = run.end();
+        let first = dblock;
+        let last = dblock + len as u64;
         if extents
             .iter()
-            .any(|e| e.br_startblock < end && start < e.br_startblock + e.br_blockcount)
+            .any(|e| e.br_startoff < last && first < e.br_startoff + e.br_blockcount)
         {
             return Err(FsError::invalid(
                 libc::EEXIST,
-                format!(
-                    "the run {}..{end} overlaps an extent the file already has",
-                    run.start
-                ),
+                format!("the run {first}..{last} overlaps an extent the file already has"),
             ));
         }
-        // The extents the run touches: at most one below it and one above.
+        // The extents the run can be joined to.  Two extents of one file can
+        // only become one when they are adjacent in *both* spaces: a fragmented
+        // file's extents are next to each other in the file and nowhere near
+        // each other on the image, and joining those would tell the file that
+        // its data is in blocks it is not in.
+        let joinable = |e: &BmbtRec| {
+            (e.br_startoff + e.br_blockcount == first && e.br_startblock + e.br_blockcount == fsb)
+                || (last == e.br_startoff && fsb + len as u64 == e.br_startblock)
+        };
         let mut touching: Vec<usize> = extents
             .iter()
             .enumerate()
-            .filter(|(_, e)| e.br_startblock + e.br_blockcount == start || end == e.br_startblock)
+            .filter(|(_, e)| joinable(e))
             .map(|(i, _)| i)
             .collect();
         touching.sort_unstable();
@@ -622,39 +641,41 @@ impl RawDinode {
             0 => {
                 let at = extents
                     .iter()
-                    .position(|e| e.br_startblock > start)
+                    .position(|e| e.br_startoff > first)
                     .unwrap_or(extents.len());
                 extents.insert(
                     at,
                     BmbtRec {
-                        br_startoff:   start,
-                        br_startblock: start,
-                        br_blockcount: u64::from(run.len),
+                        br_startoff:   first,
+                        br_startblock: fsb,
+                        br_blockcount: u64::from(len),
                         br_flag:       false,
                     },
                 );
             }
             1 => {
                 let e = &mut extents[touching[0]];
-                if e.br_startblock + e.br_blockcount == start {
-                    // The run continues the extent below it.
-                    e.br_blockcount += u64::from(run.len);
+                if e.br_startoff + e.br_blockcount == first {
+                    // The run continues the extent below it, in both spaces.
+                    e.br_blockcount += u64::from(len);
                 } else {
-                    // The run continues the extent above it.
-                    e.br_startoff = start;
-                    e.br_startblock = start;
-                    e.br_blockcount += u64::from(run.len);
+                    // The run continues the extent above it, so it now starts
+                    // earlier, at this run's place on the image.
+                    e.br_startoff = first;
+                    e.br_startblock = fsb;
+                    e.br_blockcount += u64::from(len);
                 }
             }
             _ => {
-                // The run bridges two extents, so they become one.
+                // The run bridges two extents that are adjacent to it in both
+                // spaces, so all three become one.
                 let low = touching[0];
                 let high = *touching.last().expect("at least one");
-                let low_start = extents[low].br_startblock;
-                let high_end = extents[high].br_startblock + extents[high].br_blockcount;
-                extents[low].br_startoff = low_start;
-                extents[low].br_startblock = low_start;
-                extents[low].br_blockcount = high_end - low_start;
+                let (low_off, low_fsb) = (extents[low].br_startoff, extents[low].br_startblock);
+                let high_end = extents[high].br_startoff + extents[high].br_blockcount;
+                extents[low].br_startoff = low_off;
+                extents[low].br_startblock = low_fsb;
+                extents[low].br_blockcount = high_end - low_off;
                 extents.drain(low + 1..=high);
             }
         }

@@ -296,9 +296,17 @@ in this code before it was finished.
 Three things about real trees came out of experiments on the test images, and
 all three are now written down in the code rather than in someone's head:
 
-* A leaf in a 512-byte block holds at most 62 records, and `xfs_repair` complains
-  of one holding 30, so the rule is half: below that a node wants merging with a
-  sibling, and one left with a single entry wants the root collapsed.
+* A leaf in a 512-byte block holds at most 62 records, and `xfs_repair` refuses
+  one holding fewer than 31: `bad btree nrecs (30, min=31, max=62) in btbno
+  block 1/4`.  The XFS B+tree documentation describes merging as what a tree
+  "should" do and derives `minrecs` as `maxrecs / 2`, which reads like a
+  management policy rather than a validity rule -- and the first version of this
+  work took that reading and dropped merging from the take path.  That reading
+  is wrong for our purposes, and the experiment that settled it is in the next
+  section: `xfs_repair` enforces the minimum, so an underfull leaf fails the
+  check that decides whether an image is acceptable, and merging is required
+  after all.  The documentation's "should" is about how XFS chooses to arrange
+  a tree; `xfs_repair` is about what it will accept.
 * A leaf holds records and *nothing else* -- 62 of them fill the region exactly
   -- so a tree's keys live only in its interior nodes.  The first version of the
   leaf writer kept a second array of keys there, on the assumption that a leaf
@@ -341,14 +349,504 @@ file whose data fork is a B+tree cannot be extended yet either, because that is
 the extent mutation of the next phase; such a file is refused with a message
 that says so rather than half-written.
 
-Merging a short leaf into a sibling is also still missing, and it is what stops
-a group looking fuller than it is: a leaf that has fallen below half full is
-passed over, and its space is not reclaimed until the merge that reclaims it.  That means descent, a parent's key and pointer changing when a child
-empties, merging a node that falls below half, and collapsing a root left with
-one child; then the group header's count and longest run, in the same
-transaction; then the allocator's own interface.  Freeing a block -- inserting a
-run and merging it with its neighbours -- is with them, and belongs with the
-operations that free blocks rather than being written before anything calls it.
+### The merge bug, and why merging is no longer on the critical path
+
+The allocator used to merge a short leaf into a sibling, and the merge was wrong
+in three separate ways, each of which had to be found on its own:
+
+* `remove_child` shifted the child's array the wrong way.  It wrote slot *i+1*
+  from slot *i+2*, which is the shift for removing index-1, so the child that was
+  supposed to be removed stayed in its slot and the *last* child was dropped
+  instead.  The tree still answered searches, with the leaf that should have
+  gone, which is why nothing about it looked like corruption.
+* The merge picked the wrong side.  A child merged into the sibling on its left
+  comes *after* that sibling's records, and a child with nothing to its left
+  comes *before* the one on its right.  Both were inverted, which leaves a tree
+  holding exactly the right records in the wrong order.
+* The merge then dropped the child's records on the floor.  It read the sibling,
+  wrote it back unchanged, and unlinked the child, so 384 blocks' worth of free
+  space simply stopped existing.  This is what the `xfs_repair` count mismatch
+  was reporting all along, and reading it as an occupancy rule sent the work
+  looking for a rule that was never there.
+
+With the third one fixed the loss is a conservation failure, and a conservation
+failure is what the model test is for: it compares what is left in the two trees
+after every single allocation, so a mutation that is right for one record and
+wrong for two hundred cannot pass.
+
+What replaced the merge, for the moment, is smaller: a child is dropped from its
+parent only when it has no records left at all, and an underfull child is joined to
+its neighbour instead.  Dropping a child closes the gap it leaves in its level's sibling chain,
+which is the part that has to be exactly right -- see below.
+
+That is enough to be correct about the *loss* and not yet enough to be correct
+about the *image*, and the difference is worth keeping straight.  Removing the
+merge branch made the conservation failure go away and made the model test pass,
+and it also made 13 of the 14 write integration tests pass through a real FUSE
+mount.  The fourteenth failed, and the reason is the rule above:
+
+```
+bad btree nrecs (30, min=31, max=62) in btbno block 1/4
+```
+
+Growing a file takes a run, the leaf it came from drops below half, and the leaf
+is left that way.  A pristine `resources/xfsv4.img` passes `xfs_repair -n`
+cleanly, so this is the mutation and not the image it started from.  Merging is
+therefore back on the list, and the two things the merge has to get right are now
+both known: the records have to end up in the right order relative to the
+sibling they join, and the parent's separator key has to be recomputed from the
+surviving child's actual first record -- whichever sibling that turns out to be.
+The sibling chain has to be closed on both sides, which is the part that is
+already written and tested.
+
+Freeing a block -- inserting a run and joining it to its neighbours -- is still
+missing, and belongs with the operations that free blocks rather than being
+written before anything calls it.  So do the group header's count and longest
+run in the same transaction, and the allocator's own interface.
+
+### Putting blocks back
+
+Freeing is the shape of allocating backwards, and it has the same three
+obligations: both trees record the run as free, the group's own two numbers
+follow, and the superblock's total follows too.  All of it goes into the
+caller's one transaction.  The group header also needed setters it did not have
+-- for the two btree roots and their heights -- because a tree that grows a
+level gets a new root block, and a header still naming the old one points at a
+node that is now an interior node in the middle of the tree.  The roots are
+read back off the blocks rather than assumed, so the header records what the
+tree is rather than what it was.
+
+Two runs that touch are one run, so freeing joins a run to the record that ends
+where it starts and to the record that begins where it ends, and when there are
+both those become one.  A joined record can be *longer* than the one it
+replaced, which moves it in the tree keyed by length, so it goes back in where
+that tree's order now puts it rather than where the record it replaced sat.
+Freeing a run that is already free is refused rather than adding a second copy,
+which would be a block handed out twice.
+
+**The joining is done within a leaf, and that is a limit rather than a
+oversight.**  The two trees are keyed differently, so the record a run touches
+in the tree keyed by start is in a different place from the record it touches in
+the tree keyed by length, and finding the latter needs a search this does not
+have.  The two available outcomes are two touching records or a record joined to
+the wrong neighbour, and the first is correct -- the group's free space is the
+same either way -- while the second is not.  So the first is what happens, and
+the cross-leaf search is the next thing to build.
+
+### Inserting, and the split that nearly lost a run
+
+Both directions share one rule, and it is the opposite of the obvious one: the
+run goes into the leaf's list *first*, and the overflow is what gets split.
+Splitting a full leaf and then inserting puts the new run nowhere -- the two
+halves describe what the leaf held before, so it belongs to neither, and the
+tree loses a run while still looking like a tree.  That is why the sorted list
+is a separate step from writing it, so a caller that has to split can split a
+list that already contains the new record.
+
+Three more things about a split, all found by the tests that check a split
+leaves the tree able to answer a search:
+
+* An interior node has **one more key than children**; the last key is the upper
+  bound of the last child's keyspace.  A split gives the separator to *both*
+  halves -- the left as its upper bound, the right as the first child's lower
+  bound -- and a node can only hold as many children as it has room for keys
+  *and* that one extra.
+* The two halves start out carrying the links the whole node had, which is wrong
+  three ways at once, so the new half has to be put into the chain: the old
+  block's right neighbour moves along, and whatever was on the right has to be
+  told that its left neighbour is no longer the block it was.
+* A tree that grows a level builds its new root out of the *old* root's bytes.
+  A node's checksum is taken over its own bytes, including the file system's
+  identifier and the group's number, and a block that has never held a node has
+  neither, so borrowing the old root's is both correct and the only way to get a
+  checksum that verifies.
+
+### Checking freeing against the file system, not against ourselves
+
+Every test of the free path until now compared a hand-built image with this
+code's own idea of what a consistent tree looks like, which is no evidence at
+all.  Two tests now take a copy of a real image, move blocks through the real
+transaction, and ask `xfs_repair -n`.  Both found things.
+
+**Freeing blocks that are already free** left the tree holding them twice, and
+repair said so plainly:
+
+```
+out-of-order bno btree record 2 (571 2) block 0/4
+block (0,571-572) multiply claimed by bno space tree
+```
+
+A run that lands *inside* a record the tree already has is not a run to add
+beside it: that record has to be cut in two around the part being freed.  Adding
+a second copy is how a tree ends up handing the same block out twice, which is
+what "multiply claimed" means.  This is what happens when a block is freed
+twice, so the case is worth handling for its own sake.
+
+**And then the superblock was told the wrong thing.**  The group's count was
+right -- it is recomputed from the trees -- but the superblock's total was moved
+by however many blocks were *asked* to be freed rather than by however many the
+group's free space actually grew by.  For blocks that were genuinely new those
+are the same, which is why the first test passed and this one did not.  Cutting
+a record in two around blocks that were already free adds nothing at all, and
+the superblock said `sb_fdblocks 90626, counted 90624`.  The count now follows
+the difference the trees actually show, which is the thing repair compares and
+also the thing that is true.
+
+The round trip these two tests sit on -- take two blocks from a real image, hand
+exactly those blocks back -- passes repair with nothing to say.
+
+### A field that has to follow a sum, not a count
+
+Growing a file at its end left the inode's own block count stale, and
+`xfs_repair` said so:
+
+```
+bad nblocks 128 for inode 37, would reset to 152
+```
+
+The guard that was supposed to prevent it was checking the *number* of extents
+rather than the sum of their lengths, which is what the field means.  A file
+grown at its end lands beside its own last block, so the new blocks are *joined*
+to an extent that was already there: the extent count does not move, twenty-four
+more blocks are covered, and the count is silently wrong.  That is the ordinary
+case for growing a file, and the guard was exactly inverted for it -- it fired
+when an extent was added alongside, and stayed quiet when an existing one grew.
+
+It went unnoticed because every other image in the suite has the file being
+grown sitting inside a preallocated extent, so the growth wrote into blocks that
+were already counted.  The freshly made image is the only one where growing a
+file has to *allocate*, which is what happens on a real file system.  So the
+class of defect is: an inode field derived from a sum, guarded by a test on a
+count.
+
+### What mixing taking and giving back found
+
+The model test that caught the free path losing records a run at a time was
+applied to both directions -- take blocks and give them back, in a fixed
+sequence, checking after *every* operation that both trees agree with a model of
+which blocks are free.  Comparing needs the two sides canonicalised, because a
+tree is allowed to hold two records that touch, and the only thing two answers
+can be compared on is which blocks are free.
+
+It found a real defect:
+
+```text
+round 2: allocated (1615, 5)   -- out of the record (1615, 6), leaving (1620, 1)
+round 5: freed (1615, 5)
+later:   allocate(1): no free run in this node starts at block 1620
+```
+
+Chasing it turned up two more, both now fixed:
+
+* **A parent could be left with a separator naming a record that is no longer
+  there.**  The take path had a fast path that skipped refreshing a parent's key
+  when a child merely *lost* a record, and a child that loses its **first**
+  record is the ordinary case -- taking the head of a run.  This does not look
+  like damage: the tree still answers, and answers wrongly.
+* **The descent in `take_in_tree` was written in terms of a start block**, which
+  is enough for the tree keyed by start and not enough for the tree keyed by
+  length.  There, `child_for` *searches* for any run long enough, so it could
+  arrive at a different leaf from the one holding the run the caller had already
+  chosen; the take then reported nothing found where something was.  The
+  descent now looks for the leaf that holds the run.
+
+With both fixed a different failure took its place: at round 60 the tree keyed by
+start held `(1615, 5)` and `(1621, 5)` where the tree keyed by length held only
+`(1615, 5)`.  Five blocks free in one tree and allocated in the other -- `multiply
+claimed`.  And the cause was the one the images had already answered: coalescing
+within a leaf is not enough.
+
+### Keeping the free list stocked: tried, and the accounting confirmed
+
+The refill cannot work by reaching into the trees, because mid-operation the
+group header still names the roots the trees had *before*.  The way out is the
+one the documentation describes: keep the list stocked, so a split never has to
+reach at all.  That was implemented -- free into the trees, then move some of it
+onto the list -- and it works as far as the split itself, with the accounting
+coming out exactly as `agf_freeblks` is documented:
+
+```text
+group 0: freeblks 30144 -> 30144 (freed 80)
+```
+
+Eighty blocks freed, eighty moved onto the list, and the count of free extents in
+the trees unchanged -- which is the whole claim that the list is neither a free
+extent nor a live node.
+
+It was then reverted, for two reasons worth keeping.  It broke three existing
+free tests, which is a regression against a working baseline and not something to
+leave half-done.  And `xfs_repair` rejected the list it produced:
+
+```text
+bad agbno 4294967295 in agfl, agno 0     (once per slot)
+```
+
+`4294967295` is the null block, so the window named entries that were all null.
+A list block that has never been written has *no* live entries whatever the
+header's window says -- the header names a window over a block full of nothing --
+and taking that window at its word is exactly this.  So the window handling for a
+first-written list is the bug, and it is in `Agfl::window` and `give_back` rather
+than in the stocking that calls them.
+
+### Deciding a free once and obeying it twice
+
+Freeing now works like this.  The tree keyed by start **decides** what the free
+means: it finds the records the run touches -- the one that ends where it starts
+and the one that begins where it ends -- and it can look in the leaves *beside*
+it, because there the leaves are in the same order as the blocks they hold, so a
+run's neighbours along the group's blocks are its neighbours in the tree.  It
+reports what it joined.
+
+The tree keyed by length is then **brought to that answer**: the records the first
+tree joined stop being records there, and the run that is left goes in.  It never
+forms an opinion of its own, because it cannot -- its neighbours along the
+blocks are nowhere near its neighbours in its own order.
+
+Letting each decide for itself is what produced the divergence, and the difference
+is invisible unless you look for it: a model that joins touching runs before
+comparing cannot see grouping differences at all, which is why this took so long
+to believe.  Real images are what settled it -- identical record sets in every
+group of `resources/xfsv4.img`, including one of nearly eight thousand records.
+
+Three things came out of writing it:
+
+* **The upward walk was in four places.**  Every path that changes a leaf has to
+  do the same things afterwards -- drop a child that emptied and close the gap in
+  the sibling chain, join a child that fell below half, read every parent's
+  separators back off its children -- and having four copies is how they come to
+  differ.  It is one function now.
+* **Sharing records out belongs there too.**  Two full leaves cannot be merged,
+  and that is the ordinary case rather than the corner one, so the shared walk
+  moves records across the boundary when the sibling cannot absorb them.
+* **A record that is *named* has to be found by name.**  `remove_run_in_tree`
+  locates it and rebuilds the path by pointer, because descending by order answers
+  "which leaf should hold this run" -- the right question for a take, and the
+  wrong one for a removal.
+
+The model test now passes, so the trees agree on the records and not merely on
+the blocks.
+
+A third fix was written for the first failure and taken back, because it was the
+wrong shape: it made `take_from_run` find the record that *covers* the block
+rather than the one starting at it, and that breaks a test which is asserting
+intent -- **a take is from the head of a run**, since taking out of the middle
+leaves a fragment nobody asked for.
+
+From that it was tempting to conclude that the two trees are *meant* to group
+free space differently, and that the second therefore needs a remove-this-range
+operation rather than a take.  **That is wrong, and the images say so.**  In every
+group of `resources/xfsv4.img` the two trees hold *identical record sets*:
+
+```text
+ag0  bno 19     cnt 19       identical
+ag1  bno 1713   cnt 1713     identical
+ag2  bno 9      cnt 9        identical
+ag3  bno 7947   cnt 7947     identical
+```
+
+Not merely the same free blocks -- the same runs, grouped the same way, in a group
+of nearly eight thousand records.  A filesystem that let the trees group free
+space differently would be free to show it there, and one with that many records
+almost certainly has runs freed next to each other.  The question was settled by
+reading the images, not the documentation, and it had been sitting there
+unexamined.
+
+So coalescing is not tidying, and coalescing within a leaf only is the defect.
+Freeing has to join a run to its neighbour **across the leaf boundary** so that
+both trees arrive at the same records.  That is the next piece of work.
+
+**This is why the cross-leaf search is the next thing to build and not a polish
+item.**  The test is kept and ignored rather than deleted, with the operations
+that reproduce it, because it reproduces exactly.
+
+The same test also found a bug in its own model, which is worth recording: the
+helper that put a freed run into the model dropped the records *touching* it as
+though they were being replaced, losing exactly the blocks the join was supposed
+to recover.  The tree was right and the model was wrong.  A false alarm is the
+cheapest kind of model-test failure, because it is found by reading the
+difference.
+
+### Where a split's new block comes from
+
+A node that fills up has to become two, and the second needs a block nothing else
+is using.  The block comes from the **group's free list**, and the question of
+where to ask for it is asked of the same thing that hands out the tree's blocks
+rather than being passed in separately: the group holds the answer.  So
+`GroupBlocks` grew a third method, `take_btree_block`, and the `N` generic and
+the closure the tree functions used to take are gone.
+
+Taking a block moves the free list's window **in the group header, in the same
+transaction**, because a list that has lost a block while its header still offers
+it hands the same block out a second time.  Both the list and the header move
+together or neither does.
+
+**Two claims here were wrong, one of them mine correcting itself.**  First: the
+images do *not* show a replenished list.  Second, correcting that: **no image in
+the repository has a written free list at all.**  None of the hand-built image,
+the freshly made one or the version 5 one contains the list's magic anywhere.
+Their group headers name a window -- four entries in most groups, six in group 1
+of `xfsv4.img`, eight in group 3 -- over a block that was never written, which is
+what a filesystem looks like before it has ever grown a btree node.
+
+So an earlier reading of `flcount = 4`, "the initial four reserved blocks", was
+wrong twice over: the window is named but the list behind it was never written,
+and the larger counts are not evidence of replenishment.  A list that is created
+lazily, on the first split that needs one, is a perfectly ordinary design.
+
+What *is* measurable, and it constrains the design, is this: **`agf_freeblks`
+equals the sum of the bno tree's runs exactly** -- difference zero in every group
+of both a hand-built and a freshly made image, eight groups measured.  There is no
+separate term for the free list in the group's count.  So either a block on the
+list is also free in the trees, or it is not counted at all; and if reserving one
+removed it from the trees, the two would stop agreeing, which nothing here does.
+
+What is not here is the other half.  The free list is documented as reserved
+space for growing the free-space btrees, with more blocks reserved from the group
+as it is consumed, so **an empty list is not intrinsically ENOSPC**: the allocator
+refills it.  Those blocks are reserved and may not be handed out for ordinary file
+data, so metadata-block allocation is a distinct thing from ordinary allocation
+rather than a variant of it.
+
+The refill is not written, and the reason is worth recording rather than leaving
+as a bare "not done".  Taking a block from the group's free space means mutating
+the very trees that are mid-mutation when a split asks for the block.  Taking
+only shrinks a record, so it cannot split a leaf and cannot ask for another block
+-- but it can merge or share records out, which *writes* parent blocks, and a
+parent the outer operation is holding in memory would be written twice.  So the
+refill wants its block obtained before the tree work starts, which means knowing
+in advance how many a free might need.  That is a design decision rather than a
+patch, and it deserves its own look.
+
+Until then a depleted group reports that it has nothing to offer rather than
+handing out a block that is in use, which is the right way round: the first is
+recoverable and the second corrupts the tree somewhere much later.  A test pins
+that.
+
+The AGFL half is tested against a fixture with a real initialised free list,
+because that is the only way to reach it here: it checks that the blocks taken
+are the ones the list held and in order, that the header's window followed them,
+and that the list no longer offers what was taken.
+
+### Two things that are allocator policy, not format rules
+
+**A take does not have to come from the head of a run.**  The format describes
+free space as extents and does not say which part of one an allocation may take;
+taking a contiguous subextent and leaving the rest described exactly is equally
+valid.  xfuse does take from the head, because that leaves no fragment nobody
+asked for, but that is a *policy* and the test pinning it says so.
+
+The structural assertion is separate, and it is what survives any policy: after a
+take, the blocks the trees call free are exactly the blocks that were free and
+were not taken, and the leaf is still in order.  `a_take_leaves_the_rest_described`
+checks that through `remove_range` rather than through the policy-restricted call,
+so the check would still hold if the allocator stopped taking from the head -- and
+`remove_range` is also the primitive a policy-free take would need.
+
+**Freeing blocks that are already free changes nothing.**  An earlier version cut
+the existing record in two around them and added a record of its own, which made
+the same blocks free twice: `multiply claimed`.  Cutting is not the answer either,
+because it describes the same free space in more records than it needs to -- which
+is the two trees disagreeing.  A record that already covers the range says so, so
+the range is left alone.
+
+### Sibling links are structure, not navigation
+
+A B+tree block names the block on its left and the block on its right, and those
+two names are live structural metadata rather than a hint for getting around
+faster.  XFS's consistency checks want sibling pointers to name valid blocks at
+the same level, and describe cross-linked sibling lists and loops as a form of
+metadata corruption in their own right, checked separately from the parent and
+child pointers.  So when a child leaves the tree in the middle of a level, the
+chain has to be closed around the gap: if the level is `L <-> N <-> R` and `N`
+goes, the live level is `L <-> R`, which means both `L.rightsib = R` and
+`R.leftsib = L`.  A root has no siblings of its own.
+
+Three things about that are worth being precise about, because each was a way of
+getting it wrong first:
+
+* The chain is doubly linked, so a merge or a drop can touch *three* blocks: the
+  surviving one, the far neighbour, and the parent if its key or pointer array
+  changes.  Fixing only the neighbour you happen to be holding is the obvious
+  mistake.
+* Only the *live* blocks are relinked.  The block being dropped is left as it
+  is: once it is no longer a member of the tree its contents are no longer part
+  of the tree's graph, and whatever writes those bytes next fills them in.  An
+  invariant over every block that ever held tree data would fail on XFS's own
+  images, and a block that has been freed and reused is not evidence of anything.
+* The one that is still an open question, and is recorded rather than guessed:
+  which sibling survives a merge.  The implementation must not assume the left
+  one does, because if the right-hand block absorbs its left neighbour then the
+  survivor's first record changes and the parent's separator key has to change
+  with it, even though the pointer stays the same.
+
+A merge also has to cope with the case that turns out to be the ordinary one: the
+leaf that has just given up a record sits next to a *full* leaf, and two full
+leaves do not fit in one node.  Merging alone turned every such allocation into
+`ENOSPC`, because the absorb ran out of room.  So when the two sets of records
+will not fit together they are shared across the boundary instead, until the
+short node is no longer short, and both nodes stay in the tree -- which also
+means no sibling has to be relinked.  Moving the boundary left moves the
+*sibling's* first record too, so this is the case where a parent's separator
+changes even though no pointer did, and it is why the parent is rebuilt from the
+children it actually has.
+
+### The superblock keeps its own count of what is free
+
+The last thing standing between a grown file and an image `xfs_repair` accepts
+is one line of repair output:
+
+```
+sb_fdblocks 90624, counted 90600
+```
+
+The 24 is exactly the number of blocks the test wrote, and the numbers were
+traced rather than guessed.  The group's header was updated correctly (its
+`freeblks` went 10729 to 10705, and the two trees lost the same 24 blocks), and
+`xfs_db` reads the trees back with the same total.  So the trees and the header
+agree, and what disagrees is the *superblock's* own count of the free blocks on
+the data device, which nothing here was updating.
+
+That was confirmed rather than inferred.  The image is a version 4 file system
+with no checksums, so its superblock can be edited: taking `sb_fdblocks` at
+offset 144 from 90624 down to 90600 makes `xfs_repair -n` exit clean, with
+nothing else changed.  The requirement is therefore that the count moves with
+every allocation, and will have to move back the other way when blocks are
+freed.
+
+Fixing it did mean writing the superblock, but not by building one.  The count
+is *patched* into the first sector's bytes: the bytes are read out of the
+transaction, one field is changed in them, and those bytes go back.  Nothing is
+rebuilt from the parsed struct, so the parts of the superblock the parser
+deliberately threw away cannot be lost on the way out -- and a write of one
+sector into a block the first group's headers share cannot take them with it,
+because a write that is not block aligned is a read-modify-write.
+
+Two things about that were not obvious and are now pinned by a test rather than
+by a comment:
+
+* The count sits at offset 144, which is what the field-by-field parse adds up
+  to, and the test checks the constant against the parsed field rather than
+  against this file -- so a field moving in the struct cannot quietly leave the
+  offset behind.
+* A version 5 file system's checksum lives in the second feature word at offset
+  200, *not* in the version number, and the checksum itself is at offset 224,
+  stored little-endian, covering the bytes before it, then those four bytes
+  read as zeroes, then the rest of the sector.  The image the write tests use
+  has checksums switched off, so without a test of its own the whole checksum
+  branch would be dead code on the path that actually runs.
+
+That test also checks that patching the count changes *nothing else*: the
+superblock shares its block with the first group's headers, so a patch that
+moved any other byte would be a patch that could take them with it.
+
+`sibling_chains_stay_well_formed` and `closing_a_gap_needs_both_sides` check all
+of this over a tree after *every* allocation rather than once at the end, and
+the second test exists because of a gap the first one had: draining a group in
+block order only ever empties the *first* child, so a check written that way
+never sees a child with live children on both sides, and passes just as happily
+with that child's right-hand link left dangling.  Both tests were confirmed to
+fail when each of the three cases is broken on purpose, which is the only way to
+know a check of this kind is doing anything.
 
 One thing worth recording about the free lists: in the v4 test image none of the
 four groups has an initialised free list at all, while every group header still

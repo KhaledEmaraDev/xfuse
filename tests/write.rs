@@ -49,7 +49,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use util::{writable_copy, GOLDEN4KN, GOLDENV4};
+use util::{writable_copy, GOLDEN4KN, GOLDENV4, GOLDENWRITABLE};
 
 /// Copy a golden image, mount it read-write, hand the mountpoint to `body`, and
 /// put everything back.
@@ -452,65 +452,6 @@ fn whole_block_and_unaligned_writes() {
     }
 }
 
-/// A write that would run past the end of the file must be refused, and must
-/// leave the file untouched.
-#[test]
-fn write_past_eof_is_refused() {
-    require_fusefs!();
-    let image = writable_copy(&GOLDENV4, "past-eof");
-    let (size, before) = with_rw_mount_at(&image, "past-eof", |mnt| {
-        let file = mnt.join("files/hello.txt");
-        let before = read_file(&file);
-        let size = before.len();
-        let mut f = open_rw(&file);
-        f.seek(SeekFrom::End(0)).unwrap();
-        let result = f.write_all(b"more data than fits");
-        drop(f);
-
-        // How the refusal arrives is the kernel's business as much as ours: a
-        // kernel that finds the write unacceptable before it reaches the file
-        // system reports a short write rather than the file system's EFBIG, and
-        // both are a refusal.  A write reported as a success is not.
-        match result {
-            Ok(()) => panic!(
-                "a write of 21 bytes past the end of a {size} byte file was reported as succeeding"
-            ),
-            Err(e) => {
-                let acceptable =
-                    e.raw_os_error() == Some(libc::EFBIG) || e.raw_os_error().is_none();
-                assert!(
-                    acceptable,
-                    "writing past the end of the file failed with an error that is not a refusal: \
-                     {e:?}"
-                );
-            }
-        }
-        (size, before)
-    });
-
-    // What the file looks like *through the mount that tried the write* is not
-    // the question.  A kernel may extend its own idea of the file's size on its
-    // way to the write -- it has to, to turn a write past the end into a write
-    // at the end -- and then hand us a request we refuse, leaving the kernel
-    // with a larger size than the file system has and padding reads to match.
-    // That disagreement is the kernel's, and it lasts only as long as the mount.
-    //
-    // The question is whether anything was written, and that is what a second,
-    // read-only mount with no cached size of its own can answer.
-    with_ro_mount(&image, "past-eof-ro", |mnt| {
-        let after = read_file(&mnt.join("files/hello.txt"));
-        assert_eq!(
-            after.len(),
-            size,
-            "a refused write changed the file on the image"
-        );
-        assert_eq!(
-            after, before,
-            "a refused write changed the file on the image"
-        );
-    });
-}
-
 /// The last byte of a file is as writable as any other, and the byte after it
 /// is not.
 #[test]
@@ -532,6 +473,124 @@ fn write_the_last_byte() {
     assert_eq!(content.len(), 14, "writing the last byte changed the size");
     assert_eq!(&content[..13], b"Hello, World!");
     assert_eq!(content[13], b'!', "the last byte did not change");
+}
+
+/// A write past the end of a file makes the file bigger: new blocks allocated,
+/// an extent recorded, and the size changed, all of it visible on the image and
+/// not only through the mount that wrote it.
+#[test]
+fn a_write_past_the_end_grows_the_file() {
+    require_fusefs!();
+    let image = writable_copy(&GOLDENV4, "extend");
+    let size_before = with_rw_mount_at(&image, "extend", |mnt| {
+        let file = mnt.join("files/hello.txt");
+        let before = std::fs::metadata(&file).unwrap().len() as usize;
+        // Append four blocks' worth, which is past the end.
+        let mut f = open_rw(&file);
+        f.seek(SeekFrom::End(0)).unwrap();
+        f.write_all(&[b'A'; 4096 * 4]).unwrap();
+        drop(f);
+        let after = std::fs::metadata(&file).unwrap().len() as usize;
+        assert_eq!(after, before + 4096 * 4, "the file did not grow");
+        before
+    });
+
+    // And it grew on the image, not just in the kernel's idea of it.
+    with_ro_mount(&image, "extend-ro", |mnt| {
+        let file = mnt.join("files/hello.txt");
+        let content = read_file(&file);
+        assert_eq!(content.len(), size_before + 4096 * 4);
+        assert!(
+            content[size_before..].iter().all(|b| *b == b'A'),
+            "the new bytes"
+        );
+        assert_eq!(&content[..size_before], b"Hello, World!\n", "the old bytes");
+    });
+}
+
+/// A write that leaves a gap reads as zeroes, because the blocks in the gap are
+/// not the file's and must not hold what they held before.
+#[test]
+fn a_write_past_the_end_can_leave_a_gap() {
+    require_fusefs!();
+    let image = writable_copy(&GOLDENV4, "extend-gap");
+    let size_before = with_rw_mount_at(&image, "extend-gap", |mnt| {
+        let file = mnt.join("files/hello.txt");
+        let before = std::fs::metadata(&file).unwrap().len() as usize;
+        let mut f = open_rw(&file);
+        f.seek(SeekFrom::End(0)).unwrap();
+        // A kilobyte of data, then a kilobyte of nothing, then a kilobyte of data.
+        f.write_all(&[b'B'; 1024]).unwrap();
+        f.seek(SeekFrom::Current(1024)).unwrap();
+        f.write_all(&[b'C'; 1024]).unwrap();
+        drop(f);
+        before
+    });
+    with_ro_mount(&image, "extend-gap-ro", |mnt| {
+        let content = read_file(&mnt.join("files/hello.txt"));
+        assert_eq!(content.len(), size_before + 3072);
+        assert!(content[size_before..size_before + 1024]
+            .iter()
+            .all(|b| *b == b'B'));
+        assert!(
+            content[size_before + 1024..size_before + 2048]
+                .iter()
+                .all(|b| *b == 0),
+            "the gap must read as zeroes, not as whatever those blocks held"
+        );
+        assert!(content[size_before + 2048..].iter().all(|b| *b == b'C'));
+    });
+}
+
+/// The file system has to agree that the image is still a file system.
+#[test]
+fn a_grown_file_leaves_the_image_consistent() {
+    require_fusefs!();
+    let image = writable_copy(&GOLDENV4, "extend-repair");
+    with_rw_mount_at(&image, "extend-repair", |mnt| {
+        let mut f = open_rw(&mnt.join("files/hello.txt"));
+        f.seek(SeekFrom::End(0)).unwrap();
+        f.write_all(&[b'Z'; 4096 * 3]).unwrap();
+    });
+    if let Err(e) = xfs_repair_check(&image) {
+        panic!("{e}");
+    }
+}
+
+/// A file system nobody has written to yet is the other end of the allocator's
+/// range, and every image the other tests use was built to be awkward.
+///
+/// A group in a freshly made file system holds its free space in one leaf and is
+/// not fragmented at all, which is a shape the hand-built images never have.  So
+/// this writes a file that did not exist, grows it past its end, and asks the
+/// file system's own repair whether the image is still one.
+#[test]
+fn a_freshly_made_image_takes_writes_and_stays_a_file_system() {
+    require_fusefs!();
+    let image = writable_copy(&GOLDENWRITABLE, "fresh");
+    with_rw_mount_at(&image, "fresh", |mnt| {
+        // Making a file is not something a read-write mount can do yet -- it
+        // needs a block map that can be written, which is later work -- so this
+        // grows a file the image already has instead.
+        let path = mnt.join("dir/big.bin");
+        let before = std::fs::metadata(&path).unwrap().len();
+        let mut f = open_rw(&path);
+        f.seek(SeekFrom::End(0)).unwrap();
+        f.write_all(&[b'E'; 4096 * 3]).expect("growing a file");
+        drop(f);
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().len(),
+            before + 4096 * 3,
+            "the file did not grow"
+        );
+        // And the bytes are there to read back, which is the other half of a
+        // write being real.
+        let got = std::fs::read(&path).unwrap();
+        assert!(got[before as usize..].iter().all(|b| *b == b'E'));
+    });
+    if let Err(e) = xfs_repair_check(&image) {
+        panic!("{e}");
+    }
 }
 
 // Writing into a hole, or into preallocated-but-unwritten space, needs an

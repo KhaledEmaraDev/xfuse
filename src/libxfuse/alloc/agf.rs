@@ -363,6 +363,25 @@ impl Agf {
     /// fact: the trees are, and this is a copy that can disagree if the trees
     /// are changed without it.  That is why every change to the trees changes
     /// this in the same transaction.
+    /// Record the block now holding the root of the tree of free blocks, and
+    /// how deep it is.
+    ///
+    /// A tree that grows a level gets a new root block, so a group that has
+    /// been freed into heavily has a different root than it did before.  A
+    /// header that still names the old one points at a node that is now an
+    /// interior node in the middle of the tree, which is a tree the reader
+    /// cannot make sense of.
+    pub fn set_block_btree(&mut self, root: XfsAgblock, level: u32) {
+        self.set_u32_at(offset::BNOROOT, root);
+        self.set_u32_at(offset::BNORELEVEL, level);
+    }
+
+    /// The same, for the tree keyed by how long each free run is.
+    pub fn set_extent_btree(&mut self, root: XfsAgblock, level: u32) {
+        self.set_u32_at(offset::CNTROOT, root);
+        self.set_u32_at(offset::CNTRELEVEL, level);
+    }
+
     pub fn set_free_blocks(&mut self, free: u32) {
         self.set_u32_at(offset::FREEBLKS, free);
     }

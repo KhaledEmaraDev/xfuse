@@ -549,6 +549,40 @@ mkfs_xattr_v1() {
 	zstd -f resources/xfs_xattr_v1.img
 }
 
+mkfs_writable() {
+	# Create an image a read-write mount can be used on.
+	#
+	# This one is generated rather than hand-built, because it is the shape that
+	# matters for the write path and nothing else has that shape: a freshly
+	# formatted group keeps all of its free space in a handful of records, one
+	# leaf, no fragmentation.  The hand-built images have full leaves and lots
+	# of small runs, which is the other end of the range, and an allocator that
+	# only works there is not much of an allocator.
+	#
+	# The features are the ones the write path can maintain: no reflink, no
+	# reverse mapping tree, no sparse inodes, no big timestamps, no checksums.
+	# Any of those and a read-write mount is refused, by design.
+	#
+	# mkfs.xfs wants at least 300 MB, so this is as small as an XFS file system
+	# can be.  It is populated with -p rather than by mounting, so that
+	# generating it needs neither root nor a loop device.
+	#
+	# The files are small on purpose: a file whose extents are held in the inode
+	# is what the write path can grow, and that is a file of a few blocks.
+	mkdir -p /tmp/xfuse-writable-populate/dir
+	printf 'hello\n' > /tmp/xfuse-writable-populate/a.txt
+	printf 'x' > /tmp/xfuse-writable-populate/dir/small.txt
+	dd if=/dev/urandom of=/tmp/xfuse-writable-populate/dir/big.bin bs=1024 count=64 2>/dev/null
+
+	rm -f resources/xfs_writable.img
+	mkfs.xfs --unsupported -f -b size=512 -i size=256,sparse=0 \
+		-m crc=0,finobt=0,reflink=0,rmapbt=0,bigtime=0 \
+		-d agcount=4,file=1,size=300m \
+		-p /tmp/xfuse-writable-populate resources/xfs_writable.img
+	rm -rf /tmp/xfuse-writable-populate
+	zstd -f resources/xfs_writable.img
+}
+
 mkfs_4096
 mkfs_512
 mkfs_v4
@@ -558,3 +592,4 @@ mkfs_4kn
 mkfs_nrext64
 mkfs_realtime
 mkfs_xattr_v1
+mkfs_writable

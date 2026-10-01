@@ -185,6 +185,15 @@ pub static GOLDENPREALLOCATED: LazyLock<PathBuf> =
     LazyLock::new(|| prepare_image("xfs_preallocated.img"));
 #[allow(unused)] // Not used by benches
 pub static GOLDENV4: LazyLock<PathBuf> = LazyLock::new(|| prepare_image("xfsv4.img"));
+/// An image made by `scripts/mkimg.sh`'s `mkfs_writable`: a freshly formatted
+/// file system that no test has been run against yet.
+///
+/// Every other image here was built to be awkward -- fragmented, preallocated,
+/// with features switched off one at a time -- so the easy end of the
+/// allocator's range, a file system whose groups hold their free space in a
+/// single leaf, is the case that nothing else covers.
+#[allow(unused)] // Not used by the read or bench targets
+pub static GOLDENWRITABLE: LazyLock<PathBuf> = LazyLock::new(|| prepare_image("xfs_writable.img"));
 #[allow(unused)] // Not used by benches
 pub static GOLDEN_NOFTYPE: LazyLock<PathBuf> = LazyLock::new(|| prepare_image("xfs_noftype.img"));
 #[allow(unused)] // Not used by benches

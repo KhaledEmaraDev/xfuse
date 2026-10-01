@@ -284,6 +284,220 @@ impl Volume {
     ///
     /// The whole range is checked before any of it is written, so a write that
     /// is refused leaves the file exactly as it was.
+    /// Write past the end of a file, making the file big enough to hold it.
+    ///
+    /// Four things have to happen, and they all have to happen in one
+    /// transaction, because a file whose size says it has blocks its extents do
+    /// not list is a file that will hand the same block out twice:
+    ///
+    /// 1. Blocks are allocated.  Only the ones the write needs: the file's
+    ///    existing blocks, and any hole between the old end and the write, stay
+    ///    unallocated, which is what makes the gap read as zeroes rather than
+    ///    as whatever those blocks used to hold.
+    /// 2. The new blocks are recorded as an extent.  The allocation starts at
+    ///    the first block *after* the old end when the write is contiguous with
+    ///    it, so the extent joins the last one the file already has rather
+    ///    than overlapping it.
+    /// 3. The part of the first new block that is between the old end and the
+    ///    write is zeroed, which only matters when there is a gap.
+    /// 4. The size becomes the end of the write, and the times move.
+    ///
+    /// The allocation is lined up on a file system block: a write that starts
+    /// part way into a block still has to leave the rest of that block alone,
+    /// and the transaction's writes are read-modify-write, so it does.
+    fn write_extending(&mut self, ino: u64, offset: u64, end: u64, data: &[u8]) -> FsResult<u32> {
+        use crate::libxfuse::alloc::allocator::allocate;
+
+        // Everything needed from the superblock is taken before the
+        // transaction starts, which borrows the volume.
+        let sb = self.sb;
+        let blocksize = u64::from(sb.sb_blocksize);
+        let size = {
+            let oi = self
+                .open_files
+                .get_mut(&ino)
+                .ok_or_else(|| no_entry(b"an inode the kernel has not looked up"))?;
+            let size = u64::try_from(oi.dinode.fsize()).map_err(FsError::from)?;
+            if !matches!(oi.dinode.di_core.di_format, XfsDinodeFmt::Extents) {
+                return Err(FsError::unsupported(format!(
+                    "growing a file whose extents are in a B+tree (data fork format {:?})",
+                    oi.dinode.di_core.di_format
+                )));
+            }
+            size
+        };
+
+        // The blocks the write needs.  The file already owns the blocks below
+        // its end, and a gap above it stays unallocated, which is what makes the
+        // gap read as zeroes rather than as whatever those blocks used to hold.
+        let old_last = size.div_ceil(blocksize);
+        let write_first = offset / blocksize;
+        let last_needed = end.div_ceil(blocksize);
+        let first_new = write_first.max(old_last);
+        let needed = last_needed - first_new;
+
+        // The block the write starts in, which the file already has when the
+        // write is appended to or overwrites its tail.  The part of the write
+        // that falls in it goes to the block the file's extents point at, and
+        // the rest goes to what is allocated below.
+        let first_fsb = if write_first < old_last {
+            let file = self
+                .open_files
+                .get_mut(&ino)
+                .ok_or_else(|| no_entry(b"an inode"))?
+                .dinode
+                .get_file()
+                .map_err(FsError::from)?;
+            let (Some(fsb), _) = file
+                .lookup(self.device.by_ref(), &sb, write_first)
+                .map_err(FsError::from)?
+            else {
+                return Err(FsError::Corrupt {
+                    what: format!("a block inside the file at {write_first} has no extent"),
+                });
+            };
+            Some(fsb)
+        } else {
+            None
+        };
+
+        let xfs_ino = self.xfs_ino(ino);
+        let inode_offset = sb.inode_offset(xfs_ino);
+        let inode_size = sb.inode_size();
+        let now = SystemTime::now();
+
+        // A file grows where it is, so the groups are tried from the one its
+        // last block is in, and then round upwards.
+        let mut agno = 0;
+        if let Some(fsb) = first_fsb {
+            agno = (fsb / u64::from(sb.sb_agblocks)) as u32;
+        } else if size > 0 {
+            let file = self
+                .open_files
+                .get_mut(&ino)
+                .ok_or_else(|| no_entry(b"an inode"))?
+                .dinode
+                .get_file()
+                .map_err(FsError::from)?;
+            let (Some(fsb), _) = file
+                .lookup(self.device.by_ref(), &sb, (size - 1) / blocksize)
+                .map_err(FsError::from)?
+            else {
+                return Err(FsError::Corrupt {
+                    what: "the block at the end of a file has no extent".into(),
+                });
+            };
+            agno = (fsb / u64::from(sb.sb_agblocks)) as u32;
+        }
+        agno = agno.min(sb.agcount().saturating_sub(1));
+
+        debug!(
+            "extending ino {ino}: size {size} offset {offset} end {end} blocksize {blocksize} \
+             first_new {first_new} needed {needed} into_old {}",
+            first_fsb
+                .map(|_| (first_new * blocksize - offset) as usize)
+                .unwrap_or(0)
+        );
+        let mut tx = self.begin();
+        let mut run = None;
+        let mut image_offset = None;
+        if needed > 0 {
+            run = Some(allocate(&mut tx, &sb, agno, needed as u32)?);
+            // The gap between the old end and the write, inside the first new
+            // block, is not part of the file and has to read as zeroes.  A block
+            // that has just been allocated holds whatever it held before.
+            let block_start = first_new * blocksize;
+            let gap_from = size.max(block_start);
+            if gap_from < offset {
+                let at = sb.fsb_to_offset(u64::from(run.expect("just allocated").start))
+                    + (gap_from - block_start);
+                tx.write_bytes(at, &vec![0u8; (offset - gap_from) as usize])?;
+            }
+            let run = run.expect("just allocated");
+            // The allocator's blocks are numbered within the group it was asked
+            // about, while a file's extents name blocks in the whole image.  A
+            // group-relative number used as an absolute one points at the right
+            // block in the *wrong group*, and the file then reads back what that
+            // group had there.
+            let fsb = sb.ag_block_to_fsb(agno, run.start);
+            let base = sb.fsb_to_offset(fsb);
+            image_offset = Some(base);
+            // A block that has just been given to a file holds whatever it
+            // held before -- here, part of a superblock -- and a file must never
+            // read back a former directory's contents.  The write below fills
+            // the bytes the caller actually wrote; the rest, including the gap a
+            // sparse write leaves, has to be zero, and the kernel sends only the
+            // bytes that were written, so the file system is the only thing that
+            // can do it.
+            for i in 0..run.len as u64 {
+                tx.write_data(base + i * blocksize, &vec![0u8; blocksize as usize])?;
+            }
+        }
+
+        // The data.  The part that lands in the block the file already has goes
+        // there, and the rest goes to the blocks that were just allocated.  The
+        // transaction writes read-modify-write, so whatever else is in that
+        // first block is left alone.
+        let into_old = first_fsb
+            .map(|_| (first_new * blocksize - offset) as usize)
+            .unwrap_or(0);
+        if into_old > 0 {
+            let fsb = first_fsb.expect("the old block, when part of the write is in it");
+            let at = sb.fsb_to_offset(fsb) + (offset % blocksize);
+            tx.write_data(at, &data[..into_old])?;
+        }
+        if let Some(image_offset) = image_offset {
+            tx.write_data(
+                image_offset + (offset + into_old as u64 - first_new * blocksize),
+                &data[into_old..],
+            )?;
+        }
+
+        // The extent, then the size and the times, and then all of it becomes
+        // real: the file's size, its extents and the groups' free space have to
+        // move together or the file system is describing two different things.
+        let mut raw = RawDinode::from_bytes(tx.read_bytes(inode_offset, inode_size)?)?;
+        if let Some(run) = run {
+            // The extent names two spaces: the file blocks it covers, and the
+            // image blocks they live at.
+            let fsb = sb.ag_block_to_fsb(agno, run.start);
+            raw.add_extent(first_new, fsb, run.len)?;
+            // The file's own count of the blocks it occupies has to follow its
+            // extents, or every reader of the file system -- including
+            // xfs_repair -- will say the inode disagrees with its own data.
+            //
+            // It follows the *sum* of the extents' block counts and not the
+            // number of extents, so it has to be recomputed even when the new
+            // blocks were joined to an extent that was already there rather
+            // than added beside it.  A file grown at its end lands next to its
+            // own last block, and that is the ordinary case: the extent count
+            // does not move, 24 more blocks are covered, and an inode still
+            // carrying the old count is one `bad nblocks` away from being
+            // repairable.
+            let blocks: u64 = raw
+                .core_extents()
+                .map(|extents| extents.iter().map(|e| e.br_blockcount).sum())
+                .unwrap_or(0);
+            raw.set_nblocks(blocks);
+        }
+        raw.set_size(end as i64);
+        raw.set_mtime(now);
+        raw.set_ctime(now);
+        raw.finalise();
+        tx.write_bytes(inode_offset, raw.as_bytes())?;
+        tx.commit()?;
+
+        // The read side may be holding a copy of something that just changed, and
+        // the cached inode is now behind the image.
+        self.device.invalidate();
+        self.device.set_bufsize(inode_size);
+        let dinode = Dinode::from(self.device.by_ref(), &sb, xfs_ino);
+        if let Some(oi) = self.open_files.get_mut(&ino) {
+            oi.dinode = dinode;
+        }
+        Ok(data.len() as u32)
+    }
+
     fn write_data(&mut self, ino: u64, offset: u64, data: &[u8]) -> FsResult<u32> {
         if !self.writable {
             return Err(FsError::read_only("write"));
@@ -318,18 +532,13 @@ impl Volume {
         let end = offset
             .checked_add(data.len() as u64)
             .ok_or_else(|| FsError::invalid(libc::EFBIG, "write runs past the end of the file"))?;
-        if end > size {
-            return Err(FsError::invalid(
-                libc::EFBIG,
-                format!(
-                    "write at {offset} length {} runs past the end of the file ({size} bytes); \
-                     growing a file is not supported yet",
-                    data.len()
-                ),
-            ));
-        }
         if data.is_empty() {
             return Ok(0);
+        }
+        if end > size {
+            // Past the end of the file the write has to *become* part of the
+            // file: blocks allocated, extents recorded, and a size to match.
+            return self.write_extending(ino, offset, end, data);
         }
 
         // Work out where every block of the write lands before writing any of

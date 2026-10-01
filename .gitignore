@@ -3,3 +3,4 @@ build/
 .cache/
 .*.swp
 resources/xfs.img
+resources/*.img

@@ -28,10 +28,14 @@
 use std::io::{prelude::*, SeekFrom};
 
 use bitflags::bitflags;
-use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
+use byteorder::{BigEndian, ByteOrder, LittleEndian, ReadBytesExt};
 use crc::{Crc, CRC_32_ISCSI};
 
-use super::{definitions::*, utils::Uuid};
+use super::{
+    definitions::*,
+    error::{FsError, FsResult},
+    utils::Uuid,
+};
 
 #[allow(dead_code)]
 mod constants {
@@ -251,6 +255,22 @@ impl Sb {
     #[allow(dead_code)] // The allocator that calls this is the next phase.
     pub const AGI_SECTOR: u32 = 2;
     const BBSHIFT: u8 = 9;
+    /// Where the superblock's own checksum sits.  It is stored little-endian
+    /// even though everything around it is big-endian.
+    pub const BCRC: usize = 224;
+    /// Where the count of free data blocks sits in the superblock's bytes.
+    ///
+    /// Every field ahead of it is a fixed size, so this is what the field by
+    /// field parse above adds up to.  It is spelled out here rather than left to
+    /// the parse because a field that can be written back has to be *placed*,
+    /// and a test checks this offset against a real superblock rather than
+    /// against this file.
+    pub const FDBLOCKS: usize = 144;
+    /// Where the second feature word sits, which is where the checksum bit
+    /// lives.  The version number does not carry it: a version 4 file system
+    /// made without checksums and a version 5 one differ here rather than in
+    /// their version number.
+    pub const FEATURES2: usize = 200;
 
     pub fn from<T: BufRead + Seek>(buf_reader: &mut T) -> Sb {
         let sb_magicnum = buf_reader.read_u32::<BigEndian>().unwrap();
@@ -416,6 +436,60 @@ impl Sb {
         self.sb_flags & constants::XFS_SBF_READONLY != 0
     }
 
+    /// Write a new count of the free blocks on the data device into the
+    /// superblock's bytes, fixing the checksum if this file system has one.
+    ///
+    /// The bytes are patched, not rebuilt.  The superblock is the first sector
+    /// of a block that the first group's headers share, and the parse above
+    /// deliberately threw away most of the fields it walked past, so writing
+    /// back what was parsed would mean writing back a superblock with the parts
+    /// nobody kept missing from it.  Patching one field in bytes that were read
+    /// off the image cannot do that.
+    pub fn patch_fdblocks(bytes: &mut [u8], free: u64) -> FsResult<()> {
+        if bytes.len() < Self::BCRC + 4 {
+            return Err(FsError::Corrupt {
+                what: "the superblock is shorter than its own checksum".into(),
+            });
+        }
+        if BigEndian::read_u32(&bytes[0..]) != XFS_SB_MAGIC {
+            return Err(FsError::Corrupt {
+                what: "the superblock's magic number is wrong".into(),
+            });
+        }
+        let sectsize = usize::from(BigEndian::read_u16(&bytes[102..]));
+        let features2 = BigEndian::read_u32(&bytes[Self::FEATURES2..]);
+        BigEndian::write_u64(&mut bytes[Self::FDBLOCKS..], free);
+        if features2 & constants::XFS_SB_VERSION2_CRCBIT == 0 {
+            return Ok(());
+        }
+        // The checksum covers everything ahead of the checksum field, then the
+        // four bytes of the field itself read as zeroes, then the rest of the
+        // first sector.
+        let bcrc = Self::BCRC;
+        bytes[bcrc..bcrc + 4].fill(0);
+        const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
+        let mut digest = CASTAGNOLI.digest();
+        digest.update(&bytes[..bcrc]);
+        digest.update(&[0u8; 4]);
+        let tail = bytes.len().min(sectsize);
+        if tail > bcrc + 4 {
+            digest.update(&bytes[bcrc + 4..tail]);
+        }
+        LittleEndian::write_u32(&mut bytes[bcrc..], digest.finalize());
+        Ok(())
+    }
+
+    /// The count of free blocks the superblock itself records, read back out of
+    /// its own bytes rather than out of a parsed struct.
+    pub fn fdblocks_in(bytes: &[u8]) -> FsResult<u64> {
+        if bytes.len() < Self::FDBLOCKS + 8 {
+            return Err(FsError::Corrupt {
+                what: "the superblock is too short to hold a free block count".into(),
+            });
+        }
+        Ok(BigEndian::read_u64(&bytes[Self::FDBLOCKS..]))
+    }
+
     /// Enable a read-only-compat feature.  Only the tests need this.
     #[cfg(test)]
     pub fn set_read_only_compat(&mut self, feature: u32) {
@@ -499,6 +573,16 @@ impl Sb {
         agno as u64 * self.fsb_to_offset(self.sb_agblocks as u64)
     }
 
+    /// The image block number of a block named within an allocation group.
+    ///
+    /// A block the allocation machinery names is counted from the start of its
+    /// group, while everything the rest of the file system uses -- a file's
+    /// extents, the address of a data block -- is counted from the start of the
+    /// image.  Mixing the two points at the right block in the wrong group.
+    pub const fn ag_block_to_fsb(&self, agno: u32, agblock: XfsAgblock) -> XfsFsblock {
+        (agno as u64 * self.sb_agblocks as u64 + agblock as u64) as XfsFsblock
+    }
+
     /// The image offset of the first block of an allocation group, given as a
     /// block number within that group.
     #[allow(dead_code)] // The allocator that calls this is the next phase.
@@ -580,5 +664,85 @@ impl Sb {
     /// Return the file system version (usually 4 or 5)
     pub fn version(&self) -> u16 {
         self.sb_versionnum & 0xF
+    }
+}
+
+#[cfg(test)]
+mod t {
+    use std::io::Cursor;
+
+    use super::*;
+
+    /// The first sector of the superblock of an image, or `None` when the image
+    /// has not been unpacked.  The same shape as the FUSE-gated tests: an
+    /// environment without images cannot check this, and saying so beats
+    /// passing without having looked.
+    fn superblock_of(path: &str) -> Option<Vec<u8>> {
+        let all = std::fs::read(path).ok()?;
+        Some(all[..512].to_vec())
+    }
+
+    /// Where the free block count sits, and what patching it is allowed to
+    /// touch.
+    ///
+    /// The offset is checked against the field-by-field parse rather than
+    /// against this file, so a field moving in the struct cannot quietly leave
+    /// the offset behind.  And patching has to be surgical: the superblock
+    /// shares its block with the first group's headers, so a patch that changed
+    /// anything else would be a patch that could take them with it.
+    #[test]
+    fn the_free_block_count_is_where_the_parse_says_it_is() {
+        for path in ["target/tmp/xfsv4.img", "target/tmp/xfs1024.img"] {
+            let Some(bytes) = superblock_of(path) else {
+                eprintln!("skipping {path}: no unpacked image");
+                continue;
+            };
+            let parsed = Sb::from(&mut Cursor::new(&bytes));
+            assert_eq!(
+                Sb::fdblocks_in(&bytes).expect("a count in the bytes"),
+                parsed.sb_fdblocks,
+                "{path}: the offset does not match the parsed field"
+            );
+
+            let mut patched = bytes.clone();
+            let before = parsed.sb_fdblocks;
+            Sb::patch_fdblocks(&mut patched, before - 24).expect("a patchable superblock");
+            assert_eq!(
+                Sb::fdblocks_in(&patched).expect("a count in the bytes"),
+                before - 24,
+                "{path}: the patched count did not read back"
+            );
+
+            // Everything outside the count, and outside the checksum when there
+            // is one, must be exactly as it was.
+            // Whether this file system has checksums is a property of the bytes
+            // and not of the file's name, and it decides whether patching the
+            // count has to move the checksum with it.
+            let checksummed = BigEndian::read_u32(&bytes[Sb::FEATURES2..])
+                & constants::XFS_SB_VERSION2_CRCBIT
+                != 0;
+            let allowed = |i: usize| {
+                (Sb::FDBLOCKS..Sb::FDBLOCKS + 8).contains(&i)
+                    || (checksummed && (Sb::BCRC..Sb::BCRC + 4).contains(&i))
+            };
+            for (i, (a, b)) in bytes.iter().zip(patched.iter()).enumerate() {
+                if a != b {
+                    assert!(
+                        allowed(i),
+                        "{path}: patching the count also changed byte {i}"
+                    );
+                }
+            }
+
+            if checksummed {
+                // The trusted read path panics when the checksum is wrong, so
+                // simply reading the patched superblock back is the check that
+                // the checksum was recomputed correctly.  Without this the whole
+                // checksum branch would go untested, because the image the
+                // write tests use has checksums switched off.
+                let reparsed = Sb::from(&mut Cursor::new(&patched));
+                assert_eq!(reparsed.sb_fdblocks, before - 24);
+            }
+        }
     }
 }
