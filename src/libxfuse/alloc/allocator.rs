@@ -69,7 +69,7 @@ use super::{
     free_space::{
         first_run_from,
         free_in_both_trees,
-        remove_range_in_tree,
+        range_is_free,
         take_from_both_trees,
         FreeRun,
         FreeSpace,
@@ -411,16 +411,25 @@ fn uuid_of(agf: &Agf) -> [u8; 16] {
 /// is for, and the refill that reaches for the group header mid-split is still
 /// blocked on roots that have not been written yet.
 #[allow(dead_code)]
-fn stock_the_free_list(
+/// Put as many of a run as the free list has room for onto the free list, and
+/// say how many it took.
+///
+/// These blocks are **not** put in the free space trees at all.  The list exists
+/// to hold blocks that are the group's to use but are spoken for, and a block on
+/// it is in neither of the two places `agf_freeblks` counts: not a free extent,
+/// and not yet a live node.  Adding them to the trees and taking them back out
+/// arrives at the same numbers by two steps instead of one, and it is what made
+/// the superblock and the trees disagree by exactly the number stocked.
+///
+/// They come off the *end* of the run, so the list keeps the order the group
+/// would hand blocks out in.
+fn append_to_the_free_list(
     transaction: &mut Transaction<'_>,
     sb: &Sb,
     agno: u32,
     agf: &mut Agf,
-    from: FreeRun,
+    run: FreeRun,
 ) -> FsResult<u32> {
-    if from.len == 0 {
-        return Ok(0);
-    }
     let at = sb.ag_header_offset(agno, Sb::AGFL_SECTOR);
     let blocksize = sb.sb_blocksize as usize;
     let bytes = transaction
@@ -428,50 +437,28 @@ fn stock_the_free_list(
         .map_err(|_| FsError::corrupt("the group free list could not be read"))?;
     let mut agfl = Agfl::from_bytes(bytes, sb.has_crc())?;
 
-    // The window is the header's, and it names the slots that are live.  Anything
-    // outside it is stale -- a block that was a list once and is being written
-    // as one again must not have its old contents read as free blocks.
+    // The window is the header's and names the slots that are live.  Anything
+    // outside it is stale: a block written as a list again must not carry its old
+    // contents forward as free blocks.
     //
-    // A list is not required to carry a header: in every file system here it is
-    // a bare array, so whether one belongs is decided by reading the block rather
-    // than assumed, and writing one where none belongs would put a header on top
-    // of entry zero.
+    // A list need not carry a header -- in every file system here it is a bare
+    // array -- so whether one belongs is read from the block rather than assumed,
+    // and writing one where none belongs would put a header over entry zero.
     let mut window = agfl.window(
         agf.free_list_first(),
         agf.free_list_last(),
         agf.free_list_count(),
     );
-    let room = agfl.capacity().saturating_sub(window.count).min(from.len);
+    let room = agfl.capacity().saturating_sub(window.count).min(run.len);
     if room == 0 {
         return Ok(0);
     }
-
-    // They come off the end of what was freed, so the list keeps the order the
-    // group would hand the blocks out in.
-    let first = from.start + (from.len - room);
-    let mut store = TransactionBlocks::new(transaction, sb, agno);
-    let block_geometry = GroupGeometry::new(sb.sb_agblocks, sb.has_crc(), true);
-    let size_geometry = GroupGeometry::new(sb.sb_agblocks, sb.has_crc(), false);
-    remove_range_in_tree(
-        &mut store,
-        block_geometry,
-        agf.block_btree_root(),
-        first,
-        room,
-    )?;
-    remove_range_in_tree(
-        &mut store,
-        size_geometry,
-        agf.extent_btree_root(),
-        first,
-        room,
-    )?;
+    let first = run.start + (run.len - room);
     for b in first..first + room {
         window = agfl.give_back(&mut window, b)?;
     }
     agfl.blank_beyond(window.last);
     agfl.update_crc();
-    let _ = store;
     transaction.write_bytes(at, agfl.as_bytes())?;
     agf.set_free_list_window(window.first, window.last, window.count);
     Ok(room)
@@ -514,16 +501,45 @@ pub fn free_in_group(
 
     let block_geometry = GroupGeometry::new(agblocks, crc, true);
     let size_geometry = GroupGeometry::new(agblocks, crc, false);
-    let (by_block_root, by_size_root) = {
-        let mut store = TransactionBlocks::new(transaction, sb, agno);
-        free_in_both_trees(
-            &mut store,
+    // A block that is already free is already the group's to use, and the free
+    // list is for blocks that are spoken for.  Putting one on the list as well
+    // makes the same block free twice, so this is asked first.
+    {
+        let mut probe = TransactionBlocks::new(transaction, sb, agno);
+        if range_is_free(
+            &mut probe,
             block_geometry,
             agf.block_btree_root(),
-            size_geometry,
-            agf.extent_btree_root(),
-            run,
-        )?
+            run.start,
+            run.len,
+        )? {
+            return Ok(());
+        }
+    }
+
+    // Part of what is being freed is spoken for: it goes on the free list rather
+    // than into the trees, because that is what the list is for, and a block on
+    // it is in neither of the two places the group's count comes from.  The rest
+    // is ordinary free space and goes into the trees as usual.
+    let reserved = append_to_the_free_list(transaction, sb, agno, &mut agf, run)?;
+    let to_trees = run.len - reserved;
+    let (by_block_root, by_size_root) = {
+        let mut store = TransactionBlocks::new(transaction, sb, agno);
+        if to_trees == 0 {
+            (agf.block_btree_root(), agf.extent_btree_root())
+        } else {
+            free_in_both_trees(
+                &mut store,
+                block_geometry,
+                agf.block_btree_root(),
+                size_geometry,
+                agf.extent_btree_root(),
+                FreeRun {
+                    start: run.start,
+                    len:   to_trees,
+                },
+            )?
+        }
     };
 
     // Read the new roots and heights back off the blocks themselves, so the
@@ -555,8 +571,15 @@ pub fn free_in_group(
     agf.set_free_blocks(free);
     agf.set_longest_free(longest);
     write_agf(transaction, sb, agno, &mut agf)?;
+    // The superblock counts free blocks on the *whole device*, and a block on the
+    // free list is still one of those: it has only stopped being available for
+    // file data.  So reserving some counts them as given back to the device even
+    // though the group's own free extents did not change -- which is why the two
+    // numbers differ by exactly the number reserved when it is forgotten.
+    //
+    // And the free space trees' part moves by what the group actually gained.
     let moved = u64::from(free).saturating_sub(before);
-    set_sb_fdblocks(transaction, sb, 0, moved)?;
+    set_sb_fdblocks(transaction, sb, 0, moved + u64::from(reserved))?;
     Ok(())
 }
 
@@ -712,6 +735,11 @@ mod t {
         u64::from_be_bytes(d[at..at + 8].try_into().unwrap())
     }
 
+    /// How many blocks a set of runs covers.
+    fn tree_total(runs: &[FreeRun]) -> u32 {
+        runs.iter().map(|r| r.len).sum()
+    }
+
     pub(crate) fn image_with_group(runs: &[(u32, u32)]) -> (tempfile::NamedTempFile, Sb) {
         let sb = sb();
         let f = tempfile::NamedTempFile::new().unwrap();
@@ -849,19 +877,47 @@ mod t {
             by_block, by_size,
             "the two trees no longer agree about what is free"
         );
-        // (100, 50) ends at 150, so the freed run joined it rather than
-        // sitting beside it as a record of its own.
-        assert!(
-            by_block.contains(&FreeRun {
-                start: 100,
-                len:   70,
-            }),
-            "the freed run did not join the one it touches: {by_block:?}"
-        );
-        let after_free: u32 = by_block.iter().map(|r| r.len).sum();
+        // (100, 50) ends at 150, so the freed run touched it.  Where those
+        // twenty blocks went depends on the free list: a block that the list has
+        // room for is spoken for rather than freed, and never reaches the trees at
+        // all.  So the trees are only expected to show the join when the list
+        // could not take them, and what has to hold either way is that the two
+        // trees still agree and that nothing was lost.
+        let before_tree_total = tree_total(&free_runs_on_image(image.path(), true));
+        // How many blocks are on the free list now, which is what the trees did
+        // *not* get.  A block that is spoken for is still the group's to use.
+        let listed: u32 = {
+            let d = std::fs::read(image.path()).unwrap();
+            let at = sb.ag_header_offset(0, Sb::AGFL_SECTOR) as usize;
+            let af = sb.ag_header_offset(0, Sb::AGF_SECTOR) as usize;
+            let be = |o: usize| be32(&d, o);
+            let (first, last, _) = (be(af + 40), be(af + 44), be(af + 48));
+            (first..=last)
+                .filter(|i| be(at + (*i as usize) * 4) != 0)
+                .count() as u32
+        };
+        if listed > 0 {
+            // The blocks went to the list; the trees are untouched by them, so
+            // what moved there is nothing and the count is unchanged.
+            assert_eq!(
+                tree_total(&by_block),
+                before_tree_total,
+                "the trees changed even though the blocks went to the free list"
+            );
+        } else {
+            assert!(
+                by_block.contains(&FreeRun {
+                    start: 100,
+                    len:   70,
+                }),
+                "the freed run did not join the one it touches: {by_block:?}"
+            );
+        }
+        // The group's free space grows by twenty however they were accounted
+        // for: the free list holds blocks that are the group's to use.
         assert_eq!(
-            after_free,
-            before_free + 20,
+            tree_total(&by_block) + listed,
+            before_tree_total + 20,
             "the group's free space did not grow by what was freed"
         );
         // And the superblock's own total moved with them.
@@ -872,7 +928,7 @@ mod t {
             .unwrap();
         assert_eq!(
             Sb::fdblocks_in(&sector).expect("a count in the superblock"),
-            u64::from(after_free),
+            u64::from(before_free) + 20,
             "the superblock's count of free blocks did not follow the group"
         );
     }
@@ -893,9 +949,12 @@ mod t {
     /// only prove the code copes with a case that does not happen.
     #[test]
     fn freeing_a_run_on_a_real_image_leaves_a_file_system() {
-        let golden = "target/tmp/xfsv4.img";
-        let Ok(source) = std::fs::File::open(golden) else {
-            eprintln!("skipping: no unpacked {golden}");
+        let Some(golden) = crate::libxfuse::alloc::golden("xfsv4.img") else {
+            eprintln!("skipping: no unpacked xfsv4.img");
+            return;
+        };
+        let Ok(source) = std::fs::File::open(&golden) else {
+            eprintln!("skipping: no unpacked xfsv4.img");
             return;
         };
         let mut copy = tempfile::NamedTempFile::new().unwrap();
@@ -982,9 +1041,12 @@ mod t {
     /// code's own idea of a consistent tree.
     #[test]
     fn freeing_blocks_that_are_already_free_cuts_the_record_in_two() {
-        let golden = "target/tmp/xfsv4.img";
-        let Ok(source) = std::fs::File::open(golden) else {
-            eprintln!("skipping: no unpacked {golden}");
+        let Some(golden) = crate::libxfuse::alloc::golden("xfsv4.img") else {
+            eprintln!("skipping: no unpacked xfsv4.img");
+            return;
+        };
+        let Ok(source) = std::fs::File::open(&golden) else {
+            eprintln!("skipping: no unpacked xfsv4.img");
             return;
         };
         let mut copy = tempfile::NamedTempFile::new().unwrap();
@@ -1248,9 +1310,12 @@ mod t {
     #[test]
     #[ignore = "the refill reaches the group header, whose tree roots are stale mid-split"]
     fn a_split_leaves_the_block_count_right() {
-        let golden = "target/tmp/xfsv4.img";
-        let Ok(source) = std::fs::File::open(golden) else {
-            eprintln!("skipping: no unpacked {golden}");
+        let Some(golden) = crate::libxfuse::alloc::golden("xfsv4.img") else {
+            eprintln!("skipping: no unpacked xfsv4.img");
+            return;
+        };
+        let Ok(source) = std::fs::File::open(&golden) else {
+            eprintln!("skipping: no unpacked xfsv4.img");
             return;
         };
         let mut copy = tempfile::NamedTempFile::new().unwrap();
@@ -1462,9 +1527,12 @@ mod t {
     /// asserted them equal would be asserting something false.
     #[test]
     fn what_moves_when_a_free_stocks_the_free_list() {
-        let golden = "target/tmp/xfsv4.img";
-        let Ok(src) = std::fs::File::open(golden) else {
-            eprintln!("skipping: no unpacked {golden}");
+        let Some(golden) = crate::libxfuse::alloc::golden("xfsv4.img") else {
+            eprintln!("skipping: no unpacked xfsv4.img");
+            return;
+        };
+        let Ok(src) = std::fs::File::open(&golden) else {
+            eprintln!("skipping: no unpacked xfsv4.img");
             return;
         };
         let mut copy = tempfile::NamedTempFile::new().unwrap();
@@ -1481,7 +1549,7 @@ mod t {
         }
         copy.flush().unwrap();
 
-        let mut reader = std::io::BufReader::new(std::fs::File::open(golden).unwrap());
+        let mut reader = std::io::BufReader::new(std::fs::File::open(&golden).unwrap());
         let sb = Sb::from(&mut reader);
         let agb = sb.sb_agblocks as usize;
         let bs = sb.sb_blocksize as usize;
@@ -1511,7 +1579,7 @@ mod t {
         // Blocks that are *not* free: freeing blocks that already are is a
         // no-op and would measure nothing.  Group 0's headers, its free list
         // and its btree nodes are skipped along with everything free.
-        let d = std::fs::read(golden).unwrap();
+        let d = std::fs::read(&golden).unwrap();
         let mut free_blocks = std::collections::HashSet::new();
         let mut stack = vec![be32(&d, sectors(0, Sb::AGF_SECTOR) + 16) as usize];
         while let Some(b) = stack.pop() {

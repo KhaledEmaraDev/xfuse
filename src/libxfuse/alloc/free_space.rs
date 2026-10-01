@@ -2319,6 +2319,21 @@ pub fn remove_range_in_tree<B: GroupBlocks>(
     walk_up(blocks, geometry, root, leaf, &path, pending)
 }
 
+/// Whether a range of blocks is already recorded as free.
+///
+/// Asked before anything is done with a free, because a block that is already
+/// free is already the group's to use and putting it on the free list as well
+/// makes the same block free twice over.
+pub fn range_is_free<B: GroupBlocks>(
+    blocks: &mut B,
+    geometry: GroupGeometry,
+    root: XfsAgblock,
+    start: XfsAgblock,
+    len: u32,
+) -> FsResult<bool> {
+    Ok(leaf_covering(blocks, geometry, root, start, len)?.is_some())
+}
+
 /// Take a range out of both trees, because both must lose the same blocks.
 ///
 /// The tree keyed by start names the range to take; the tree keyed by length is

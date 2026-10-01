@@ -287,9 +287,14 @@ mod t {
     use super::*;
     use crate::libxfuse::{alloc::agi::Agi, error::FsResult, sb::Sb};
 
-    const GOLDEN: &str = "target/tmp/xfsv4.img";
+    /// A file system made by hand, whose free space is heavily fragmented.
+    fn golden() -> Option<std::path::PathBuf> {
+        crate::libxfuse::alloc::golden("xfsv4.img")
+    }
     /// A file system made by mkfs, whose inode numbers agree with its own headers.
-    const FRESH: &str = "target/tmp/xfs_writable.img";
+    fn fresh() -> Option<std::path::PathBuf> {
+        crate::libxfuse::alloc::golden("xfs_writable.img")
+    }
 
     /// The values `xfs_db` prints inside brackets, as in `1:[32,0,0]`.
     ///
@@ -322,6 +327,7 @@ mod t {
     /// Ask `xfs_db` to print one field of a node, so the reader is checked
     /// against the tool rather than against itself.
     fn shown(block: u32, field: &str) -> Option<Vec<String>> {
+        let golden = golden()?;
         let out = std::process::Command::new("xfs_db")
             .arg("-r")
             .arg("-c")
@@ -330,7 +336,7 @@ mod t {
             .arg("type inobt")
             .arg("-c")
             .arg(format!("p {field}"))
-            .arg(GOLDEN)
+            .arg(golden.as_os_str())
             .output()
             .ok()?;
         let text = String::from_utf8_lossy(&out.stdout);
@@ -352,6 +358,7 @@ mod t {
 
     /// A scalar field of a node, as `xfs_db` prints it: `level = 1`.
     fn scalar_of(block: u32, field: &str) -> Option<String> {
+        let golden = golden()?;
         let out = std::process::Command::new("xfs_db")
             .arg("-r")
             .arg("-c")
@@ -360,7 +367,7 @@ mod t {
             .arg("type inobt")
             .arg("-c")
             .arg(format!("p {field}"))
-            .arg(GOLDEN)
+            .arg(golden.as_os_str())
             .output()
             .ok()?;
         let text = String::from_utf8_lossy(&out.stdout);
@@ -377,9 +384,10 @@ mod t {
     }
 
     fn read(block: u32) -> Option<InobtNode> {
-        let mut reader = std::io::BufReader::new(std::fs::File::open(GOLDEN).ok()?);
+        let golden = golden()?;
+        let mut reader = std::io::BufReader::new(std::fs::File::open(golden.as_os_str()).ok()?);
         let sb = crate::libxfuse::sb::Sb::from(&mut reader);
-        let bytes = std::fs::read(GOLDEN).ok()?;
+        let bytes = std::fs::read(golden.as_os_str()).ok()?;
         let at = block as usize * sb.sb_blocksize as usize;
         InobtNode::from_bytes(bytes[at..at + sb.sb_blocksize as usize].to_vec()).ok()
     }
@@ -387,8 +395,8 @@ mod t {
     /// An interior node reads as the keys and child blocks `xfs_db` prints.
     #[test]
     fn an_interior_node_reads_as_xfs_db_prints_it() {
-        if !std::path::Path::new(GOLDEN).exists() {
-            eprintln!("skipping: no unpacked {GOLDEN}");
+        if golden().is_none() {
+            eprintln!("skipping: no unpacked xfsv4.img");
             return;
         }
         let root = 12u32;
@@ -469,9 +477,13 @@ mod t {
         // not a node of that tree -- which is the same disagreement about inode
         // numbers that the count check below runs into.  It is a good image for
         // most things and cannot be asked about inodes.
-        for golden in [FRESH] {
+        let Some(path) = fresh() else {
+            eprintln!("skipping: no unpacked xfs_writable.img");
+            return;
+        };
+
+        for golden in [&path] {
             let Ok(bytes) = std::fs::read(golden) else {
-                eprintln!("skipping {golden}: no unpacked image");
                 continue;
             };
             let mut reader = std::io::BufReader::new(std::fs::File::open(golden).unwrap());
@@ -490,7 +502,7 @@ mod t {
                 for chunk in ranges_in_tree(agi.inobt_root(), fetch).expect("the chunks") {
                     assert!(
                         chunk.count_agrees(),
-                        "{golden} ag{agno}: the chunk at inode {} claims {} free inodes but its \
+                        "{golden:?} ag{agno}: the chunk at inode {} claims {} free inodes but its \
                          mask has {} bits set",
                         chunk.start,
                         chunk.free_count,
@@ -499,25 +511,26 @@ mod t {
                     assert_eq!(
                         chunk.free_inos().len() as u32,
                         chunk.free_count,
-                        "{golden} ag{agno}: the chunk does not name as many free inodes as it says"
+                        "{golden:?} ag{agno}: the chunk does not name as many free inodes as it \
+                         says"
                     );
                     for ino in chunk.free_inos() {
                         assert!(
                             (chunk.start..chunk.start + INODES_PER_CHUNK).contains(&ino),
-                            "{golden} ag{agno}: inode {ino} is outside the chunk that claims it"
+                            "{golden:?} ag{agno}: inode {ino} is outside the chunk that claims it"
                         );
                     }
                     if chunk.free_count > 0 {
                         assert!(
                             chunk.first_free_ino().is_some(),
-                            "{golden} ag{agno}: a chunk with free inodes cannot name one"
+                            "{golden:?} ag{agno}: a chunk with free inodes cannot name one"
                         );
                     }
                     checked += 1;
                 }
             }
             if checked > 0 {
-                eprintln!("{golden}: {checked} chunks checked");
+                eprintln!("{golden:?}: {checked} chunks checked");
             }
         }
     }
@@ -545,13 +558,13 @@ mod t {
         // image's inode numbers disagree with its own headers -- a group's next
         // inode number sits before where the packed layout puts it -- so it
         // cannot be asked which inodes are free.
-        const IMAGE: &str = "target/tmp/xfs_writable.img";
-        if !std::path::Path::new(IMAGE).exists() {
-            eprintln!("skipping: no unpacked {IMAGE}");
+        let Some(image) = fresh() else {
+            eprintln!("skipping: no unpacked xfs_writable.img");
             return;
-        }
-        let bytes = std::fs::read(IMAGE).expect("the unpacked image");
-        let mut reader = std::io::BufReader::new(std::fs::File::open(IMAGE).unwrap());
+        };
+        let image = image.to_string_lossy().into_owned();
+        let bytes = std::fs::read(&image).expect("the unpacked image");
+        let mut reader = std::io::BufReader::new(std::fs::File::open(&image).unwrap());
         let sb = Sb::from(&mut reader);
         let bs = sb.sb_blocksize as usize;
         let fetch = |block: u32| -> FsResult<Box<[u8]>> {
@@ -584,8 +597,8 @@ mod t {
     /// A leaf reads as the ranges `xfs_db` prints.
     #[test]
     fn a_leaf_reads_as_xfs_db_prints_it() {
-        if !std::path::Path::new(GOLDEN).exists() {
-            eprintln!("skipping: no unpacked {GOLDEN}");
+        if golden().is_none() {
+            eprintln!("skipping: no unpacked xfsv4.img");
             return;
         }
         let leaf = 6u32;
@@ -631,7 +644,7 @@ mod t {
         assert_eq!(InobtNode::interior_capacity(512), 62);
         // Which is what the tool's own numbering shows: the root of the tree in
         // this image holds two children and its key array is sized for sixty-two.
-        if std::path::Path::new(GOLDEN).exists() {
+        if golden().is_some() {
             let node = read(12).expect("the inode b-tree root");
             assert!(
                 node.numrecs() as usize <= node.children().expect("children").len(),

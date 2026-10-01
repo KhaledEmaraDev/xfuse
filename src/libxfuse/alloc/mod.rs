@@ -82,6 +82,42 @@
 //! with the operations that actually free blocks, rather than being written
 //! before anything calls it.
 
+/// Make a golden image available unpacked, and say where it is.
+///
+/// The unit tests read the unpacked images directly rather than through the
+/// integration harness, which means they depend on that harness having run
+/// first.  A `cargo clean` or anything else that empties `target` turns every
+/// one of them into a failure that has nothing to do with the code under test.
+///
+/// So they unpack it here, the same way the harness does, and skip cleanly if
+/// the compressed original is not there either.
+#[cfg(test)]
+pub(crate) fn golden(name: &str) -> Option<std::path::PathBuf> {
+    let image = format!("target/tmp/{name}");
+    if std::path::Path::new(&image).exists() {
+        return Some(image.into());
+    }
+    let compressed = format!("resources/{name}.zst");
+    if !std::path::Path::new(&compressed).exists() {
+        return None;
+    }
+    if let Some(parent) = std::path::Path::new(&image).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let status = std::process::Command::new("unzstd")
+        .arg("-f")
+        .arg("-o")
+        .arg(&image)
+        .arg(&compressed)
+        .output();
+    match status {
+        Ok(out) if out.status.success() && std::path::Path::new(&image).exists() => {
+            Some(image.into())
+        }
+        _ => None,
+    }
+}
+
 pub mod agf;
 pub mod agfl;
 pub mod agi;

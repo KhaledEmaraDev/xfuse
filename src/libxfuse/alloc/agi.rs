@@ -215,7 +215,7 @@ mod t {
         Some((sb, geometry))
     }
 
-    fn read_agi(sb: &Sb, agno: u32, golden: &str) -> Agi {
+    fn read_agi(sb: &Sb, agno: u32, golden: &std::path::Path) -> Agi {
         let bytes = std::fs::read(golden).expect("the unpacked image");
         let at = sb.ag_header_offset(agno, Sb::AGI_SECTOR) as usize;
         Agi::from_bytes(
@@ -234,16 +234,16 @@ mod t {
     /// the check is against the tool, not against this code.
     #[test]
     fn the_inode_header_agrees_with_xfs_db() {
-        for golden in ["target/tmp/xfsv4.img", "target/tmp/xfs_writable.img"] {
-            if !std::path::Path::new(golden).exists() {
-                eprintln!("skipping {golden}: no unpacked image");
+        for name in ["xfsv4.img", "xfs_writable.img"] {
+            let Some(golden) = crate::libxfuse::alloc::golden(name) else {
+                eprintln!("skipping {name}: no unpacked image");
                 continue;
-            }
+            };
             let mut reader =
-                std::io::BufReader::new(std::fs::File::open(golden).expect("the image"));
+                std::io::BufReader::new(std::fs::File::open(&golden).expect("the image"));
             let sb = Sb::from(&mut reader);
             for agno in 0..sb.agcount() {
-                let agi = read_agi(&sb, agno, golden);
+                let agi = read_agi(&sb, agno, &golden);
                 // `xfs_db` prints some fields as `null` where there is nothing
                 // to report -- a group that has never handed out an inode number
                 // has no next one -- so a field that is not a number is not a
@@ -258,12 +258,13 @@ mod t {
                             "-c",
                             &format!("p {field}"),
                         ])
-                        .arg(golden)
+                        .arg(golden.as_os_str())
                         .output()
                         .expect("xfs_db can be run");
                     assert!(
                         out.status.success(),
-                        "xfs_db failed on {golden} ag{agno} {field}"
+                        "xfs_db failed on {} ag{agno} {field}",
+                        golden.display()
                     );
                     String::from_utf8_lossy(&out.stdout)
                         .lines()
@@ -275,7 +276,7 @@ mod t {
                     if let Some(want) = show(field) {
                         assert_eq!(
                             ours, want,
-                            "{golden} ag{agno}: {what} disagrees with xfs_db"
+                            "{golden:?} ag{agno}: {what} disagrees with xfs_db"
                         );
                     }
                 };
@@ -287,13 +288,14 @@ mod t {
                     assert_eq!(
                         (u64::from(agi.inobt_root()), u64::from(agi.inobt_level())),
                         (root, level),
-                        "{golden} ag{agno}: the inode btree's root and level disagree with xfs_db"
+                        "{golden:?} ag{agno}: the inode btree's root and level disagree with \
+                         xfs_db"
                     );
                 }
                 assert_eq!(
                     agi.inode_count(),
                     agi.free_inodes() + agi.used_inodes(),
-                    "{golden} ag{agno}: free and used inodes do not add up to the inode count"
+                    "{golden:?} ag{agno}: free and used inodes do not add up to the inode count"
                 );
             }
         }
@@ -303,10 +305,12 @@ mod t {
     /// pass the count the group was made with.
     #[test]
     fn a_moved_free_count_is_a_moved_pair() {
-        let golden = "target/tmp/xfsv4.img";
-        let bytes = std::fs::read(golden).expect("the unpacked golden image");
-        let mut reader =
-            std::io::BufReader::new(std::fs::File::open("target/tmp/xfsv4.img").unwrap());
+        let Some(golden) = crate::libxfuse::alloc::golden("xfsv4.img") else {
+            eprintln!("skipping: no unpacked xfsv4.img");
+            return;
+        };
+        let bytes = std::fs::read(&golden).expect("the unpacked golden image");
+        let mut reader = std::io::BufReader::new(std::fs::File::open(&golden).unwrap());
         let sb = Sb::from(&mut reader);
         let at = sb.ag_header_offset(0, Sb::AGI_SECTOR) as usize;
         let mut agi = Agi::from_bytes(

@@ -699,6 +699,29 @@ Two things followed from that, and both are now fixed:
 With both fixed the refill hands back a real free block and the list survives
 being written, which it did not before.
 
+### What a reservation moves, and what it does not
+
+Freeing a run now **puts as much of it on the free list as the list has room
+for, and frees only the rest into the trees**.  The blocks that are reserved never
+enter the trees at all, which is what a reservation is, and it is not what the
+first attempt did -- that freed everything into the trees and then took the
+reserved part back out, which arrives at the same numbers by two steps instead of
+one.
+
+Three things had to be right, and each was wrong on its own first:
+
+* **The already-free check comes first.**  Blocks that are already free are
+  already the group's to use, and putting them on the list as well makes the same
+  block free twice.  It was checked after the reservation, and the surplus landed
+  on the list.
+* **The superblock counts free blocks on the whole device**, so a block on the
+  free list is still one of them: it has only stopped being *available for file
+  data*.  Reserving some therefore counts them as given back, and forgetting that
+  is why the superblock and the trees disagreed by exactly the number reserved.
+* **A block the list already holds stays free space for the group.**  The group's
+  free space grew by the whole run however it was accounted for, so the tests
+  count the trees and the list together rather than the trees alone.
+
 ### The first row of the AGFL transition table, measured
 
 Freeing blocks and putting them on the free list was measured rather than
