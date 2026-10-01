@@ -40,6 +40,7 @@
 //! | Module | What it is |
 //! |:-------|:-----------|
 //! | [`agf`] | the group file: the group's size, its free space, and where that free space is indexed |
+//! | [`agi`] | the group inode header: how many inodes the group has and how many are free |
 //! | [`agfl`] | the group free list: a small, pre-extracted supply of free blocks |
 //! | [`free_space`] | the btrees the group's free space is indexed in, one node of them |
 //! | [`allocator`] | handing out blocks out of a group, through a transaction |
@@ -82,5 +83,6 @@
 
 pub mod agf;
 pub mod agfl;
+pub mod agi;
 pub mod allocator;
 pub mod free_space;
