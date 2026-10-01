@@ -89,6 +89,36 @@ pub struct InoRange {
     pub first_free: u32,
 }
 
+/// Every range of inode numbers a tree says are in use, in the order the tree
+/// holds them.
+///
+/// The order matters: the ranges are runs of used inode numbers and they are read
+/// in key order, so the counts can be added up in that order and mean something.
+///
+/// Unlike the free space trees, this takes no geometry: a node's shape follows
+/// from its own size, because a record is sixteen bytes whichever way round it
+/// is counted.
+pub fn ranges_in_tree<F>(root: u32, mut fetch: F) -> FsResult<Vec<InoRange>>
+where
+    F: FnMut(u32) -> FsResult<Box<[u8]>>,
+{
+    let mut out = Vec::new();
+    let mut stack = vec![root];
+    while let Some(block) = stack.pop() {
+        let node = InobtNode::from_bytes(fetch(block)?)?;
+        if node.is_leaf() {
+            out.extend(node.ranges()?);
+            continue;
+        }
+        // Pushed in reverse so that popping visits them left to right, which is
+        // what makes the ranges come out in the order the tree holds them.
+        let mut children = node.children()?;
+        children.reverse();
+        stack.extend(children.into_iter().map(|(_, block)| block));
+    }
+    Ok(out)
+}
+
 impl InobtNode {
     /// Read a node out of a block's bytes.
     pub fn from_bytes(bytes: impl Into<Vec<u8>>) -> FsResult<Self> {
@@ -207,6 +237,7 @@ impl InobtNode {
 #[cfg(test)]
 mod t {
     use super::*;
+    use crate::libxfuse::{alloc::agi::Agi, error::FsResult, sb::Sb};
 
     const GOLDEN: &str = "target/tmp/xfsv4.img";
 
@@ -368,6 +399,65 @@ mod t {
         assert_eq!(bracketed("1:[32,0,0]"), vec![32, 0, 0]);
         assert_eq!(bracketed("2:[2400]"), vec![2400]);
         assert_eq!(after_colon("1:6 2:11"), vec![6, 11]);
+    }
+
+    /// The header's free inode count is the ranges' own free counts, added up.
+    ///
+    /// This is the check the walk rests on, and it settles two things at once:
+    /// that the ranges are being read correctly, and that free inodes are counted
+    /// where the tree says rather than by counting gaps.
+    ///
+    /// The gap below the first range is *not* free, and that is worth stating
+    /// rather than leaving as a surprise: a group's inode numbers start at zero
+    /// and its first used range starts at thirty-two, so the numbers below that
+    /// are reserved and are not offered to anyone.
+    ///
+    /// The third field of a range is not used here, and this does not say what it
+    /// is.  `xfs_db` prints it as a value that does not look like an offset or a
+    /// count, and the range's own length is not established either -- only that
+    /// its free count is.  Guessing at the rest would be a number that means
+    /// something plausible, which is the failure this whole file is written to
+    /// avoid.
+    #[test]
+    fn the_free_inode_count_is_the_ranges_own_counts() {
+        // The freshly made image, and not the hand-built one: the hand-built
+        // image's inode numbers disagree with its own headers -- a group's next
+        // inode number sits before where the packed layout puts it -- so it
+        // cannot be asked which inodes are free.
+        const IMAGE: &str = "target/tmp/xfs_writable.img";
+        if !std::path::Path::new(IMAGE).exists() {
+            eprintln!("skipping: no unpacked {IMAGE}");
+            return;
+        }
+        let bytes = std::fs::read(IMAGE).expect("the unpacked image");
+        let mut reader = std::io::BufReader::new(std::fs::File::open(IMAGE).unwrap());
+        let sb = Sb::from(&mut reader);
+        let bs = sb.sb_blocksize as usize;
+        let fetch = |block: u32| -> FsResult<Box<[u8]>> {
+            let at = block as usize * bs;
+            Ok(bytes[at..at + bs].to_vec().into_boxed_slice())
+        };
+
+        for agno in 0..sb.agcount() {
+            let at = sb.ag_header_offset(agno, Sb::AGI_SECTOR) as usize;
+            let agi = Agi::from_bytes(bytes[at..at + bs].to_vec(), sb.has_crc())
+                .expect("a group inode header");
+            if agi.inode_count() == 0 {
+                continue;
+            }
+            let ranges = ranges_in_tree(agi.inobt_root(), fetch).expect("the used ranges");
+            let free: u64 = ranges.iter().map(|r| u64::from(r.free_count)).sum();
+            assert_eq!(
+                free,
+                agi.free_inodes(),
+                "group {agno}: the ranges hold {free} free inodes and the header says {}",
+                agi.free_inodes()
+            );
+            assert!(
+                ranges.windows(2).all(|w| w[0].start < w[1].start),
+                "group {agno}: the ranges are not in order"
+            );
+        }
     }
 
     /// A leaf reads as the ranges `xfs_db` prints.
