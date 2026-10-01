@@ -395,6 +395,10 @@ mod t {
     /// An interior node reads as the keys and child blocks `xfs_db` prints.
     #[test]
     fn an_interior_node_reads_as_xfs_db_prints_it() {
+        if !crate::libxfuse::alloc::have_xfs_db() {
+            eprintln!("skipping: no xfs_db to check against");
+            return;
+        }
         if golden().is_none() {
             eprintln!("skipping: no unpacked xfsv4.img");
             return;
@@ -472,6 +476,10 @@ mod t {
     /// printed fields turns out to be three printed fields and a mask.
     #[test]
     fn a_chunks_free_count_is_the_number_of_free_inodes_in_its_mask() {
+        if !crate::libxfuse::alloc::have_xfs_db() {
+            eprintln!("skipping: no xfs_db to check against");
+            return;
+        }
         // Only the freshly made image.  The hand-built one's inode tree does not
         // resolve from its own headers -- walking it runs into a block that is
         // not a node of that tree -- which is the same disagreement about inode
@@ -597,6 +605,10 @@ mod t {
     /// A leaf reads as the ranges `xfs_db` prints.
     #[test]
     fn a_leaf_reads_as_xfs_db_prints_it() {
+        if !crate::libxfuse::alloc::have_xfs_db() {
+            eprintln!("skipping: no xfs_db to check against");
+            return;
+        }
         if golden().is_none() {
             eprintln!("skipping: no unpacked xfsv4.img");
             return;

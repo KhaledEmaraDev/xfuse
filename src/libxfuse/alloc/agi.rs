@@ -235,6 +235,10 @@ mod t {
     #[test]
     fn the_inode_header_agrees_with_xfs_db() {
         for name in ["xfsv4.img", "xfs_writable.img"] {
+            if !crate::libxfuse::alloc::have_xfs_db() {
+                eprintln!("skipping: no xfs_db to check against");
+                continue;
+            }
             let Some(golden) = crate::libxfuse::alloc::golden(name) else {
                 eprintln!("skipping {name}: no unpacked image");
                 continue;

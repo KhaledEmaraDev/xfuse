@@ -722,6 +722,75 @@ Three things had to be right, and each was wrong on its own first:
   free space grew by the whole run however it was accounted for, so the tests
   count the trees and the list together rather than the trees alone.
 
+### Filling the list, and an unresolved boundary
+
+Four hundred take-and-give-back rounds fill the list, and `xfs_repair -n` accepts
+the result with the capacity reported one entry lower than the array holds -- but
+that lower number is a **coincidence that hides the fault, not a fix**, and the
+reported capacity has been put back.
+
+What is known: a list reaches its full count of entries and refuses the next
+block, which `a_full_free_list_refuses_a_returned_block` now checks by filling
+until one is refused rather than by computing how full "full" is.  What is not
+known: filling the list *through this code's free path* fails with `NoSpace` one
+entry before that boundary, and the only thing that makes it stop failing is
+reporting less capacity than the array has.  That is the definition of a
+symptom being hidden rather than fixed, so it is written down here and the test
+is left ignored.
+
+What filling the list does establish, and it is the useful part:
+
+```text
+after 400 take-and-give-back rounds
+  agf_freeblks   30144 -> 30021
+  agf_btreeblks  0 -> 0
+  AGFL window    (1, 4, 4) -> (1, 127, 127)
+```
+
+The trees lost exactly what the list took, and **never grew**: while the list has
+room the trees receive nothing, so a leaf cannot overflow.  The second row of the
+transition table -- an AGFL entry consumed for a live node -- is therefore
+unreachable until the list is full *and* blocks start reaching the trees.
+
+And it stays out of reach past that, for a reason worth writing down: the blocks a
+take gives back are **contiguous**, so consecutive frees join into one growing
+record and the leaf's record count never rises.  Overflowing a leaf needs frees
+that do not touch, and the allocator offers runs, not positions inside them.
+
+### An earlier, now-retracted note
+
+
+
+The list in these images is a bare array of 128 slots in a 512-byte block, and
+taking and giving back a block four hundred times fills it exactly:
+
+```text
+after 400 take-and-give-back rounds
+  agf_freeblks   30144 -> 30021
+  agf_btreeblks  0 -> 0
+  AGFL window    (1, 4, 4) -> (1, 127, 127)
+```
+
+`xfs_repair -n` accepts that.  Filling it also turned up a real fault: the usable
+capacity is **one less than the array holds**, because the window's last names the
+newest entry and adding one refuses to step past the end.  Reporting the full 128
+made a fill that believed it had room fail instead, so **a free of perfectly good
+blocks came back as `NoSpace`** once the list was nearly full.  The last slot in
+the array cannot be used, and nothing about that is obvious from the array.
+
+Two things this measurement says about the remaining questions:
+
+* **The free space trees cannot overflow while the list has room.**  Every freed
+  block is reserved, so the trees receive nothing, so a leaf never fills.  The
+  second row of the transition table -- an AGFL entry consumed for a live node --
+  is therefore unreachable until the list is full *and* blocks start reaching the
+  trees.
+* **It is still out of reach after the list fills**, because the blocks a take
+  gives back are contiguous, so consecutive frees join into one growing record and
+  the leaf's record count never rises.  Overflowing a leaf needs frees that do
+  not touch, and the allocator interface only offers runs, not positions inside
+  them.
+
 ### The first row of the AGFL transition table, measured
 
 Freeing blocks and putting them on the free list was measured rather than

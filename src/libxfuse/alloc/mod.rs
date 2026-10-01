@@ -118,6 +118,30 @@ pub(crate) fn golden(name: &str) -> Option<std::path::PathBuf> {
     }
 }
 
+/// Whether the tools the tests check themselves against are here.
+///
+/// The tests that compare what this code reads with what the file system's own
+/// tools report are the only evidence any of this is right, and they are also the
+/// only ones that need something installed.  Where the tool is not, they skip:
+/// a host without `xfs_db` should not report failures in a file system it cannot
+/// inspect.
+#[cfg(test)]
+pub(crate) fn have_xfs_db() -> bool {
+    std::process::Command::new("xfs_db")
+        .arg("-V")
+        .output()
+        .is_ok()
+}
+
+/// Whether `xfs_repair` is here, for the same reason.
+#[cfg(test)]
+pub(crate) fn have_xfs_repair() -> bool {
+    std::process::Command::new("xfs_repair")
+        .arg("-V")
+        .output()
+        .is_ok()
+}
+
 pub mod agf;
 pub mod agfl;
 pub mod agi;

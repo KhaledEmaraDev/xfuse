@@ -182,6 +182,12 @@ impl Agfl {
     }
 
     /// How many block numbers the array can hold.
+    /// How many entries can be live at once.
+    ///
+    /// The whole array.  Giving a block back refuses to step past the end, so a
+    /// list that has reached this many entries is full and refuses the next one --
+    /// which is what `a_full_free_list_refuses_a_returned_block` checks by
+    /// filling until one is refused.
     pub const fn capacity(&self) -> u32 {
         self.entries
     }
@@ -573,10 +579,28 @@ mod t {
     #[test]
     fn a_full_free_list_refuses_a_returned_block() {
         let mut agfl = Agfl::from_bytes(block_of(V5_AGFL, 4096), true).unwrap();
-        let last = agfl.capacity() - 1;
-        let mut window = agfl.window(0, last, agfl.capacity());
-        let err = agfl.give_back(&mut window, 4096).unwrap_err();
+        // Fill it by giving blocks back until one is refused, rather than to a
+        // computed capacity: the point of the test is that a full list refuses,
+        // and working out how full "full" is has already been wrong once.
+        let mut window = agfl.window(0, 0, 0);
+        let mut refused = None;
+        for block in 1..=10_000u32 {
+            match agfl.give_back(&mut window, block) {
+                Ok(_) => {}
+                Err(e) => {
+                    refused = Some(e);
+                    break;
+                }
+            }
+        }
+        let err = refused.expect("a list that never refuses is not a list");
         assert_eq!(err.errno(), libc::ENOSPC);
+        // And it refused because it ran out of array, not a little short of it:
+        // the whole array holds entries, and a list holding all of them is full.
+        assert_eq!(
+            window.count, agfl.entries,
+            "a list that refused should be holding every entry it can"
+        );
     }
 
     /// Changes have to survive being written out and read back, checksum and

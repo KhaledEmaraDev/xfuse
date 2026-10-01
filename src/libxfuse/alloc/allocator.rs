@@ -888,9 +888,9 @@ mod t {
         // *not* get.  A block that is spoken for is still the group's to use.
         let listed: u32 = {
             let d = std::fs::read(image.path()).unwrap();
-            let at = sb.ag_header_offset(0, Sb::AGFL_SECTOR) as usize;
             let af = sb.ag_header_offset(0, Sb::AGF_SECTOR) as usize;
             let be = |o: usize| be32(&d, o);
+            let at = sb.ag_header_offset(0, Sb::AGFL_SECTOR) as usize;
             let (first, last, _) = (be(af + 40), be(af + 44), be(af + 48));
             (first..=last)
                 .filter(|i| be(at + (*i as usize) * 4) != 0)
@@ -1307,8 +1307,28 @@ mod t {
     /// What *is* tested, and passes, is the other half: a depleted list hands
     /// back a real free block rather than block 0, and stops offering it.  See
     /// `an_empty_free_list_takes_a_block_that_was_really_free`.
+    ///
+    /// **Not passing, and what it says is useful.**
+    ///
+    /// Freeing eighty blocks in a group reserves every one of them, so the trees
+    /// receive nothing, no leaf ever fills, and **no split happens at all**:
+    ///
+    /// ```text
+    /// group 0: freeblks 30144 -> 30144 (freed 80), btreeblks 0 -> 0
+    /// ```
+    ///
+    /// That is worth knowing on its own: while the free list has room, the free
+    /// space trees cannot overflow, so a split -- and therefore an AGFL entry
+    /// being consumed for a live node -- is unreachable until the list is full
+    /// and blocks start reaching the trees instead.
+    ///
+    /// The test cannot be made to pass by freeing blocks the way this one does:
+    /// every allocated block belongs to a file or an inode, and giving one up
+    /// without the inode giving it up is what repair calls *found inodes not in
+    /// the inode allocation tree*.  The only free a real image takes honestly is
+    /// one of the blocks just taken, which is not enough to fill a leaf.
     #[test]
-    #[ignore = "the refill reaches the group header, whose tree roots are stale mid-split"]
+    #[ignore = "reserving every freed block means the trees never overflow, so no split occurs"]
     fn a_split_leaves_the_block_count_right() {
         let Some(golden) = crate::libxfuse::alloc::golden("xfsv4.img") else {
             eprintln!("skipping: no unpacked xfsv4.img");
@@ -1659,5 +1679,127 @@ mod t {
         // are freed and put on the list, which is the first row of the
         // transition table.
         let _ = (out, complaints);
+    }
+
+    /// Fill the free list, then keep going until the free space trees overflow
+    /// and a split has to take a node from the list.
+    ///
+    /// This is the second row of the transition table, reached the only way a
+    /// real image allows.  Blocks are taken and given back one at a time, so
+    /// every one is honestly free to reserve -- unlike blocks taken out of a
+    /// file, which is the truncate that is not built.  While the list has room
+    /// the trees receive nothing and cannot overflow; once it is full the blocks
+    /// start reaching the trees, the leaf fills, and the split asks the list for
+    /// a node.
+    ///
+    /// What is read out is which counters moved when that entry was consumed.
+    ///
+    /// **Not passing, and the reason is an unresolved boundary rather than
+    /// anything in the filling.**  The list reaches its full count of entries
+    /// and refuses the next one, which `a_full_free_list_refuses_a_returned_block`
+    /// confirms directly.  But with the capacity the header implies, filling it
+    /// this way fails the *free* with `NoSpace` before the list is full, and
+    /// moving the reported capacity down by one makes this pass and the image
+    /// pass `xfs_repair -n`.  A change that makes the symptom go away without
+    /// being understood is not a fix, so the capacity is left as the array size
+    /// and the boundary is written down here instead.
+    #[test]
+    #[ignore = "filling the list fails with NoSpace one entry before the boundary is known"]
+    fn a_split_takes_a_node_from_the_free_list() {
+        let Some(golden) = crate::libxfuse::alloc::golden("xfsv4.img") else {
+            eprintln!("skipping: no unpacked xfsv4.img");
+            return;
+        };
+        let src = std::fs::File::open(&golden).unwrap();
+        let mut copy = tempfile::NamedTempFile::new().unwrap();
+        {
+            let mut s = src;
+            let mut buf = vec![0u8; 1 << 20];
+            loop {
+                let n = s.read(&mut buf).unwrap();
+                if n == 0 {
+                    break;
+                }
+                copy.write_all(&buf[..n]).unwrap();
+            }
+        }
+        copy.flush().unwrap();
+        let mut reader = std::io::BufReader::new(std::fs::File::open(&golden).unwrap());
+        let sb = Sb::from(&mut reader);
+        let device = Arc::new(BlockDevice::open(copy.path(), Access::ReadWrite).unwrap());
+        let mut cache = BlockCache::new(BS, 256);
+
+        let read_state = || -> (u32, u32, (u32, u32, u32), u32) {
+            let d = std::fs::read(copy.path()).unwrap();
+            let af = sb.ag_header_offset(0, Sb::AGF_SECTOR) as usize;
+            (
+                be32(&d, af + 52),
+                be32(&d, af + 60),
+                (be32(&d, af + 40), be32(&d, af + 44), be32(&d, af + 48)),
+                be32(&d, 144),
+            )
+        };
+
+        let start = read_state();
+        let mut last = start;
+        let mut rounds = 0u32;
+        for i in 0..400u32 {
+            let taken = {
+                let mut tx = Transaction::begin(&device, &mut cache, &sb, CommitMode::Direct);
+                let r = allocate(&mut tx, &sb, 0, 1)
+                    .unwrap_or_else(|e| panic!("round {i}: the group can spare no block: {e:?}"));
+                tx.commit().unwrap();
+                r
+            };
+            {
+                let mut tx = Transaction::begin(&device, &mut cache, &sb, CommitMode::Direct);
+                free_in_group(&mut tx, &sb, 0, taken).expect("free");
+                tx.commit().unwrap();
+            }
+            rounds = i + 1;
+            last = read_state();
+            if last.3 != start.3 {
+                eprintln!(
+                    "round {i}: the device total moved by {}",
+                    last.3 as i64 - start.3 as i64
+                );
+            }
+        }
+        eprintln!("after {rounds} take-and-give-back rounds");
+        eprintln!("  agf_freeblks   {} -> {}", start.0, last.0);
+        eprintln!("  agf_btreeblks  {} -> {}", start.1, last.1);
+        eprintln!("  AGFL window    {:?} -> {:?}", start.2, last.2);
+        device.flush().unwrap();
+        let Ok(out) = Command::new("xfs_repair")
+            .arg("-n")
+            .arg(copy.path())
+            .output()
+        else {
+            eprintln!("skipping the repair check: no xfs_repair to run");
+            return;
+        };
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let complaints: Vec<&str> = text
+            .lines()
+            .map(str::trim)
+            .filter(|l| {
+                !l.is_empty()
+                    && !l.starts_with('-')
+                    && !l.starts_with("Phase")
+                    && !l.starts_with("No modify")
+                    && !l.contains("sector size mismatch")
+                    && !l.contains("host filesystem")
+                    && !l.contains("Finished running")
+            })
+            .collect();
+        assert!(
+            out.status.success(),
+            "xfs_repair -n rejected the image after {rounds} rounds:\n{}",
+            complaints.join("\n")
+        );
     }
 }
