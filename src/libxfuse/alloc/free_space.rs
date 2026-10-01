@@ -4947,3 +4947,131 @@ mod model {
         );
     }
 }
+
+#[cfg(test)]
+mod takeboth {
+    use super::{
+        t::{chain, group_of_leaves},
+        *,
+    };
+
+    fn group() -> MemoryBlocks {
+        // One leaf per tree, holding the same two runs, so a take has to remove
+        // them from both.
+        let by_block = vec![vec![(100, 10), (300, 10)]];
+        let by_size = vec![vec![(100, 10), (300, 10)]];
+        let mut blocks = group_of_leaves(&by_block, &by_size);
+        chain(&mut blocks, &[10], true);
+        chain(&mut blocks, &[11], false);
+        blocks
+    }
+
+    /// Taking a range out of both trees removes it from both, and the two are
+    /// left describing the same space.
+    ///
+    /// This is the primitive the free list's refill is built on, and it is worth
+    /// checking on its own: a refill that takes a block out of one tree and not
+    /// the other leaves the file system with a block that is both a node and free
+    /// space, and the symptom of that is not anywhere near its cause.
+    #[test]
+    fn taking_a_range_removes_it_from_both_trees() {
+        let mut blocks = group();
+        let block_geometry = GroupGeometry::new(1 << 20, false, true);
+        let by_length = GroupGeometry::new(1 << 20, false, false);
+        let (b, s) = take_from_both_trees(&mut blocks, block_geometry, 4, by_length, 5, 100, 4)
+            .expect("the take");
+        assert_eq!(
+            (b, s),
+            (4, 5),
+            "a take of two blocks should not grow either tree"
+        );
+
+        let by_block = canonical(walk(b, block_geometry, |x| blocks.get(x)).unwrap());
+        let by_size = canonical(walk(s, by_length, |x| blocks.get(x)).unwrap());
+        assert_eq!(
+            by_block,
+            vec![
+                FreeRun {
+                    start: 104,
+                    len:   6,
+                },
+                FreeRun {
+                    start: 300,
+                    len:   10,
+                }
+            ],
+            "the block-ordered tree did not give the blocks up"
+        );
+        assert_eq!(
+            by_size, by_block,
+            "the two trees no longer describe the same free space"
+        );
+        assert!(
+            !by_block
+                .iter()
+                .any(|r| (u64::from(r.start) <= 103)
+                    && (103 < u64::from(r.start) + u64::from(r.len))),
+            "a block that was taken is still free"
+        );
+    }
+
+    /// Taking from the middle of a run splits it, so the blocks in front stay
+    /// free rather than going with the ones that were taken.
+    #[test]
+    fn taking_from_the_middle_of_a_run_keeps_the_blocks_in_front() {
+        let mut blocks = group();
+        let block_geometry = GroupGeometry::new(1 << 20, false, true);
+        let by_length = GroupGeometry::new(1 << 20, false, false);
+        take_from_both_trees(&mut blocks, block_geometry, 4, by_length, 5, 102, 3)
+            .expect("the take");
+        let by_block = canonical(walk(4, block_geometry, |x| blocks.get(x)).unwrap());
+        assert_eq!(
+            by_block,
+            vec![
+                FreeRun {
+                    start: 100,
+                    len:   2,
+                },
+                FreeRun {
+                    start: 105,
+                    len:   5,
+                },
+                FreeRun {
+                    start: 300,
+                    len:   10,
+                }
+            ],
+            "the run was not split around the blocks that were taken"
+        );
+    }
+
+    /// Taking blocks that are not free is refused rather than quietly taken.
+    #[test]
+    fn taking_blocks_that_are_not_free_is_refused() {
+        let mut blocks = group();
+        let block_geometry = GroupGeometry::new(1 << 20, false, true);
+        let by_length = GroupGeometry::new(1 << 20, false, false);
+        assert!(
+            take_from_both_trees(&mut blocks, block_geometry, 4, by_length, 5, 500, 1).is_err(),
+            "a block that is not free was handed out"
+        );
+        assert!(
+            take_from_both_trees(&mut blocks, block_geometry, 4, by_length, 5, 100, 99).is_err(),
+            "more blocks than the run holds were handed out"
+        );
+    }
+
+    /// Joining touching runs is what makes one run of both, so that comparing
+    /// two answers is a comparison of free blocks rather than of bookkeeping.
+    fn canonical(mut runs: Vec<FreeRun>) -> Vec<FreeRun> {
+        runs.sort_by_key(|r| (r.start, r.len));
+        let mut out: Vec<FreeRun> = Vec::new();
+        for r in runs {
+            match out.last_mut() {
+                Some(last) if last.start + last.len == r.start => last.len += r.len,
+                _ => out.push(r),
+            }
+        }
+        out
+    }
+}

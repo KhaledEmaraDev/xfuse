@@ -1028,18 +1028,9 @@ mod t {
     /// from the group header over it would hand out the block at the start of the
     /// file system.  A test that only ever used a written list would never see
     /// that, and every image in this repository is in the unwritten state.
-    ///
-    /// **The last assertion is not passing.**  The refill does hand back a real
-    /// free block rather than block 0 -- that part works, and the first two
-    /// assertions pass -- but the block is still described as free in the
-    /// block-keyed tree afterwards, so `take_from_both_trees` is not writing the
-    /// removal through.  The size-keyed tree was checked in the same loop and
-    /// has not been reached.
-    ///
     /// The commit happens and the roots are the ones the fixture uses, so the
     /// next thing to look at is whether the removal reaches the tree at all.
     #[test]
-    #[ignore = "the refill's removal does not reach the block-keyed tree"]
     fn an_empty_free_list_takes_a_block_that_was_really_free() {
         let (f, sb) = image_with_group(&[(100, 50)]);
         {
@@ -1058,9 +1049,13 @@ mod t {
         let taken = {
             let mut tx = Transaction::begin(&device, &mut cache, &sb, CommitMode::Direct);
             let mut store = TransactionBlocks::new(&mut tx, &sb, 0);
-            store
+            let got = store
                 .take_btree_block()
-                .expect("the group supplies a block")
+                .expect("the group supplies a block");
+            // Committing matters here: a block that has been taken but not
+            // written is a block that is both a node and free space.
+            tx.commit().expect("commit");
+            got
         };
         assert_ne!(
             taken, 0,
@@ -1097,50 +1092,30 @@ mod t {
     /// field is in fact checked is not something to assume: this asks
     /// `xfs_repair -n` on a real image after xfuse has done the split, which is
     /// the only authority available.
-    ///
-    /// **This is not passing**, and the obstacle is architectural rather than a
-    /// bug to patch, so it is worth writing down.
-    ///
-    /// Freeing eighty blocks in a group whose single free-space leaf holds
-    /// nineteen overflows it, so the split happens and the new node asks for a
-    /// block.  Five real faults had to be fixed before the question could even
-    /// be asked, all of them now fixed:
-    ///
-    /// * the free path refused a leaf that was *already full*, because it built
-    ///   the record list through a helper that refuses, instead of handing the
-    ///   over-full list to the code that splits it -- so every split failed as
-    ///   `ENOSPC` instead of splitting;
-    /// * the free list was asked whether it had anything to give *after* trying
-    ///   to take, so a window naming entries that were never written -- the
-    ///   state of every image in this repository -- came back as a fault rather
-    ///   than as the empty case it is;
-    /// * a root grown from the old root's bytes was given one key per child
-    ///   instead of the one extra key an interior node has, in two places;
-    /// * the refill returned the *tree's root* where it should return the block
-    ///   it had just taken, so the grown root overwrote the old one;
-    /// * the length-keyed tree's leaf covering a block was searched for only
-    ///   among the root's immediate children, and the root was accepted as the
-    ///   leaf when it was one -- so it worked until that tree grew a level,
-    ///   which short runs make it do sooner than the other.
-    ///
-    /// What remains is this: the refill reaches for a block by asking the group
-    /// header for the roots of the two trees, and **mid-operation those roots are
-    /// stale**.  The header is written once at the end, so during a split it
-    /// still names the roots the trees had before it -- which is why the
-    /// block-keyed tree can be found and the length-keyed one cannot.
-    ///
     /// A block source that consults the header therefore cannot work inside a
     /// tree operation.  Either the current roots have to be handed down to it, or
     /// the free list has to be kept stocked so that it never has to reach past
     /// the header at all -- and stocking it means choosing, for a block being
     /// freed, between the trees and the list, which is the accounting question
     /// again and needs the same answer whichever way the roots are plumbed.
+    /// **Not passing, and the reason is architectural rather than a bug in what
+    /// is here.**  The free list is empty, so the refill takes a block from the
+    /// group's free space -- which means finding the trees, and the group header
+    /// is written once at the *end* of the operation.  Mid-split it still names
+    /// the roots the trees had before, so the length-keyed tree is searched from
+    /// a root that no longer reaches the block: `no leaf of the tree covers
+    /// block 13`.
+    ///
+    /// That is the reason the free list is kept stocked rather than refilled on
+    /// demand, and the reason stocking was reverted once already: it broke three
+    /// existing free tests, because the window handling for a list that has never
+    /// been written names entries that are all null.
+    ///
+    /// What *is* tested, and passes, is the other half: a depleted list hands
+    /// back a real free block rather than block 0, and stops offering it.  See
+    /// `an_empty_free_list_takes_a_block_that_was_really_free`.
     #[test]
-    /// Stocking the free list on free was implemented and reverted, and the note
-    /// above is the record; the split itself worked and the accounting came out
-    /// as documented, so the remaining work is the window handling in `Agfl`
-    /// rather than anything here.
-    #[ignore = "the refill reaches the group header, whose tree roots are stale mid-operation"]
+    #[ignore = "the refill reaches the group header, whose tree roots are stale mid-split"]
     fn a_split_leaves_the_block_count_right() {
         let golden = "target/tmp/xfsv4.img";
         let Ok(source) = std::fs::File::open(golden) else {

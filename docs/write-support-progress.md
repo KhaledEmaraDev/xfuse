@@ -717,10 +717,27 @@ refill wants its block obtained before the tree work starts, which means knowing
 in advance how many a free might need.  That is a design decision rather than a
 patch, and it deserves its own look.
 
-Until then a depleted group reports that it has nothing to offer rather than
-handing out a block that is in use, which is the right way round: the first is
-recoverable and the second corrupts the tree somewhere much later.  A test pins
-that.
+The refill is written, and one half of it is tested and passes: a group whose
+free list is empty -- which is what **every image in this repository** is in --
+hands back a real free block from the group's own space, and stops offering it.
+Getting there turned up a hazard worth naming: the list block is never written on
+a file system that has not grown a tree, so its array reads as zeroes, and a zero
+entry is **block 0**, not the null block.  A list is therefore asked whether it has
+been written at all before its window is believed, because the earlier check --
+"are any entries not null?" -- said yes, and the refill handed out the
+superblock.
+
+The other half is still blocked, and the reason is the one above rather than
+anything in the refill itself: mid-split the group header still names the roots
+the trees had before, so the length-keyed tree is searched from a root that no
+longer reaches the block, and the refill reports `no leaf of the tree covers block
+13`.  That test stays ignored with that written on it.
+
+Which leaves stocking as the answer, on two counts.  It is what the free list is
+for.  And it was tried once and reverted, because it broke three existing free
+tests -- the window handling for a list that has never been written was naming
+entries that are all null.  That is the next piece of work here, and it is a
+matter of `Agfl`'s window rather than of the allocator.
 
 The AGFL half is tested against a fixture with a real initialised free list,
 because that is the only way to reach it here: it checks that the blocks taken
