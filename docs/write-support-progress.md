@@ -699,6 +699,48 @@ Two things followed from that, and both are now fixed:
 With both fixed the refill hands back a real free block and the list survives
 being written, which it did not before.
 
+### The superblock's total is device-wide, not the groups' sum
+
+Checked on both images, with the group *file* field rather than the group inode
+header:
+
+```text
+                     sb_fdblocks    sum(AGF freeblks)    difference
+xfsv4.img                  90624                90277            347
+xfs_writable.img          483138               483122             16
+```
+
+**Both differ, including the freshly made one** -- which nothing here has
+written to.  So the disagreement is there immediately after creation and is not
+something this work introduced.  The likely reading is that the superblock's
+count is free blocks on the whole device while each group's is free space in that
+group's trees, so the extra blocks are free space belonging to no group -- but
+that is not established, only suggested by the two numbers.
+
+What follows for the tests: the stocking test's residual, where the superblock
+ends two below the counted total, should be read against this gap rather than as
+a bug on its own.  A test that asserts the superblock total equals the sum of the
+groups' counts is asserting something false about both fixtures.
+
+### The inode area: less is established than it looked
+
+The measurement offered for the layout question -- forty-two runs of thirty-two
+blocks, spread across blocks 16 to 3231, with gaps of thirty-two or forty-eight
+-- does not survive checking.  Blocks inside those gaps are **directory and file
+data**:
+
+```text
+block 48: 58 44 32 44 0f 10 00 f0 ...   ("XD2D": a directory)
+block 49: 5f 5f 5f 5f ...                (file data)
+block 95: 5f 5f 5f 5f ...                (file data)
+```
+
+So the scan that produced the runs was picking up the dinode magic inside data
+blocks, and neither the run structure nor the "exactly ilength/2 blocks" count can
+be relied on.  What is still established is the small part: two inodes to a block
+at offsets 0 and 256, the magic `0x494e`, and inode 32 at block 16 offset 0,
+which covers the first chunk and nothing beyond it.
+
 ### Where a split's new block comes from
 
 A node that fills up has to become two, and the second needs a block nothing else
