@@ -130,9 +130,10 @@ impl Dinode {
         match effective_mode {
             S_IFREG => match di_core.di_format {
                 XfsDinodeFmt::Extents => {
+                    let is_v5 = di_core.di_version >= 3;
                     let mut bmx = Vec::<BmbtRec>::new();
                     for _i in 0..di_core.nextents {
-                        bmx.push(BmbtRec::decode(&mut decoder).unwrap())
+                        bmx.push(BmbtRec::decode_with_version(&mut decoder, is_v5).unwrap())
                     }
                     di_u = Some(DiU::Bmx(bmx));
                 }
@@ -166,9 +167,10 @@ impl Dinode {
                     di_u = Some(DiU::Dir2Sf(dir_sf));
                 }
                 XfsDinodeFmt::Extents => {
+                    let is_v5 = di_core.di_version >= 3;
                     let mut bmx = Vec::<BmbtRec>::new();
                     for _i in 0..di_core.nextents {
-                        bmx.push(BmbtRec::decode(&mut decoder).unwrap())
+                        bmx.push(BmbtRec::decode_with_version(&mut decoder, is_v5).unwrap())
                     }
                     di_u = Some(DiU::Bmx(bmx));
                 }
@@ -202,9 +204,10 @@ impl Dinode {
                     di_u = Some(DiU::Symlink(data))
                 }
                 XfsDinodeFmt::Extents => {
+                    let is_v5 = di_core.di_version >= 3;
                     let mut bmx = Vec::<BmbtRec>::new();
                     for _i in 0..di_core.nextents {
-                        bmx.push(BmbtRec::decode(&mut decoder).unwrap());
+                        bmx.push(BmbtRec::decode_with_version(&mut decoder, is_v5).unwrap());
                     }
                     di_u = Some(DiU::Bmx(bmx));
                 }
@@ -234,9 +237,10 @@ impl Dinode {
                     di_a = Some(DiA::Attrsf(attr_shortform));
                 }
                 XfsDinodeFmt::Extents => {
+                    let is_v5 = di_core.di_version >= 3;
                     let mut bmx = Vec::<BmbtRec>::new();
                     for _i in 0..di_core.anextents {
-                        bmx.push(BmbtRec::decode(&mut decoder).unwrap());
+                        bmx.push(BmbtRec::decode_with_version(&mut decoder, is_v5).unwrap());
                     }
                     di_a = Some(DiA::Abmx(bmx));
                 }

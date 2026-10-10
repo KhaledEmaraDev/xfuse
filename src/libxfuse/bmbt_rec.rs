@@ -29,6 +29,7 @@
 use bincode_next::{de::Decoder, error::DecodeError, Decode, Encode};
 
 use super::definitions::*;
+use super::inode::EXTENT_REC_SIZE;
 
 #[derive(Debug, Clone, Copy)]
 pub struct BmbtRec {
@@ -40,25 +41,79 @@ pub struct BmbtRec {
     pub br_flag: bool,
 }
 
-impl<Ctx> Decode<Ctx> for BmbtRec {
-    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+impl BmbtRec {
+    /// Decode a `BmbtRec` from a bincode decoder.
+    ///
+    /// Extent records are always 16 bytes on disk (two `__be64` fields: `l0`
+    /// and `l1`), for both v4 and v5 inodes.  The `is_v5` parameter is kept
+    /// for API compatibility but does not change the record format — NREXT64
+    /// only affects how the extent *count* is stored in the inode, not each
+    /// record's size.
+    pub fn decode_with_version<D: Decoder>(
+        decoder: &mut D,
+        _is_v5: bool,
+    ) -> Result<BmbtRec, DecodeError> {
         let br: u128 = Decode::decode(decoder)?;
-
-        let br_blockcount = (br & ((1 << 21) - 1)) as u64;
+        let br_blockcount = (br & ((1u128 << 21) - 1)) as u64;
         let br = br >> 21;
-
-        let br_startblock = (br & ((1 << 52) - 1)) as u64;
+        let br_startblock = (br & ((1u128 << 52) - 1)) as u64;
         let br = br >> 52;
-
-        let br_startoff = (br & ((1 << 54) - 1)) as u64;
+        let br_startoff = (br & ((1u128 << 54) - 1)) as u64;
         let br_flag = (br >> 54) != 0;
-
         Ok(BmbtRec {
             br_startoff,
             br_startblock,
             br_blockcount,
             br_flag,
         })
+    }
+
+    /// Encode this `BmbtRec` to a bincode encoder.
+    pub fn encode_with_version<E: bincode_next::enc::Encoder>(
+        self,
+        encoder: &mut E,
+        _is_v5: bool,
+    ) -> Result<(), bincode_next::error::EncodeError> {
+        let mut br: u128 = 0;
+        br |= (self.br_blockcount as u128) & ((1u128 << 21) - 1);
+        br |= ((self.br_startblock as u128) & ((1u128 << 52) - 1)) << 21;
+        br |= ((self.br_startoff as u128) & ((1u128 << 54) - 1)) << (21 + 52);
+        if self.br_flag {
+            br |= 1u128 << (21 + 52 + 54);
+        }
+        br.encode(encoder)
+    }
+
+    /// Decode a `BmbtRec` from a byte slice.
+    pub fn from_bytes(bytes: &[u8]) -> Option<BmbtRec> {
+        if bytes.len() < EXTENT_REC_SIZE {
+            return None;
+        }
+        let br = u128::from_be_bytes(bytes[..EXTENT_REC_SIZE].try_into().unwrap());
+        let br_blockcount = (br & ((1u128 << 21) - 1)) as u64;
+        let br = br >> 21;
+        let br_startblock = (br & ((1u128 << 52) - 1)) as u64;
+        let br = br >> 52;
+        let br_startoff = (br & ((1u128 << 54) - 1)) as u64;
+        let br_flag = (br >> 54) != 0;
+        Some(BmbtRec {
+            br_startoff,
+            br_startblock,
+            br_blockcount,
+            br_flag,
+        })
+    }
+
+    /// Encode this `BmbtRec` into a byte slice.
+    pub fn to_bytes(self, bytes: &mut [u8]) {
+        let mut br: u128 = 0;
+        br |= (self.br_blockcount as u128) & ((1u128 << 21) - 1);
+        br |= ((self.br_startblock as u128) & ((1u128 << 52) - 1)) << 21;
+        br |= ((self.br_startoff as u128) & ((1u128 << 54) - 1)) << (21 + 52);
+        if self.br_flag {
+            br |= 1u128 << (21 + 52 + 54);
+        }
+        bytes[..EXTENT_REC_SIZE].copy_from_slice(&br.to_be_bytes());
     }
 }
 
@@ -230,22 +285,29 @@ mod tests {
 
         assert_eq!(bmx.map_dblock(6), Some(41));
     }
-}
 
-/// Encode a BmbtRec as a u128 with the same layout as decode.
-#[allow(clippy::items_after_test_module)]
-impl Encode for BmbtRec {
-    fn encode<E: bincode_next::enc::Encoder>(
-        &self,
-        encoder: &mut E,
-    ) -> Result<(), bincode_next::error::EncodeError> {
-        let mut br: u128 = 0;
-        br |= (self.br_blockcount as u128) & ((1 << 21) - 1);
-        br |= ((self.br_startblock as u128) & ((1 << 52) - 1)) << 21;
-        br |= ((self.br_startoff as u128) & ((1 << 54) - 1)) << (21 + 52);
-        if self.br_flag {
-            br |= 1u128 << (21 + 52 + 54);
-        }
-        br.encode(encoder)
+    /// Verify that the 16-byte record format matches the on-disk `xfs_bmbt_rec`
+    /// layout from `xfs_format.h`: `l0` carries the flag and startoff in its
+    /// high bits, `l0` and `l1` together carry startblock, and `l1` carries
+    /// blockcount in its low 21 bits.  This layout is identical for v4 and v5
+    /// inodes — NREXT64 only changes how the *count* is stored in the inode,
+    /// not the record size — so a round-trip through `from_bytes`/`to_bytes`
+    /// must reproduce the exact bytes.
+    #[test]
+    fn round_trip_16_byte_record() {
+        let rec = BmbtRec {
+            br_startoff: 0,
+            br_startblock: 2272,
+            br_blockcount: 8,
+            br_flag: false,
+        };
+        let mut buf = [0u8; EXTENT_REC_SIZE];
+        rec.to_bytes(&mut buf);
+        assert_eq!(&buf[..], &[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0x1c, 0, 0, 8]);
+        let decoded = BmbtRec::from_bytes(&buf).unwrap();
+        assert_eq!(decoded.br_startoff, 0);
+        assert_eq!(decoded.br_startblock, 2272);
+        assert_eq!(decoded.br_blockcount, 8);
+        assert!(!decoded.br_flag);
     }
 }

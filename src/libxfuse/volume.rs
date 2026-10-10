@@ -3057,6 +3057,23 @@ impl Filesystem for Volume {
         }
     }
 
+    /// Flush directory changes, the directory analog of [`fsync`](Self::fsync).
+    /// With no journal, flushing the underlying device is all there is to do.
+    fn fsyncdir(
+        &mut self,
+        _req: &Request,
+        _ino: u64,
+        _fh: u64,
+        _datasync: bool,
+        reply: ReplyEmpty,
+    ) {
+        let result = self.tx.device().flush();
+        match result {
+            Ok(()) => reply.ok(),
+            Err(e) => reply.error(e.raw_os_error().unwrap_or(libc::EIO)),
+        }
+    }
+
     /// Close a file handle.
     #[allow(clippy::too_many_arguments)]
     fn release(

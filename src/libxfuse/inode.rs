@@ -680,10 +680,7 @@ impl RawDinode {
         let mut out = Vec::with_capacity(n);
         for i in 0..n {
             let at = self.literal_area_offset() + i * EXTENT_REC_SIZE;
-            out.push(decode_extent(
-                &self.bytes[at..at + EXTENT_REC_SIZE],
-                self.nrext64(),
-            )?);
+            out.push(decode_extent(&self.bytes[at..at + EXTENT_REC_SIZE])?);
         }
         Some(out)
     }
@@ -1368,49 +1365,21 @@ impl RawDinode {
 ///
 /// A record packs the offset within the file, the starting block, the number of
 /// blocks, and the "not written yet" flag into one 128-bit number, big-endian.
+/// This is the `xfs_bmbt_rec { __be64 l0, l1; }` struct from the on-disk
+/// format, which is always 16 bytes regardless of inode version.  NREXT64 only
+/// changes how the extent *count* is stored in the inode, not the record size.
 pub const EXTENT_REC_SIZE: usize = 16;
 
 /// Decode one extent record.
-///
-/// `nrext64` selects between the narrow record, in which the length is 21 bits,
-/// and the wide one, in which it is 63.
-#[allow(dead_code)] // Used as soon as a file's extents are changed.
-fn decode_extent(bytes: &[u8], nrext64: bool) -> Option<BmbtRec> {
-    if bytes.len() < EXTENT_REC_SIZE {
-        return None;
-    }
-    let mut raw = [0u8; 16];
-    raw.copy_from_slice(&bytes[..EXTENT_REC_SIZE]);
-    let br = u128::from_be_bytes(raw);
-    let (blockcount_bits, blockcount_shift) = if nrext64 { (63, 0) } else { (21, 21) };
-    let br_blockcount = (br & ((1 << blockcount_bits) - 1)) as u64;
-    let br = br >> blockcount_shift;
-    let br_startblock = (br & ((1 << 52) - 1)) as u64;
-    let br = br >> 52;
-    let br_startoff = (br & ((1 << 54) - 1)) as u64;
-    let br_flag = (br >> 54) != 0;
-    Some(BmbtRec {
-        br_startoff,
-        br_startblock,
-        br_blockcount,
-        br_flag,
-    })
+#[allow(dead_code)]
+fn decode_extent(bytes: &[u8]) -> Option<BmbtRec> {
+    BmbtRec::from_bytes(bytes)
 }
 
-/// Encode one extent record, in the narrow form.
-#[allow(dead_code)] // Used as soon as a file's extents are changed.
+/// Encode one extent record.
+#[allow(dead_code)]
 pub fn encode_extent(bytes: &mut [u8], rec: &BmbtRec) {
-    assert!(bytes.len() >= EXTENT_REC_SIZE);
-    debug_assert!(rec.br_blockcount < (1 << 21));
-    // The record is one 128-bit number: the block count in the low bits, then
-    // the starting block, then the offset within the file, and the "not
-    // written yet" flag in the very top bit.
-    let br_flag = u128::from(rec.br_flag) << 127;
-    let br_startoff = u128::from(rec.br_startoff) << 73;
-    let br_startblock = u128::from(rec.br_startblock) << 21;
-    let br_blockcount = u128::from(rec.br_blockcount);
-    let br = br_startoff | br_startblock | br_blockcount | br_flag;
-    bytes[..EXTENT_REC_SIZE].copy_from_slice(&br.to_be_bytes());
+    rec.to_bytes(bytes);
 }
 
 #[cfg(test)]
