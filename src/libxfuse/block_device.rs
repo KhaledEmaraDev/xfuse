@@ -259,10 +259,15 @@ impl BlockDevice {
                     return 512;
                 }
             } else {
-                // TEMPORARY: Simulate FreeBSD behavior on Linux for debugging
-                let _ = f;
-                let _ = md;
-                return 512;
+                // On non-FreeBSD, regular files are not block devices, and
+                // using md.blksize() would return the host filesystem's
+                // preferred I/O size (e.g. 4096 on ext4) rather than the
+                // image's sector size.  XFS sector size is always 512 for
+                // these images, so return that directly.
+                let ft = md.file_type();
+                if ft.is_file() {
+                    return 512;
+                }
             }
         }
         md.blksize() as usize
