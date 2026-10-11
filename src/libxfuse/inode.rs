@@ -499,6 +499,13 @@ impl RawDinode {
         self.update_crc();
     }
 
+    /// Set the device number for a `Dev`-formatted inode (`mknod`).
+    pub fn set_dev(&mut self, rdev: u64) {
+        let start = self.literal_area_offset();
+        BigEndian::write_u64(&mut self.bytes[start..start + 8], rdev);
+        self.update_crc();
+    }
+
     /// Set the offset of the attribute fork within the local area.
     pub fn set_forkoff(&mut self, forkoff: u8) {
         self.bytes[offset::FORKOFF] = forkoff;

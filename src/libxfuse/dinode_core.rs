@@ -133,6 +133,10 @@ pub struct DinodeCore {
     pub di_crtime: XfsTimestamp,
     pub di_ino: u64,
     //_di_uuid: Uuid,
+    /// Device number for Dev-formatted inodes (mknod).  Decoded in
+    /// `Dinode::from_bytes`, not by this `Decode` implementation, because
+    /// the value lives in the literal area rather than the core.
+    pub di_rdev:   u64,
 }
 
 impl DinodeCore {
@@ -218,7 +222,7 @@ impl DinodeCore {
             nlink: self.nlink,
             uid: self.di_uid,
             gid: self.di_gid,
-            rdev: 0,
+            rdev: self.di_rdev as u32,
             blksize: 0,
             flags: 0,
         })
@@ -323,6 +327,7 @@ impl<Ctx> Decode<Ctx> for DinodeCore {
             di_flags2,
             di_crtime,
             di_ino,
+            di_rdev: 0,
         })
     }
 }

@@ -1484,8 +1484,8 @@ impl BtreeRoot {
     where
         R: bincode_next::de::read::Reader + BufRead + Seek,
     {
-        // Allocate a new leaf block
-        let agno = 0; // TODO: choose AG intelligently
+        let ino = self.owner.ok_or(libc::ENOTSUP)?;
+        let agno = sb.locate_ino(ino).agno;
         let run_opt = allocate_in_group(tx, sb, agno, 1).map_err(|e| e.errno())?;
         let run = run_opt.ok_or(libc::ENOSPC)?;
         let leaf_block = (agno as u64 * sb.sb_agblocks as u64) + run.start as u64;
@@ -1681,7 +1681,8 @@ impl BtreeRoot {
 
         // Root is full - need to split and grow to level 2
         // 1. Allocate new block for the old root (now a child)
-        let agno = 0; // TODO: choose AG intelligently
+        let ino = self.owner.ok_or(libc::ENOTSUP)?;
+        let agno = sb.locate_ino(ino).agno;
         let run_opt = allocate_in_group(tx, sb, agno, 1).map_err(|e| e.errno())?;
         let run = run_opt.ok_or(libc::ENOSPC)?;
         let old_root_block = (agno as u64 * sb.sb_agblocks as u64) + run.start as u64;

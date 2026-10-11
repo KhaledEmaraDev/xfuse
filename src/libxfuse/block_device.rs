@@ -258,6 +258,11 @@ impl BlockDevice {
                     // for all XFS image formats (sb_sectsize is always 512).
                     return 512;
                 }
+            } else {
+                // TEMPORARY: Simulate FreeBSD behavior on Linux for debugging
+                let _ = f;
+                let _ = md;
+                return 512;
             }
         }
         md.blksize() as usize

@@ -367,6 +367,11 @@ impl Drop for Harness {
                     } else if errmsg.contains("not a file system root directory") {
                         // The daemon probably crashed.
                         break;
+                    } else if errmsg.contains("Invalid argument") {
+                        // The mount is already invalid, likely because the
+                        // daemon crashed or the mount is in an inconsistent
+                        // state.  Nothing more umount can do.
+                        break;
                     } else if errmsg.contains("Device busy") {
                         println!("{errmsg}");
                     } else {

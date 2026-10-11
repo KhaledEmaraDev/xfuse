@@ -113,7 +113,14 @@ impl Dinode {
         let reader = bincode_next::de::read::SliceReader::new(raw);
         let mut decoder = bincode_next::de::DecoderImpl::new(reader, config, ());
 
-        let di_core = DinodeCore::decode(&mut decoder).unwrap();
+        let mut di_core = DinodeCore::decode(&mut decoder).unwrap();
+
+        // For Dev-formatted inodes, the device number lives in the literal
+        // area immediately after the core, as a big-endian u64.
+        if di_core.di_format == XfsDinodeFmt::Dev {
+            let rdev = u64::decode(&mut decoder).unwrap();
+            di_core.di_rdev = rdev;
+        }
 
         let di_u: Option<DiU>;
         let effective_mode = if di_core.di_mode == 0 {

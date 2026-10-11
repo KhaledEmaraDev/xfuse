@@ -42,6 +42,7 @@
 mod util;
 
 use std::{
+    ffi::CString,
     fs::{File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
     os::unix::fs::PermissionsExt,
@@ -279,6 +280,11 @@ fn is_live(mnt: &Path) -> bool {
     std::fs::read_dir(mnt)
         .map(|mut entries| entries.next().is_some())
         .unwrap_or(false)
+}
+
+/// Is the test running as root?
+fn root() -> bool {
+    nix::unistd::Uid::current().is_root()
 }
 
 /// Read a whole file.
@@ -1330,4 +1336,123 @@ fn a_bad_golden_image_is_extracted_again() {
         );
         assert!(after.iter().any(|b| *b != 0), "the image is all zeroes");
     }
+}
+
+/// A FIFO created with `mknod` must survive a remount and leave a
+/// consistent image.
+#[test]
+fn mknod_creates_a_fifo() {
+    require_fusefs!();
+    let image = writable_copy(&GOLDENV4, "mknod-fifo");
+    with_rw_mount_at(&image, "mknod-fifo", |mnt| {
+        let path = mnt.join("sf/mydev");
+        let cpath = CString::new(path.to_str().unwrap()).unwrap();
+        let ret = unsafe { libc::mknod(cpath.as_ptr(), libc::S_IFIFO | 0o644, 0) };
+        assert_ne!(ret, -1, "mknod failed: {}", std::io::Error::last_os_error());
+    });
+
+    with_ro_mount(&image, "mknod-fifo-ro", |mnt| {
+        let path = mnt.join("sf/mydev");
+        let meta = std::fs::metadata(&path).expect("the FIFO should exist after remount");
+        use std::os::unix::fs::MetadataExt;
+        assert!(
+            (meta.mode() & libc::S_IFMT as u32) == libc::S_IFIFO as u32,
+            "expected a FIFO, got mode {:#o}",
+            meta.mode() & 0o7777
+        );
+    });
+
+    repair_accepts(&image, "after a FIFO was created with mknod");
+}
+
+/// A character device created with `mknod` must survive a remount and leave a
+/// consistent image.
+#[test]
+fn mknod_creates_a_chrdev() {
+    require_fusefs!();
+    if !root() {
+        skip!("creating char devices requires root");
+    }
+    let image = writable_copy(&GOLDENV4, "mknod-chrdev");
+    with_rw_mount_at(&image, "mknod-chrdev", |mnt| {
+        let path = mnt.join("sf/mychar");
+        let cpath = CString::new(path.to_str().unwrap()).unwrap();
+        let rdev = libc::makedev(1, 3);
+        let ret = unsafe { libc::mknod(cpath.as_ptr(), libc::S_IFCHR | 0o600, rdev) };
+        assert_ne!(ret, -1, "mknod failed: {}", std::io::Error::last_os_error());
+    });
+
+    with_ro_mount(&image, "mknod-chrdev-ro", |mnt| {
+        let path = mnt.join("sf/mychar");
+        let meta = std::fs::metadata(&path).expect("the char device should exist after remount");
+        use std::os::unix::fs::MetadataExt;
+        assert!(
+            (meta.mode() & libc::S_IFMT as u32) == libc::S_IFCHR as u32,
+            "expected a character device, got mode {:#o}",
+            meta.mode() & 0o7777
+        );
+        assert_eq!(
+            meta.rdev(),
+            libc::makedev(1, 3) as u64,
+            "the rdev did not survive the remount"
+        );
+    });
+
+    repair_accepts(&image, "after a char device was created with mknod");
+}
+
+/// A block device created with `mknod` must survive a remount and leave a
+/// consistent image.
+#[test]
+fn mknod_creates_a_blockdev() {
+    require_fusefs!();
+    if !root() {
+        skip!("creating block devices requires root");
+    }
+    let image = writable_copy(&GOLDENV4, "mknod-blkdev");
+    with_rw_mount_at(&image, "mknod-blkdev", |mnt| {
+        let path = mnt.join("sf/mybdev");
+        let cpath = CString::new(path.to_str().unwrap()).unwrap();
+        let rdev = libc::makedev(8, 0);
+        let ret = unsafe { libc::mknod(cpath.as_ptr(), libc::S_IFBLK | 0o660, rdev) };
+        assert_ne!(ret, -1, "mknod failed: {}", std::io::Error::last_os_error());
+    });
+
+    with_ro_mount(&image, "mknod-blkdev-ro", |mnt| {
+        let path = mnt.join("sf/mybdev");
+        let meta = std::fs::metadata(&path).expect("the block device should exist after remount");
+        use std::os::unix::fs::MetadataExt;
+        assert!(
+            (meta.mode() & libc::S_IFMT as u32) == libc::S_IFBLK as u32,
+            "expected a block device, got mode {:#o}",
+            meta.mode() & 0o7777
+        );
+        assert_eq!(
+            meta.rdev(),
+            libc::makedev(8, 0) as u64,
+            "the rdev did not survive the remount"
+        );
+    });
+
+    repair_accepts(&image, "after a block device was created with mknod");
+}
+
+/// `mknod` with a regular-file mode must be refused, because mknod does not
+/// create regular files.
+#[test]
+fn mknod_refuses_regular_file() {
+    require_fusefs!();
+    let image = writable_copy(&GOLDENV4, "mknod-reg");
+    with_rw_mount_at(&image, "mknod-reg", |mnt| {
+        let path = mnt.join("sf/regular");
+        let cpath = CString::new(path.to_str().unwrap()).unwrap();
+        let ret = unsafe { libc::mknod(cpath.as_ptr(), libc::S_IFREG | 0o644, 0) };
+        assert_eq!(ret, -1, "mknod with S_IFREG should have been refused");
+        let err = std::io::Error::last_os_error();
+        assert_eq!(
+            err.raw_os_error(),
+            Some(libc::EINVAL),
+            "expected EINVAL for a regular file mode, got: {err}"
+        );
+    });
 }
