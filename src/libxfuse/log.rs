@@ -395,20 +395,6 @@ mod locate {
                     == XLOG_HEADER_MAGIC_NUM
         };
 
-        eprintln!(
-            "blocksize {bs}, sb_logstart {ls}, sb_logblocks {}",
-            sb.sb_logblocks
-        );
-        for (what, byte) in [
-            ("as a byte offset", ls as usize),
-            ("as a 512-byte sector", (ls as usize) * 512),
-            ("as a 1 KiB block", (ls as usize) * bs),
-            ("as a 4 KiB block", (ls as usize) * 4096),
-        ] {
-            eprintln!("  {what:<20} -> byte {byte}: magic {}", magic_at(byte));
-        }
-        // And where the magic actually is, first and last block in the image that
-        // carry it, so the three candidates above can be judged.
         let mut first = None;
         let mut last = 0usize;
         let mut n = 0usize;
@@ -419,9 +405,5 @@ mod locate {
                 n += 1;
             }
         }
-        eprintln!(
-            "  {n} blocks carry the magic; first {:?}, last {last}",
-            first.unwrap_or(0)
-        );
     }
 }

@@ -1049,15 +1049,6 @@ mod ino_tests {
 
         let rootino = sb.sb_rootino;
         let loc = sb.locate_ino(rootino);
-        eprintln!(
-            "rootino={} inopblog={} agblklog={} blocksize={} inodesize={} agblocks={}",
-            rootino,
-            sb.sb_inopblog,
-            sb.sb_agblklog,
-            sb.sb_blocksize,
-            sb.sb_inodesize,
-            sb.sb_agblocks
-        );
         // Inode 32 in a group of 32768 blocks with two inodes a block is block
         // 16, slot 0 -- the first block after the group's headers.
         assert_eq!(
@@ -1155,10 +1146,6 @@ mod ino_tests {
             with_magic < named,
             "almost every inode number the geometry names has an inode in it, which would mean \
              the mapping is reading something else"
-        );
-        eprintln!(
-            "group 0: {with_magic} inodes found among {} numbers examined",
-            inos_per_group
         );
     }
 
