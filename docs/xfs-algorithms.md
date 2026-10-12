@@ -547,39 +547,58 @@ error, because the group may be nearly empty and no retry helps).
   intermediate nodes. Root collapse implemented.
 * **Extent coalescing/splitting.** Implemented: `BmbtLeafBlock::insert_record`
   coalesces with previous/next on insertion; `remove_record` coalesces adjacent
-  after deletion; `coalesce_adjacent` called after PUNCH_HOLE. Splitting during
-  deletion implemented in `delete_extents_recursive`.
-* **CRC updates for v5 nodes.** Implemented in all `to_bytes` methods
-  (`BmbtLeafBlock`, `BmbtInteriorBlock`, `BtreeIntermediate`) via
-  `crc32c_without_its_own_field`. Previously was a no-op.
+   after deletion; `coalesce_adjacent` called after PUNCH_HOLE. Splitting during
+   deletion implemented in `delete_extents_recursive`.
+ * **CRC updates for v5 nodes.** Implemented in all `to_bytes` methods
+   (`BmbtLeafBlock`, `BmbtInteriorBlock`, `BtreeIntermediate`) via
+   `crc32c_without_its_own_field`. Previously was a no-op.
 
-**verified.**
+ **NOT YET VERIFIED (incremental path).** The code below implements the
+ incremental (single-record) BMBT mutation paths that `fallocate` uses, but
+ these paths have **no unit tests** in `btree.rs` and **no FUSE-level test**
+ exercises `fallocate`/`punch_hole` on any file. The following functions are
+ present and reachable but **untested** and contain **known bugs**:
 
-* Two leaves may live in the fork with the root naming them directly; a third
-  needs an interior block, and the root becomes level 2 with one key and one
-  pointer.
-* Leaf and interior node split/merge/redistribution logic verified by
-  `xfs_repair -n` on generated images.
-* **Incremental leaf insertion with split.** `BmbtLeafBlock::insert_record`
-  inserts a record, splits on overflow, returns new leaf and separator key.
-* **Incremental leaf deletion.** `BmbtLeafBlock::remove_record` removes a
-  record, signals if below minimum occupancy.
-* **Leaf merge/redistribute.** `merge_with` and `redistribute_with` for
-  leaves implemented and verified.
-* **Intermediate node insertion/split.** `BmbtInteriorBlock::insert_key_ptr`
-  inserts key-pointer pair, splits on overflow, returns new node and separator.
-* **Intermediate node merge/redistribute.** `merge_with` and
-  `redistribute_with` for intermediate nodes implemented.
-* **Intermediate node merge/redistribute propagation.** Implemented in
-  `BtreeRoot::handle_intermediate_underflow`: same sibling selection and
-  redistribution/merge logic as leaves, propagates separator key updates up.
-* **Root collapse (level 1→0).** Implemented in `BtreeRoot::check_root_collapse`:
-  called after deletions; when level 1 root has one leaf child fitting in inode,
-  moves records back and frees leaf block.
-* **Root collapse (level 2→1).** Implemented in `BtreeRoot::check_root_collapse`:
-  called after deletions; when level 2 root has one intermediate child with
-  one leaf child, moves leaf records up to intermediate, frees leaf block,
-  updates root to level 1.
+ * **Incremental leaf insertion with split.** `BmbtLeafBlock::insert_record`
+   (`btree.rs:835`) inserts a record, splits on overflow, returns new leaf and
+   separator key. Present but untested.
+ * **Incremental leaf deletion.** `BmbtLeafBlock::remove_record`
+   (`btree.rs:934`) and the split-trim logic in `delete_extents_recursive`
+   (`btree.rs:2072-2157`). Present but untested.
+ * **Leaf merge/redistribute.** `merge_with` (`btree.rs:980`) and
+   `redistribute_with` (`btree.rs:987`) for leaves. Present but **buggy**:
+   `redistribute_with` calls `min_records(0, false)` which always returns 0,
+   making the redistribution guard dead code (see `btree.rs:989`).
+ * **Intermediate node insertion/split.** `insert_key_ptr_at`
+   (`btree.rs:1719`) and the inline split at `btree.rs:1934-1988`. Present but
+   untested; **fsblock arithmetic is wrong** — allocations use `run.start`
+   directly instead of `sb.ag_block_to_fsb(agno, run.start)`.
+ * **Intermediate node merge/redistribute propagation.** Implemented in
+   `BtreeRoot::handle_intermediate_underflow` (`btree.rs:2619`), but the deep
+   inter-node sibling merge is **stubbed** (`btree.rs:2902-2904`:
+   `// Need to merge with sibling`).
+ * **Root collapse (level 1→0).** `check_root_collapse` (`btree.rs:2219`) reads
+   the single leaf child and moves records to the inode. Present but uses a
+   non-standard writer (`write_extents_to_inode`, `btree.rs:1476`) that
+   bypasses `RawDinode::finalise`/CRC and the fork-overflow checks. Untested.
+ * **Root collapse (level 2→1).** `check_root_collapse` at `btree.rs:2229`.
+   **BROKEN**: writes leaf records into an interior-node layout (`to_bytes_auto`
+   with `bb_level=0`), producing a structurally invalid node a reader will
+   misparse. Untested.
+ * **Sibling pointer relinking.** Splits allocate new nodes with
+   `leftsib/rightsib = BMBT_NULL_PTR` (`btree.rs:1648-1649`, `1656-1659`,
+   `1860-1861`, `1877-1884`); no code relinks the sibling chain after a split.
+ * **Root growth (level 1→2).** `handle_root_split` (`btree.rs:1730`) updates
+   the in-memory root but **does not persist** the new level-2 root to the
+   inode. The `fallocate` caller re-derives counts but does not call
+   `set_data_btree_root` (`volume.rs:3851-3866`), so root growth is silently
+   lost on commit.
+
+ In short: the **bulk** path (extent-list ↔ BMBT conversion via
+ `write_extending`/`truncate`) is tested and verified; the **incremental** path
+ (`insert_extent`/`delete_extents_in_range` via `fallocate`) is present in
+ code but untested and contains the bugs above. Do not treat `xfs_repair -n`
+ validation of the bulk path as proof of the incremental path.
 
 ---
 
@@ -631,35 +650,42 @@ punch holes (free interior extents, creating sparse regions).
 **implemented.**
 
 * **`fallocate` (FALLOC_FL_PUNCH_HOLE).** `Volume::fallocate` in `volume.rs:3269`
-  punches holes in BMBT-formatted files: reads inode/btree root before
-  transaction, calls `BtreeRoot::delete_extents_in_range` to locate and remove
-  overlapping leaf records, frees blocks via `free_in_group`, updates inode
-  (`di_nblocks`, `di_mtime`, `di_ctime`) in transaction. Returns `ENOSYS` for
-  extents format; `ENOTSUP` for real-time files.
-* **`fallocate` (FALLOC_FL_KEEP_SIZE).** Preallocates blocks for a range
-  without changing file size: for each file block in range, checks if already
-  allocated via `map_block`, allocates via `allocate_in_group`, inserts extent
-  via `BtreeRoot::insert_extent`. Returns `ENOSYS` for extents format;
-  `ENOTSUP` for real-time files.
-* Both operations handle BMBT format (level ≥ 1) and extents format.
-  Root level 0 (extent list → BMBT conversion) implemented.
+   punches holes in BMBT-formatted files: reads inode/btree root before
+   transaction, calls `BtreeRoot::delete_extents_in_range` to locate and remove
+   overlapping leaf records, frees blocks via `free_in_group`, updates inode
+   (`di_nblocks`, `di_mtime`, `di_ctime`) in transaction. For extents format,
+   uses `RawDinode::split_extents_in_range` (inline extents, no BMBT).
+   Returns `ENOTSUP` for real-time files.
+ * **`fallocate` (FALLOC_FL_KEEP_SIZE).** Preallocates blocks for a range
+   without changing file size: for each file block in range, checks if already
+   allocated via `map_block`, allocates via `allocate_in_group`, inserts extent
+   via `BtreeRoot::insert_extent` (BMBT) or `set_core_extents` (extents).
+   Returns `ENOTSUP` for real-time files.
+ * Both operations handle BMBT format (level ≥ 1) and extents format.
+   Root level 0 (extent list → BMBT conversion) implemented.
 
-**missing.**
+ **missing.**
 
-* **`fallocate` (FALLOC_FL_KEEP_SIZE) for extents format.** Not yet implemented.
-* **Extent coalescing.** Implemented: `BmbtLeafBlock::insert_record` coalesces with
-  previous/next records on insertion; `remove_record` coalesces adjacent records
-  after deletion; `coalesce_adjacent` called after PUNCH_HOLE modifications to
-  merge contiguous extents. Checks both file offset and filesystem block adjacency.
-* **Partial record splitting.** Implemented in `BtreeRoot::delete_extents_recursive`
-  for PUNCH_HOLE: handles record spanning hole (split), straddling startoff (trim
-  front), straddling endoff (trim end). Uses `BmbtLeafRecord::from_extent` for
-  proper 128-bit packed record creation.
-* **Delayed allocation / unwritten extent flag.** Implemented:
-  `BmbtRec::br_flag` field marks allocated-but-unwritten extents. `fallocate`
-  KEEP_SIZE sets `br_flag = true` for newly allocated blocks (both BMBT and
-  extents formats). `BmbtRec::Encode` serializes the flag. Not yet integrated:
-  `write_data` does not clear the flag when data is written to unwritten extents.
+ * **`fallocate` (FALLOC_FL_ZERO_RANGE) proper zeroing.** The `zero_range` flag
+   is accepted and falls through to the KEEP_SIZE allocation path, but does not
+   actually zero existing data in the range. True ZERO_RANGE (write zeroes to
+   the range, converting unwritten extents to written) is not implemented.
+ * **Unwritten extent flag in fallocate.** The docs previously claimed
+   `br_flag = true` for KEEP_SIZE preallocated blocks; the code sets
+   `br_flag = false` at `volume.rs:3829` and `volume.rs:3951`. This **bug**
+   means preallocated blocks are indistinguishable from written data.
+ * **Extent coalescing.** Implemented for the **bulk** path (`write_extending`
+   builds leaves via `chunks`, `btree.rs:1007` `coalesce_adjacent` for
+   incremental deletion) but the incremental insertion coalesce is
+   **untested** (`btree.rs:850-890`, `898-919`).
+
+ **stale.**
+
+ * The earlier docs incorrectly claimed `fallocate` PUNCH_HOLE returns `ENOSY`
+   for extents format. It is in fact handled at `volume.rs:3684` via
+   `split_extents_in_range`.
+ * The docs claimed `br_flag = true` was set for newly allocated blocks; the
+   code sets `br_flag = false`.
 
 **verified.**
 
@@ -673,17 +699,27 @@ punch holes (free interior extents, creating sparse regions).
   `INSERT_RANGE`, `UNSHARE_RANGE`, `WRITE_ZEROES`). Returns `ENOSYS` for
   unsupported modes; returns `ENOTSUP` for real-time files and non-extent formats;
   returns `EINVAL` for invalid flag combinations. Actual allocation/deallocation
-  logic uses incremental BMBT insertion/deletion (partial implementation).
-* **BMBT incremental insertion (leaf level).** Verified by unit tests in
-  `btree.rs` (`insert_record`, `insert_key_ptr`, split/merge/redistribution).
-* **BMBT incremental deletion (leaf level).** Leaf `remove_record`,
-  `merge_with`, `redistribute_with` implemented and tested.
-* **Extent coalescing on insertion.** `BmbtLeafBlock::insert_record` merges
-  with previous/next records if contiguous in both file offset and block address.
-* **Extent coalescing on deletion.** `BmbtLeafBlock::remove_record` checks
-  if adjacent records become contiguous after removal.
-* **Extent coalescing after PUNCH_HOLE.** `BmbtLeafBlock::coalesce_adjacent`
-  called after modifications, merges all contiguous pairs.
+   logic uses incremental BMBT insertion/deletion (partial implementation).
+ * **BMBT incremental mutation is UNTESTED and buggy.** The `insert_extent`
+   (`btree.rs:1377`) and `delete_extents_in_range` (`btree.rs:2001`) paths are
+   reachable from `fallocate` but have **no tests** (no unit tests in
+   `btree.rs`, no fallocate FUSE test). Known bugs: wrong fsblock arithmetic,
+   unrelinked sibling pointers, unpersisted root growth, broken 2→1 collapse,
+   stubbed deep-intermediate merge, `min_records(0)` making redistribute dead.
+   See the "NOT YET VERIFIED" section above for details.
+ * **Extent coalescing on insertion.** `BmbtLeafBlock::insert_record` merges
+   with previous/next records if contiguous in both file offset and block address.
+ * **Extent coalescing on deletion.** `BmbtLeafBlock::remove_record` checks
+   if adjacent records become contiguous after removal.
+ * **Extent coalescing after PUNCH_HOLE.** `BmbtLeafBlock::coalesce_adjacent`
+   (`btree.rs:1007`) called after modifications (`btree.rs:2165`), merges all
+   contiguous pairs.
+ * **Unwritten extent flag in fallocate.** The docs previously claimed
+   `br_flag = true` for preallocated blocks; the code actually sets
+   `br_flag = false` at `volume.rs:3829` and `volume.rs:3951`. This **bug**
+   means fallocate-preallocated blocks are indistinguishable from written data.
+ * **PUNCH_HOLE for extents format.** Implemented (not `ENOSY` as previously
+   documented) at `volume.rs:3684-3758` via `split_extents_in_range`.
 
 ---
 
