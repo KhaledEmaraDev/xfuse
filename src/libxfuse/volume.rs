@@ -1543,29 +1543,11 @@ impl Filesystem for Volume {
             }
         };
 
-        eprintln!(
-            "DEBUG create: parent dir has {} entries:",
-            dir.entries.len()
-        );
-        for (i, e) in dir.entries.iter().enumerate() {
-            eprintln!(
-                "  entry {}: name={}, offset={}, ino={}",
-                i,
-                String::from_utf8_lossy(&e.name),
-                e.offset,
-                e.inumber
-            );
-        }
-
         let first_offset = if dir.entries.is_empty() {
             dir.header_len() as u16
         } else {
             dir.entries.last().unwrap().offset + SF_OFFSET_STEP
         };
-        eprintln!(
-            "DEBUG create: first_offset for new entry = {}",
-            first_offset
-        );
         if let Err(e) = dir.add(name_bytes, XFS_DIR3_FT_REG_FILE, new_xfs_ino, first_offset) {
             tx.abort();
             reply.error(e.errno());
@@ -3252,6 +3234,7 @@ impl Filesystem for Volume {
 
         let rtdev = if oi.dinode.is_realtime() {
             if let Some(rtd) = &mut self.rt_device {
+                rtd.set_bufsize(self.sb.sb_blocksize as usize);
                 Some(rtd.by_ref())
             } else {
                 warn!("Realtime device not mounted");
