@@ -256,7 +256,7 @@ impl Dir3 for Dir2Sf {
             return Ok((ino, entry.offset as i64, kind, name));
         }
 
-        Err(-1)
+        Err(ENOENT)
     }
 }
 

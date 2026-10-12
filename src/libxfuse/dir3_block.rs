@@ -37,6 +37,7 @@ use fuser::FileType;
 use libc::{c_int, ENOENT};
 
 use super::{
+    btree::crc32c_without_its_own_field,
     da_btree::hashname,
     definitions::{XfsDahash, XFS_DIR2_BLOCK_MAGIC, XFS_DIR3_BLOCK_MAGIC, *},
     dir3::{
@@ -454,9 +455,10 @@ impl Dir2Block {
         if !self.is_v3() {
             return Ok(());
         }
-        // The CRC is in the Dir3BlkHdr at offset 4
-        // For now, we'll leave CRC update as a TODO
-        // In a full implementation, we'd compute CRC32C over the block with CRC=0
+        // The CRC is in the Dir3BlkHdr at offset 4 (after the 4-byte magic).
+        // CRC32C is stored as little-endian 4 bytes.
+        let crc = crc32c_without_its_own_field(&self.raw, 4);
+        self.raw[4..8].copy_from_slice(&crc.to_le_bytes());
         Ok(())
     }
 }

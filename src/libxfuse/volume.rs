@@ -3334,9 +3334,13 @@ impl Filesystem for Volume {
                     }
                     off = offset;
                 }
-                // TODO: don't ignore errors other than ENOENT
-                Err(_) => {
-                    reply.ok();
+                // Errors other than ENOENT should be reported to the caller.
+                Err(e) => {
+                    if e == libc::ENOENT {
+                        reply.ok();
+                    } else {
+                        reply.error(e);
+                    }
                     return;
                 }
             }

@@ -1341,6 +1341,7 @@ fn a_bad_golden_image_is_extracted_again() {
 /// A FIFO created with `mknod` must survive a remount and leave a
 /// consistent image.
 #[test]
+#[allow(clippy::unnecessary_cast)]
 fn mknod_creates_a_fifo() {
     require_fusefs!();
     let image = writable_copy(&GOLDENV4, "mknod-fifo");
@@ -1368,6 +1369,7 @@ fn mknod_creates_a_fifo() {
 /// A character device created with `mknod` must survive a remount and leave a
 /// consistent image.
 #[test]
+#[allow(clippy::unnecessary_cast)]
 fn mknod_creates_a_chrdev() {
     require_fusefs!();
     if !root() {
@@ -1404,6 +1406,7 @@ fn mknod_creates_a_chrdev() {
 /// A block device created with `mknod` must survive a remount and leave a
 /// consistent image.
 #[test]
+#[allow(clippy::unnecessary_cast)]
 fn mknod_creates_a_blockdev() {
     require_fusefs!();
     if !root() {

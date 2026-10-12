@@ -234,7 +234,7 @@ pub const BMBT_NULL_PTR: XfsFsblock = u64::MAX;
 ///
 /// Little significant byte first, at `at`, which is where every checksummed
 /// structure in this file system keeps it.
-fn crc32c_without_its_own_field(bytes: &[u8], at: usize) -> u32 {
+pub(crate) fn crc32c_without_its_own_field(bytes: &[u8], at: usize) -> u32 {
     let crc = crc::Crc::<u32>::new(&crc::CRC_32_ISCSI);
     let mut buf = bytes.to_vec();
     buf[at..at + 4].fill(0);
