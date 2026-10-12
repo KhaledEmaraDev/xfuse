@@ -65,7 +65,7 @@ use bincode_next::de::read::Reader;
 use super::{
     bmbt_rec::{BmbtRec, Bmx},
     btree::{Btree, BtreeRoot},
-    definitions::{XfsFileoff, XfsFsblock, XfsFsize},
+    definitions::{XfsDablk, XfsFileoff, XfsFsblock, XfsFsize},
     sb::Sb,
 };
 
@@ -188,6 +188,24 @@ impl ExtentMap {
         match self {
             ExtentMap::Core { extents, .. } => extents.lseek(offset, whence),
             ExtentMap::Btree { btree, .. } => btree.lseek(buf_reader.by_ref(), offset, whence),
+        }
+    }
+
+    /// Map a directory block number to a physical filesystem block.
+    ///
+    /// This delegates to `Bmx::map_dblock` for the inline-extent case and to
+    /// `BtreeRoot::map_block` for the B+tree case, identical to what the
+    /// former `Dfork` type did in `dir3_lf`.
+    pub fn map_dblock<R>(&self, buf_reader: &mut R, dblock: XfsDablk) -> Result<XfsFsblock, i32>
+    where
+        R: BufRead + Reader + Seek,
+    {
+        match self {
+            ExtentMap::Core { extents, .. } => extents.map_dblock(dblock).ok_or(libc::ENOENT),
+            ExtentMap::Btree { btree, .. } => btree
+                .map_block(buf_reader.by_ref(), dblock.into(), false)?
+                .0
+                .ok_or(libc::ENOENT),
         }
     }
 }

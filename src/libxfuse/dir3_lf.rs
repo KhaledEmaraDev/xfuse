@@ -44,49 +44,18 @@ use tracing::error;
 
 use super::{
     bmbt_rec::Bmx,
-    btree::{BmbtKey, BmdrBlock, Btree, BtreeRoot, XfsBmbtPtr},
+    btree::{BmbtKey, BmdrBlock, BtreeRoot, XfsBmbtPtr},
     da_btree::{hashname, XfsDa3Blkinfo, XfsDa3Intnode, XfsDaBlkinfo},
     definitions::*,
     dir3::{Dir2DataEntry, Dir2DataHdr, Dir2DataUnused, Dir3, Dir3DataHdr, XfsDir2Dataptr},
+    extent::ExtentMap,
     sb::Sb,
     utils::{decode, get_file_type, FileKind},
 };
 
 /// All of the different ways that a directory can store its data fork.
-// TODO: combine this code with file_extent_list and file_btree
-#[derive(Debug)]
-enum Dfork {
-    /// Extent list.  Used for Leaf and Node directories.
-    Bmx(Bmx),
-    /// Btree.  Used only for BTree directories.
-    Btree(BtreeRoot),
-}
-
-impl Dfork {
-    fn lseek<R>(&self, buf_reader: &mut R, offset: u64, whence: i32) -> Result<u64, i32>
-    where
-        R: BufRead + Reader + Seek,
-    {
-        match self {
-            Dfork::Bmx(bmx) => bmx.lseek(offset, whence),
-            Dfork::Btree(btree_root) => btree_root.lseek(buf_reader, offset, whence),
-        }
-    }
-
-    fn map_dblock<R: Reader + BufRead + Seek>(
-        &self,
-        buf_reader: &mut R,
-        dblock: XfsDablk,
-    ) -> Result<XfsFsblock, i32> {
-        match self {
-            Dfork::Bmx(bmx) => bmx.map_dblock(dblock).ok_or(libc::ENOENT),
-            Dfork::Btree(root) => root
-                .map_block(buf_reader, dblock.into(), false)?
-                .0
-                .ok_or(libc::ENOENT),
-        }
-    }
-}
+/// Previously a separate `Dfork` enum, this is now unified with `ExtentMap`
+/// (used by file data forks) via the shared `Bmx`/`BtreeRoot` types.
 
 #[derive(Debug, Decode)]
 struct Dir2LeafHdr {
@@ -308,7 +277,7 @@ impl<'a, R: Reader + BufRead + Seek + 'a> Iterator for NodeLikeAddressIterator<'
 #[derive(Debug)]
 pub struct Dir2Lf {
     /// Maps directory block numbers to FS block numbers for this directory
-    dfork: Dfork,
+    dfork: ExtentMap,
 
     /// A cache of directory blocks, indexed by directory block number
     blocks: RefCell<BTreeMap<XfsDablk, Vec<u8>>>,
@@ -316,14 +285,14 @@ pub struct Dir2Lf {
 
 impl Dir2Lf {
     pub fn from_bmx(bmx: Bmx) -> Self {
-        let dfork = Dfork::Bmx(bmx);
+        let dfork = ExtentMap::from_core(bmx, 0);
         let blocks = Default::default();
         Dir2Lf { dfork, blocks }
     }
 
     pub fn from_btree(bmbt: BmdrBlock, keys: Vec<BmbtKey>, pointers: Vec<XfsBmbtPtr>) -> Self {
         let root = BtreeRoot::new(bmbt, keys, pointers, None);
-        let dfork = Dfork::Btree(root);
+        let dfork = ExtentMap::from_btree(root, 0);
         let blocks = Default::default();
         Dir2Lf { dfork, blocks }
     }
