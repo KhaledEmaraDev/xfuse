@@ -41,6 +41,7 @@
 
 use std::{fmt, io, num::TryFromIntError, path::PathBuf};
 
+use fuser::Errno;
 use nix::errno;
 
 /// An error produced by the file system.
@@ -198,6 +199,13 @@ impl From<i32> for FsError {
             errno,
             msg: format!("operation failed: {}", errno::Errno::from_raw(errno)),
         }
+    }
+}
+
+impl FsError {
+    /// Convert this error into an fuser `Errno`.
+    pub fn to_errno(&self) -> Errno {
+        Errno::from_i32(self.errno())
     }
 }
 

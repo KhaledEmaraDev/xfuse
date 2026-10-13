@@ -28,7 +28,7 @@
 use std::path::PathBuf;
 
 use clap::{crate_version, Parser};
-use fuser::{mount2, MountOption};
+use fuser::{mount, MountOption, SessionACL};
 use libxfuse::volume::Volume;
 use nix::unistd::daemon;
 use tracing_subscriber::EnvFilter;
@@ -89,6 +89,7 @@ fn main() {
 
     let app = App::parse();
 
+    let mut rtdev: Option<PathBuf> = None;
     let mut opts = vec![
         MountOption::FSName("fusefs".to_string()),
         MountOption::Subtype("xfs".to_string()),
@@ -104,11 +105,11 @@ fn main() {
         opts.push(MountOption::RO);
     }
     // geteuid is always safe
+    let mut acl = SessionACL::Owner;
     if unsafe { libc::geteuid() } == 0 {
-        opts.push(MountOption::AllowOther);
+        acl = SessionACL::RootAndOwner;
         opts.push(MountOption::DefaultPermissions);
     }
-    let mut rtdev: Option<PathBuf> = None;
     for o in app.options.iter() {
         if let Some((lhs, rhs)) = o.split_once('=') {
             if lhs == "rtdev" {
@@ -117,8 +118,14 @@ fn main() {
         } else {
             opts.push(match o.as_str() {
                 "auto_unmount" => MountOption::AutoUnmount,
-                "allow_other" => MountOption::AllowOther,
-                "allow_root" => MountOption::AllowRoot,
+                "allow_other" => {
+                    acl = SessionACL::All;
+                    continue;
+                }
+                "allow_root" => {
+                    acl = SessionACL::RootAndOwner;
+                    continue;
+                }
                 "default_permissions" => MountOption::DefaultPermissions,
                 "dev" => MountOption::Dev,
                 "nodev" => MountOption::NoDev,
@@ -150,5 +157,10 @@ fn main() {
     if !app.foreground {
         daemon(false, false).unwrap();
     }
-    mount2(vol, app.mountpoint, &opts[..]).unwrap();
+    let mut config = fuser::Config::default();
+    config.mount_options = opts;
+    config.acl = acl;
+    config.n_threads = None;
+    config.clone_fd = false;
+    mount(vol, &app.mountpoint, &config).unwrap();
 }

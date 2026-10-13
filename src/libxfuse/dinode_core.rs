@@ -210,7 +210,7 @@ impl DinodeCore {
             assert!(ino == 1 || ino == self.di_ino);
         }
         Ok(FileAttr {
-            ino,
+            ino: fuser::INodeNo(ino),
             size: self.di_size as u64,
             blocks: self.di_nblocks,
             atime: self.timestamp(&self.di_atime),
