@@ -41,14 +41,14 @@ use super::{
 
 #[derive(Clone, Copy, Debug, Decode)]
 pub struct DsymlinkHdr {
-    sl_magic: u32,
+    sl_magic:  u32,
     sl_offset: u32,
-    sl_bytes: u32,
-    _sl_crc: u32,
-    _sl_uuid: Uuid,
+    sl_bytes:  u32,
+    _sl_crc:   u32,
+    _sl_uuid:  Uuid,
     _sl_owner: u64,
     _sl_blkno: u64,
-    _sl_lsn: u64,
+    _sl_lsn:   u64,
 }
 
 #[derive(Debug)]

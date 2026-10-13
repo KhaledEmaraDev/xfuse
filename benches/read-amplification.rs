@@ -80,13 +80,13 @@ enum Image {
 
 struct Bench {
     /// Name of the benchmark
-    name: &'static str,
+    name:  &'static str,
     /// The disk image to use
     image: Image,
     /// The benchmark's function.  The argument is the path to the mounted file
     /// sytem.  The return value is the number of "useful" bytes the benchmark
     /// read.  An ideal file system would never read anything else.
-    f: fn(&Path) -> u64,
+    f:     fn(&Path) -> u64,
 }
 
 impl Bench {

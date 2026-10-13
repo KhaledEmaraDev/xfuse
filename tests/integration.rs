@@ -27,13 +27,24 @@ use tempfile::{tempdir, TempDir};
 
 mod util;
 use util::{
-    is_fusefs, skipped_check, waitfor, GOLDEN1K, GOLDEN4K, GOLDEN4KN, GOLDENPREALLOCATED, GOLDENV4,
-    GOLDEN_ATTRV1, GOLDEN_NOFTYPE, GOLDEN_NREXT64, GOLDEN_RT1, GOLDEN_RT2,
+    is_fusefs,
+    skipped_check,
+    waitfor,
+    GOLDEN1K,
+    GOLDEN4K,
+    GOLDEN4KN,
+    GOLDENPREALLOCATED,
+    GOLDENV4,
+    GOLDEN_ATTRV1,
+    GOLDEN_NOFTYPE,
+    GOLDEN_NREXT64,
+    GOLDEN_RT1,
+    GOLDEN_RT2,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 struct ExpectedXattr {
-    name: OsString,
+    name:  OsString,
     value: OsString,
 }
 
@@ -41,7 +52,7 @@ struct ExpectedXattr {
 /// in order by name.
 fn expected_xattrs_per_file(f: &str) -> impl Iterator<Item = ExpectedXattr> {
     let locals = (0..local_attrs_per_file(f)).map(|i| ExpectedXattr {
-        name: OsString::from(format!("user.attr.{i:06}")),
+        name:  OsString::from(format!("user.attr.{i:06}")),
         value: OsString::from(format!("value.{i:06}")),
     });
     let remotes = (0..remote_attrs_per_file(f)).map(|i| {
@@ -270,9 +281,9 @@ fn ents_per_dir_shortnames(path: &Path, d: &str) -> usize {
 }
 
 struct Harness {
-    d: TempDir,
+    d:     TempDir,
     child: Child,
-    path: PathBuf,
+    path:  PathBuf,
 }
 
 fn harness(img: &Path, rtimg: Option<&Path>) -> Harness {
@@ -491,8 +502,8 @@ mod dev {
     use super::*;
 
     struct MdHarness {
-        _md: mdconfig::Md,
-        d: TempDir,
+        _md:   mdconfig::Md,
+        d:     TempDir,
         child: Child,
     }
 

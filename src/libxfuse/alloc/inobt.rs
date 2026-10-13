@@ -50,13 +50,13 @@ use crate::libxfuse::{
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FreeIno {
     /// The inode's number across the whole file system.
-    pub ino: XfsIno,
+    pub ino:         XfsIno,
     /// The leaf that holds the chunk's record.
-    pub block: XfsAgblock,
+    pub block:       XfsAgblock,
     /// The first inode number of the chunk.
     pub chunk_start: u64,
     /// Which bit of the chunk's mask says this inode is free.
-    pub bit: u32,
+    pub bit:         u32,
 }
 
 /// Every chunk a tree holds, with the leaf it is in, in the order the tree holds
@@ -159,8 +159,8 @@ const LEAF_RECORD: usize = 16;
 /// One node of the b-tree of used inode numbers.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InobtNode {
-    bytes: Box<[u8]>,
-    level: u16,
+    bytes:   Box<[u8]>,
+    level:   u16,
     numrecs: u16,
     has_crc: bool,
 }
@@ -173,12 +173,12 @@ pub struct InobtNode {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct InoRange {
     /// The first inode number this chunk covers.
-    pub start: u64,
+    pub start:      u64,
     /// How many of the chunk's inodes are free, which is the number of set bits
     /// in [`Self::free`] and is checked against it.
     pub free_count: u32,
     /// Which of the chunk's inodes are free, one bit per inode.
-    pub free: u64,
+    pub free:       u64,
 }
 
 /// How many inode numbers one chunk covers, which is the width of the mask.
@@ -774,9 +774,9 @@ impl InobtNode {
                 let body = if self.has_crc { BODY_CRC } else { BODY_NO_CRC };
                 let at = body + i * LEAF_RECORD;
                 Ok(InoRange {
-                    start: u64::from(self.u32_at(at)),
+                    start:      u64::from(self.u32_at(at)),
                     free_count: self.u32_at(at + 4),
-                    free: self.u64_at(at + 8),
+                    free:       self.u64_at(at + 8),
                 })
             })
             .collect()

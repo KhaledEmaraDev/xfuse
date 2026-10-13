@@ -37,11 +37,28 @@ use std::{
 
 use fuser::{
     consts::{
-        FOPEN_CACHE_DIR, FOPEN_KEEP_CACHE, FUSE_ASYNC_READ, FUSE_EXPORT_SUPPORT,
-        FUSE_NO_OPENDIR_SUPPORT, FUSE_NO_OPEN_SUPPORT,
+        FOPEN_CACHE_DIR,
+        FOPEN_KEEP_CACHE,
+        FUSE_ASYNC_READ,
+        FUSE_EXPORT_SUPPORT,
+        FUSE_NO_OPENDIR_SUPPORT,
+        FUSE_NO_OPEN_SUPPORT,
     },
-    Filesystem, KernelConfig, ReplyAttr, ReplyBmap, ReplyCreate, ReplyDirectory, ReplyEmpty,
-    ReplyEntry, ReplyLseek, ReplyOpen, ReplyStatfs, ReplyWrite, ReplyXattr, Request, FUSE_ROOT_ID,
+    Filesystem,
+    KernelConfig,
+    ReplyAttr,
+    ReplyBmap,
+    ReplyCreate,
+    ReplyDirectory,
+    ReplyEmpty,
+    ReplyEntry,
+    ReplyLseek,
+    ReplyOpen,
+    ReplyStatfs,
+    ReplyWrite,
+    ReplyXattr,
+    Request,
+    FUSE_ROOT_ID,
 };
 use libc::{ERANGE, S_IFBLK, S_IFCHR, S_IFDIR, S_IFIFO, S_IFLNK, S_IFMT, S_IFREG, S_IFSOCK};
 // fallocate(2) mode flags (from linux/falloc.h)
@@ -63,8 +80,15 @@ use super::{
     dinode::Dinode,
     dinode_core::XfsDinodeFmt,
     dir3::{
-        Dir3, XFS_DIR3_FT_BLKDEV, XFS_DIR3_FT_CHRDEV, XFS_DIR3_FT_DIR, XFS_DIR3_FT_FIFO,
-        XFS_DIR3_FT_REG_FILE, XFS_DIR3_FT_SOCK, XFS_DIR3_FT_SYMLINK, XFS_DIR3_FT_UNKNOWN,
+        Dir3,
+        XFS_DIR3_FT_BLKDEV,
+        XFS_DIR3_FT_CHRDEV,
+        XFS_DIR3_FT_DIR,
+        XFS_DIR3_FT_FIFO,
+        XFS_DIR3_FT_REG_FILE,
+        XFS_DIR3_FT_SOCK,
+        XFS_DIR3_FT_SYMLINK,
+        XFS_DIR3_FT_UNKNOWN,
     },
     dir3_sf::{ShortformDirectory, SF_OFFSET_STEP},
     error::{no_entry, FsError, FsResult},
@@ -76,8 +100,15 @@ use crate::libxfuse::{
     alloc::free_space::FreeRun,
     bmbt_rec::BmbtRec,
     btree::{
-        BmbtInteriorBlock, BmbtKey, BmbtLeafBlock, BmbtLeafRecord, BmdrBlock, Btree,
-        BtreeLblockHdr, BtreeRoot, BMBT_NULL_PTR,
+        BmbtInteriorBlock,
+        BmbtKey,
+        BmbtLeafBlock,
+        BmbtLeafRecord,
+        BmdrBlock,
+        Btree,
+        BtreeLblockHdr,
+        BtreeRoot,
+        BMBT_NULL_PTR,
     },
 };
 
@@ -113,7 +144,7 @@ pub const NO_IMAGE: &str = "no image has been opened in this process";
 #[derive(Debug)]
 struct OpenInode {
     dinode: Dinode,
-    count: u64,
+    count:  u64,
 }
 
 /// An open file, as FUSE sees it.
@@ -128,25 +159,25 @@ struct OpenInode {
 /// disagree with the first.
 #[derive(Debug)]
 struct OpenFile {
-    ino: u64,
+    ino:   u64,
     flags: i32,
 }
 
 #[derive(Debug)]
 pub struct Volume {
-    device: BlockReader,
-    rt_device: Option<BlockReader>,
-    sb: Sb,
-    open_files: HashMap<u64, OpenInode>,
+    device:      BlockReader,
+    rt_device:   Option<BlockReader>,
+    sb:          Sb,
+    open_files:  HashMap<u64, OpenInode>,
     /// The files the kernel has open, by handle.
-    handles: HashMap<u64, OpenFile>,
+    handles:     HashMap<u64, OpenFile>,
     next_handle: u64,
     /// Where transactions get their device, cache, and superblock.
-    tx: TransactionContext,
+    tx:          TransactionContext,
     /// May this mount change the image?
-    writable: bool,
-    no_open: bool,
-    no_opendir: bool,
+    writable:    bool,
+    no_open:     bool,
+    no_opendir:  bool,
 }
 
 impl Volume {
@@ -236,7 +267,7 @@ impl Volume {
             FUSE_ROOT_ID,
             OpenInode {
                 dinode: root_inode,
-                count: 1,
+                count:  1,
             },
         );
 
@@ -601,10 +632,10 @@ impl Volume {
             if let Some((existing, blocks, _)) = tree {
                 let mut all = existing;
                 all.push(BmbtRec {
-                    br_startoff: first_new,
+                    br_startoff:   first_new,
                     br_startblock: fsb,
                     br_blockcount: u64::from(run.len),
-                    br_flag: false,
+                    br_flag:       false,
                 });
                 all.sort_by_key(|r| r.br_startoff);
                 // How the list is spread over leaves.  One leaf holds `room`; a
@@ -675,7 +706,7 @@ impl Volume {
                         leaf_fsb[i + 1]
                     };
                     let leaf = BmbtLeafBlock {
-                        level: 0,
+                        level:   0,
                         records: recs.iter().map(BmbtLeafRecord::from_extent).collect(),
                     };
                     let at = sb.fsb_to_offset(leaf_fsb[i]);
@@ -724,13 +755,13 @@ impl Volume {
                     let interior_fsb = sb.ag_block_to_fsb(agno, run.start);
                     let node = BmbtInteriorBlock {
                         level: 1,
-                        keys: leaves
+                        keys:  leaves
                             .iter()
                             .map(|l| BmbtKey {
                                 br_startoff: l[0].br_startoff,
                             })
                             .collect(),
-                        ptrs: leaf_fsb.clone(),
+                        ptrs:  leaf_fsb.clone(),
                     };
                     let block = if sb.has_crc() {
                         node.to_bytes(
@@ -790,10 +821,10 @@ impl Volume {
                             FsError::corrupt("a data fork reported itself full and cannot be read")
                         })?;
                         e.push(BmbtRec {
-                            br_startoff: first_new,
+                            br_startoff:   first_new,
                             br_startblock: fsb,
                             br_blockcount: u64::from(run.len),
-                            br_flag: false,
+                            br_flag:       false,
                         });
                         e.sort_by_key(|r| r.br_startoff);
                         e
@@ -820,7 +851,7 @@ impl Volume {
                         )));
                     }
                     let leaf = BmbtLeafBlock {
-                        level: 0,
+                        level:   0,
                         records: all.iter().map(BmbtLeafRecord::from_extent).collect(),
                     };
                     // A file system with checksums and one without have different
@@ -1893,7 +1924,7 @@ impl Filesystem for Volume {
                         }
                         let run = crate::libxfuse::alloc::free_space::FreeRun {
                             start: start as u32,
-                            len: len as u32,
+                            len:   len as u32,
                         };
                         if let Err(e) = crate::libxfuse::alloc::allocator::free_in_group(
                             &mut tx,
@@ -3753,10 +3784,10 @@ impl Filesystem for Volume {
 
                         // Create extent record
                         let extent = crate::libxfuse::bmbt_rec::BmbtRec {
-                            br_startoff: fblock,
+                            br_startoff:   fblock,
                             br_startblock: fsblock,
                             br_blockcount: 1,
-                            br_flag: true, // unwritten (preallocated)
+                            br_flag:       true, // unwritten (preallocated)
                         };
 
                         // Insert into btree
@@ -3875,10 +3906,10 @@ impl Filesystem for Volume {
 
                 // Create extent record (try to coalesce with previous if adjacent)
                 let extent = crate::libxfuse::bmbt_rec::BmbtRec {
-                    br_startoff: fblock,
+                    br_startoff:   fblock,
                     br_startblock: fsblock,
                     br_blockcount: 1,
-                    br_flag: true, // unwritten (preallocated)
+                    br_flag:       true, // unwritten (preallocated)
                 };
 
                 // Simple coalescing: if last extent is adjacent, extend it

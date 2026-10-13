@@ -33,8 +33,10 @@ use std::{
 
 use bincode_next::{de::read::Reader, error::DecodeError};
 
-use super::block_device::{Access, BlockDevice};
-use super::btree::DeviceReader;
+use super::{
+    block_device::{Access, BlockDevice},
+    btree::DeviceReader,
+};
 
 /// A forward-only, seekable window onto a [`BlockDevice`].
 ///
@@ -49,17 +51,17 @@ use super::btree::DeviceReader;
 /// block can survive a mutation of the image.
 #[derive(Debug)]
 pub struct BlockReader {
-    device: Arc<BlockDevice>,
-    block: Vec<u8>,
+    device:     Arc<BlockDevice>,
+    block:      Vec<u8>,
     /// The next byte to be returned out of `block`.
-    idx: usize,
+    idx:        usize,
     /// The image offset at which the contents of `block` begin.
-    start: u64,
+    start:      u64,
     /// The image offset of the next byte a read would return.  This is tracked
     /// separately from `start + idx` because the window can be thrown away or
     /// resized, and because the reader's position must stay put when that
     /// happens.
-    pos: u64,
+    pos:        u64,
     /// Whether the window holds bytes that were read from the device.
     ///
     /// A window starts out as zeroes, and zeroes are indistinguishable from
@@ -67,11 +69,11 @@ pub struct BlockReader {
     /// what is on the image" have to be two different questions.  A reader that
     /// seeks into a window it has never filled must read before it answers, or
     /// it will hand back the zeroes it was born with.
-    valid: bool,
+    valid:      bool,
     /// The absolute minimum that we can read in any operation
     sectorsize: usize,
     /// File's size in bytes.  It should not change while mounted.
-    pub size: u64,
+    pub size:   u64,
 }
 
 impl BlockReader {

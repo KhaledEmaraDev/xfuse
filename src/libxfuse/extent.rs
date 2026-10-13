@@ -218,10 +218,10 @@ mod t {
 
     fn rec(startoff: u64, startblock: u64, blockcount: u64) -> BmbtRec {
         BmbtRec {
-            br_startoff: startoff,
+            br_startoff:   startoff,
             br_startblock: startblock,
             br_blockcount: blockcount,
-            br_flag: false,
+            br_flag:       false,
         }
     }
 

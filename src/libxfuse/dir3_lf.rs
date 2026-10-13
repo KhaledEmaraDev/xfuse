@@ -59,17 +59,17 @@ use super::{
 
 #[derive(Debug, Decode)]
 struct Dir2LeafHdr {
-    info: XfsDaBlkinfo,
+    info:      XfsDaBlkinfo,
     pub count: u16,
-    _stale: u16,
+    _stale:    u16,
 }
 
 #[derive(Debug, Decode)]
 struct Dir3LeafHdr {
-    pub info: XfsDa3Blkinfo,
+    pub info:  XfsDa3Blkinfo,
     pub count: u16,
-    _stale: u16,
-    _pad: u32,
+    _stale:    u16,
+    _pad:      u32,
 }
 
 #[derive(Clone, Copy, Debug, Decode, Default)]
@@ -80,7 +80,7 @@ struct Dir2LeafEntry {
 
 #[derive(Debug)]
 struct Dir2LeafNDisk {
-    forw: u32,
+    forw:     u32,
     pub ents: Vec<Dir2LeafEntry>,
 }
 
@@ -182,11 +182,11 @@ impl Leaf {
 /// Iterates through all dirents with a given hash, for NodeLike directories
 #[derive(Debug)]
 struct NodeLikeAddressIterator<'a, R: Reader + BufRead + Seek + 'a> {
-    dir: &'a Dir2Lf,
-    hash: XfsDahash,
-    leaf: Dir2LeafNDisk,
+    dir:        &'a Dir2Lf,
+    hash:       XfsDahash,
+    leaf:       Dir2LeafNDisk,
     leaf_range: Range<usize>,
-    brrc: &'a RefCell<&'a mut R>,
+    brrc:       &'a RefCell<&'a mut R>,
     /// The superblock, held here rather than looked up per step.
     ///
     /// `next` is an `Iterator::next` and so returns `Option`, which is why the one
@@ -196,7 +196,7 @@ struct NodeLikeAddressIterator<'a, R: Reader + BufRead + Seek + 'a> {
     /// that put the walk into a second leaf.  Holding the superblock the caller
     /// already has moves the failure to `new`, which returns a `Result` and is
     /// where it belongs.
-    sb: &'a Sb,
+    sb:         &'a Sb,
 }
 
 impl<'a, R: Reader + BufRead + Seek + 'a> NodeLikeAddressIterator<'a, R> {

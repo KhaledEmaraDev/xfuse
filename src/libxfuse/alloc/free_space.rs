@@ -127,7 +127,7 @@ pub struct FreeRun {
     /// The first block of the run.
     pub start: XfsAgblock,
     /// How many blocks it covers.
-    pub len: u32,
+    pub len:   u32,
 }
 
 impl FreeRun {
@@ -140,12 +140,12 @@ impl FreeRun {
 /// One node of a group's free space btree.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FreeSpaceNode {
-    bytes: Box<[u8]>,
-    records: usize,
+    bytes:     Box<[u8]>,
+    records:   usize,
     blocksize: usize,
-    numrecs: u16,
-    has_crc: bool,
-    by_block: bool,
+    numrecs:   u16,
+    has_crc:   bool,
+    by_block:  bool,
 }
 
 impl FreeSpaceNode {
@@ -483,13 +483,13 @@ impl FreeSpaceNode {
             if r_start < u64::from(start) {
                 out.push(FreeRun {
                     start: r.start,
-                    len: (u64::from(start) - r_start) as u32,
+                    len:   (u64::from(start) - r_start) as u32,
                 });
             }
             if r_end > end {
                 out.push(FreeRun {
                     start: end as u32,
-                    len: (r_end - end) as u32,
+                    len:   (r_end - end) as u32,
                 });
             }
         }
@@ -626,7 +626,7 @@ impl FreeSpaceNode {
         }
         let merged = FreeRun {
             start: first,
-            len: last - first,
+            len:   last - first,
         };
         let mut out: Vec<FreeRun> = Vec::with_capacity(runs.len() + 1);
         for (i, r) in runs.iter().enumerate() {
@@ -992,7 +992,7 @@ impl FreeSpaceNode {
             let key = self.key(i)?;
             let first = FreeRun {
                 start: key.0,
-                len: key.1,
+                len:   key.1,
             };
             if self.orders_before(run, &first) {
                 break;
@@ -1303,7 +1303,7 @@ pub(crate) fn check_sibling_chains(
 /// A group in memory, which is what the tests use.
 #[derive(Debug, Default)]
 pub struct MemoryBlocks {
-    blocks: std::collections::HashMap<XfsAgblock, Box<[u8]>>,
+    blocks:     std::collections::HashMap<XfsAgblock, Box<[u8]>>,
     /// The last block handed out as somewhere to put a new node.
     next_spare: XfsAgblock,
 }
@@ -1486,10 +1486,10 @@ where
 /// Nothing here is durable until the caller writes the changed blocks and the
 /// group header through its transaction.
 pub struct FreeSpace<'a, B: GroupBlocks> {
-    blocks: &'a mut B,
-    geometry: GroupGeometry,
+    blocks:        &'a mut B,
+    geometry:      GroupGeometry,
     by_block_root: XfsAgblock,
-    by_size_root: XfsAgblock,
+    by_size_root:  XfsAgblock,
 }
 
 impl<'a, B: GroupBlocks> FreeSpace<'a, B> {
@@ -2019,11 +2019,11 @@ fn walk_up<B: GroupBlocks>(
 /// other obey, which is how the two come to hold identical records.
 pub struct Freed {
     /// The tree's root, which is a new block if the tree grew a level.
-    pub root: XfsAgblock,
+    pub root:    XfsAgblock,
     /// The run the tree now holds for this block range.
-    pub run: FreeRun,
+    pub run:     FreeRun,
     /// Records that were joined into it and are no longer records of their own.
-    pub joined: Vec<FreeRun>,
+    pub joined:  Vec<FreeRun>,
     /// Whether anything changed at all.
     ///
     /// False when the blocks were already free: there is then nothing to record,
@@ -2189,7 +2189,7 @@ pub fn free_in_tree<B: GroupBlocks>(
     }
     let merged = FreeRun {
         start: first,
-        len: last - first,
+        len:   last - first,
     };
 
     let mut root = root;
@@ -2773,7 +2773,7 @@ pub struct GroupGeometry {
     pub agblocks: XfsAgblock,
     /// Whether the file system checksums its metadata, which decides the size of a
     /// node's header and so where its keys and pointers begin.
-    pub has_crc: bool,
+    pub has_crc:  bool,
     /// Which of the two free space trees this is, keyed by start block or by run
     /// length.  The two have different magics and different key meanings, and
     /// reading one as the other is a silent way to search in the wrong order.
@@ -2933,13 +2933,25 @@ mod t {
 
         let runs = node.runs().unwrap();
         assert_eq!(runs.len(), 19);
-        assert_eq!(runs[0], FreeRun { start: 13, len: 3 });
-        assert_eq!(runs[1], FreeRun { start: 569, len: 7 });
+        assert_eq!(
+            runs[0],
+            FreeRun {
+                start: 13,
+                len:   3,
+            }
+        );
+        assert_eq!(
+            runs[1],
+            FreeRun {
+                start: 569,
+                len:   7,
+            }
+        );
         assert_eq!(
             runs[2],
             FreeRun {
                 start: 1481,
-                len: 7,
+                len:   7,
             }
         );
         // The group's longest run, which the group header also reports.
@@ -2947,7 +2959,7 @@ mod t {
             runs[18],
             FreeRun {
                 start: 3240,
-                len: 29528,
+                len:   29528,
             }
         );
         assert_eq!(
@@ -2970,13 +2982,25 @@ mod t {
         assert_eq!(
             runs,
             vec![
-                FreeRun { start: 13, len: 2 },
-                FreeRun { start: 25, len: 1 },
-                FreeRun { start: 27, len: 1 },
-                FreeRun { start: 32, len: 1 },
+                FreeRun {
+                    start: 13,
+                    len:   2,
+                },
+                FreeRun {
+                    start: 25,
+                    len:   1,
+                },
+                FreeRun {
+                    start: 27,
+                    len:   1,
+                },
+                FreeRun {
+                    start: 32,
+                    len:   1,
+                },
                 FreeRun {
                     start: 34,
-                    len: 4062,
+                    len:   4062,
                 },
             ]
         );
@@ -3033,7 +3057,7 @@ mod t {
     fn geometry() -> GroupGeometry {
         GroupGeometry {
             agblocks: AGBLOCKS,
-            has_crc: false,
+            has_crc:  false,
             by_block: true,
         }
     }
@@ -3139,11 +3163,17 @@ mod t {
             runs,
             vec![
                 FreeRun { start: 5, len: 3 },
-                FreeRun { start: 40, len: 7 },
-                FreeRun { start: 100, len: 1 },
+                FreeRun {
+                    start: 40,
+                    len:   7,
+                },
+                FreeRun {
+                    start: 100,
+                    len:   1,
+                },
                 FreeRun {
                     start: 200,
-                    len: 62,
+                    len:   62,
                 },
             ]
         );
@@ -3177,7 +3207,7 @@ mod t {
             runs[2],
             FreeRun {
                 start: 900,
-                len: 30,
+                len:   30,
             }
         );
     }
@@ -3295,12 +3325,24 @@ mod t {
         let mut node =
             FreeSpaceNode::from_bytes(leaf(&[(100, 10), (200, 5)]), false, true).unwrap();
         let left = node.take_from_run(100, 4).unwrap();
-        assert_eq!(left, Some(FreeRun { start: 104, len: 6 }));
+        assert_eq!(
+            left,
+            Some(FreeRun {
+                start: 104,
+                len:   6,
+            })
+        );
         assert_eq!(
             records_of(&node),
             vec![
-                FreeRun { start: 104, len: 6 },
-                FreeRun { start: 200, len: 5 }
+                FreeRun {
+                    start: 104,
+                    len:   6,
+                },
+                FreeRun {
+                    start: 200,
+                    len:   5,
+                }
             ]
         );
     }
@@ -3314,8 +3356,14 @@ mod t {
         assert_eq!(
             records_of(&node),
             vec![
-                FreeRun { start: 100, len: 4 },
-                FreeRun { start: 300, len: 1 }
+                FreeRun {
+                    start: 100,
+                    len:   4,
+                },
+                FreeRun {
+                    start: 300,
+                    len:   1,
+                }
             ]
         );
     }
@@ -3407,7 +3455,13 @@ mod t {
         assert!(node.take_from_run(100, 0).is_err(), "none at all");
         // And the node is unchanged, which matters: a failed allocation must not
         // have half-taken a run.
-        assert_eq!(records_of(&node), vec![FreeRun { start: 100, len: 4 }]);
+        assert_eq!(
+            records_of(&node),
+            vec![FreeRun {
+                start: 100,
+                len:   4,
+            }]
+        );
     }
 
     /// An interior node holds subtrees, not runs, and saying so beats reading
@@ -3433,15 +3487,37 @@ mod t {
         // The tree keyed by start block, inserting out of order.
         let mut by_block =
             FreeSpaceNode::from_bytes(leaf(&[(100, 1), (200, 1)]), false, true).unwrap();
-        by_block.put_run(FreeRun { start: 50, len: 3 }).unwrap();
-        by_block.put_run(FreeRun { start: 150, len: 2 }).unwrap();
+        by_block
+            .put_run(FreeRun {
+                start: 50,
+                len:   3,
+            })
+            .unwrap();
+        by_block
+            .put_run(FreeRun {
+                start: 150,
+                len:   2,
+            })
+            .unwrap();
         assert_eq!(
             records_of(&by_block),
             vec![
-                FreeRun { start: 50, len: 3 },
-                FreeRun { start: 100, len: 1 },
-                FreeRun { start: 150, len: 2 },
-                FreeRun { start: 200, len: 1 },
+                FreeRun {
+                    start: 50,
+                    len:   3,
+                },
+                FreeRun {
+                    start: 100,
+                    len:   1,
+                },
+                FreeRun {
+                    start: 150,
+                    len:   2,
+                },
+                FreeRun {
+                    start: 200,
+                    len:   1,
+                },
             ]
         );
 
@@ -3449,13 +3525,27 @@ mod t {
         // order, which is the whole point of having two trees.
         let mut by_len =
             FreeSpaceNode::from_bytes(size_leaf(&[(100, 1), (200, 9)]), false, false).unwrap();
-        by_len.put_run(FreeRun { start: 150, len: 4 }).unwrap();
+        by_len
+            .put_run(FreeRun {
+                start: 150,
+                len:   4,
+            })
+            .unwrap();
         assert_eq!(
             records_of(&by_len),
             vec![
-                FreeRun { start: 100, len: 1 },
-                FreeRun { start: 150, len: 4 },
-                FreeRun { start: 200, len: 9 },
+                FreeRun {
+                    start: 100,
+                    len:   1,
+                },
+                FreeRun {
+                    start: 150,
+                    len:   4,
+                },
+                FreeRun {
+                    start: 200,
+                    len:   9,
+                },
             ]
         );
         assert_eq!(by_len.order(), Order::ByLength);
@@ -3466,13 +3556,27 @@ mod t {
     #[test]
     fn an_overlapping_run_is_refused() {
         let mut node = FreeSpaceNode::from_bytes(leaf(&[(100, 10)]), false, true).unwrap();
-        assert!(node.put_run(FreeRun { start: 105, len: 1 }).is_err());
-        assert!(node.put_run(FreeRun { start: 90, len: 20 }).is_err());
+        assert!(node
+            .put_run(FreeRun {
+                start: 105,
+                len:   1,
+            })
+            .is_err());
+        assert!(node
+            .put_run(FreeRun {
+                start: 90,
+                len:   20,
+            })
+            .is_err());
         // Touching end to end is not overlapping: that is how a run grows.
-        node.put_run(FreeRun { start: 90, len: 10 }).unwrap();
+        node.put_run(FreeRun {
+            start: 90,
+            len:   10,
+        })
+        .unwrap();
         node.put_run(FreeRun {
             start: 110,
-            len: 10,
+            len:   10,
         })
         .unwrap();
         assert_eq!(records_of(&node).len(), 3);
@@ -3488,7 +3592,7 @@ mod t {
         assert_eq!(
             node.put_run(FreeRun {
                 start: 5000,
-                len: 1,
+                len:   1,
             })
             .unwrap_err()
             .errno(),
@@ -3498,7 +3602,7 @@ mod t {
         node.take_from_run(0, 1).unwrap();
         node.put_run(FreeRun {
             start: 5000,
-            len: 1,
+            len:   1,
         })
         .unwrap();
         assert_eq!(node.numrecs(), 62);
@@ -3513,7 +3617,11 @@ mod t {
         assert_eq!(first_key_of(&node), (100, 4));
         node.take_from_run(100, 4).unwrap();
         assert_eq!(first_key_of(&node), (200, 1), "the first record moved");
-        node.put_run(FreeRun { start: 150, len: 2 }).unwrap();
+        node.put_run(FreeRun {
+            start: 150,
+            len:   2,
+        })
+        .unwrap();
         assert_eq!(
             first_key_of(&node),
             (150, 2),
@@ -3638,7 +3746,7 @@ mod t {
                     }) {
                         node.put_run(FreeRun {
                             start: newstart,
-                            len: newlen,
+                            len:   newlen,
                         })
                         .expect("put");
                         model.push((newstart, newlen));
@@ -3652,7 +3760,10 @@ mod t {
                 let mut from_node = records_of(&node);
                 let mut from_model: Vec<FreeRun> = model
                     .iter()
-                    .map(|(s, l)| FreeRun { start: *s, len: *l })
+                    .map(|(s, l)| FreeRun {
+                        start: *s,
+                        len:   *l,
+                    })
                     .collect();
                 from_node.sort_by_key(|r| (r.start, r.len));
                 from_model.sort_by_key(|r| (r.start, r.len));
@@ -4083,12 +4194,18 @@ mod t {
         );
         assert_eq!(
             first_run_from(4, g, 6, group(blocks.clone())).unwrap(),
-            Some(FreeRun { start: 40, len: 7 }),
+            Some(FreeRun {
+                start: 40,
+                len:   7,
+            }),
         );
         // A run that has to be found past a whole leaf.
         assert_eq!(
             first_run_from(4, g, 60, group(blocks.clone())).unwrap(),
-            Some(FreeRun { start: 100, len: 1 }),
+            Some(FreeRun {
+                start: 100,
+                len:   1,
+            }),
         );
         // Past the last run there is nothing, which is how an allocator learns
         // to look in another group.
@@ -4115,7 +4232,7 @@ mod t {
             first_run_of_at_least(4, size_geometry(), 4, group(blocks.clone())).unwrap(),
             Some(FreeRun {
                 start: 100,
-                len: 62,
+                len:   62,
             }),
         );
         assert_eq!(
@@ -4143,7 +4260,13 @@ mod t {
                 .ok_or_else(|| FsError::corrupt(format!("no block {bno}")))
         };
         let found = first_run_from(4, geometry(), 6, &mut counting).unwrap();
-        assert_eq!(found, Some(FreeRun { start: 40, len: 7 }));
+        assert_eq!(
+            found,
+            Some(FreeRun {
+                start: 40,
+                len:   7,
+            })
+        );
         assert_eq!(fetched, vec![4, 10], "the second leaf should not be read");
     }
 }
@@ -4273,9 +4396,15 @@ mod insert {
             initial.sort_by_key(|(at, len)| if by_block { (*at, *len) } else { (*len, *at) });
             let mut node = node_of(leaf_of(magic, &initial), by_block);
             for run in [
-                FreeRun { start: 60, len: 2 },
+                FreeRun {
+                    start: 60,
+                    len:   2,
+                },
                 FreeRun { start: 1, len: 1 },
-                FreeRun { start: 900, len: 4 },
+                FreeRun {
+                    start: 900,
+                    len:   4,
+                },
             ] {
                 node.insert_run(run).expect("room in the leaf");
             }
@@ -4305,7 +4434,7 @@ mod insert {
             matches!(
                 node.insert_run(FreeRun {
                     start: 99_999,
-                    len: 1,
+                    len:   1,
                 }),
                 Err(FsError::NoSpace)
             ),
@@ -4424,12 +4553,15 @@ mod treeinsert {
         // The leaf starts with a run already in it, which has to survive all of
         // this as well -- a tree that only keeps what was just put in it is not
         // holding the file system's free space, it is holding its own history.
-        let mut inserted = vec![FreeRun { start: 10, len: 5 }];
+        let mut inserted = vec![FreeRun {
+            start: 10,
+            len:   5,
+        }];
         let count = capacity as u32 * 3;
         for i in 0..count {
             let run = FreeRun {
                 start: 100 + i * 3,
-                len: 1 + i % 7,
+                len:   1 + i % 7,
             };
             inserted.push(run);
             root = insert_in_tree(&mut blocks, geometry, root, run).expect("insert");
@@ -4490,7 +4622,7 @@ mod treeinsert {
                 root,
                 FreeRun {
                     start: 11 + i * 2,
-                    len: 1,
+                    len:   1,
                 },
             )
             .expect("insert");
@@ -4560,7 +4692,10 @@ mod treefree {
                 |blocks: &mut MemoryBlocks| walk(root, geometry, |b| blocks.get(b)).unwrap();
 
             // Away from everything: a record of its own.
-            let alone = FreeRun { start: 200, len: 5 };
+            let alone = FreeRun {
+                start: 200,
+                len:   5,
+            };
             free_in_tree(&mut blocks, geometry, root, alone).expect("free");
             assert!(
                 runs_now(&mut blocks).contains(&alone),
@@ -4578,13 +4713,21 @@ mod treefree {
             );
 
             // (100, 10) ends at 110, so a run starting there joins it.
-            free_in_tree(&mut blocks, geometry, root, FreeRun { start: 110, len: 5 })
-                .expect("free");
+            free_in_tree(
+                &mut blocks,
+                geometry,
+                root,
+                FreeRun {
+                    start: 110,
+                    len:   5,
+                },
+            )
+            .expect("free");
             let runs = runs_now(&mut blocks);
             assert!(
                 runs.contains(&FreeRun {
                     start: 100,
-                    len: 15,
+                    len:   15,
                 }),
                 "a run did not join the one that ends where it starts: {runs:?}"
             );
@@ -4596,13 +4739,21 @@ mod treefree {
 
             // (100, 15) now ends at 115, so a run starting there joins the far
             // end instead -- the case where the neighbour is *after* the run.
-            free_in_tree(&mut blocks, geometry, root, FreeRun { start: 115, len: 5 })
-                .expect("free");
+            free_in_tree(
+                &mut blocks,
+                geometry,
+                root,
+                FreeRun {
+                    start: 115,
+                    len:   5,
+                },
+            )
+            .expect("free");
             let runs = runs_now(&mut blocks);
             assert!(
                 runs.contains(&FreeRun {
                     start: 100,
-                    len: 20,
+                    len:   20,
                 }),
                 "a run did not join the one that begins where it ends: {runs:?}"
             );
@@ -4648,11 +4799,11 @@ mod treefree {
             vec![
                 FreeRun {
                     start: 100,
-                    len: 10,
+                    len:   10,
                 },
                 FreeRun {
                     start: 300,
-                    len: 10,
+                    len:   10,
                 }
             ],
             "the tree did not come back to what it was"
@@ -4711,13 +4862,13 @@ mod model {
             if r.start < run.start {
                 next.push(FreeRun {
                     start: r.start,
-                    len: run.start - r.start,
+                    len:   run.start - r.start,
                 });
             }
             if r_end > end {
                 next.push(FreeRun {
                     start: end,
-                    len: r_end - end,
+                    len:   r_end - end,
                 });
             }
         }
@@ -4934,10 +5085,13 @@ mod takeboth {
         assert_eq!(
             by_block,
             vec![
-                FreeRun { start: 104, len: 6 },
+                FreeRun {
+                    start: 104,
+                    len:   6,
+                },
                 FreeRun {
                     start: 300,
-                    len: 10,
+                    len:   10,
                 }
             ],
             "the block-ordered tree did not give the blocks up"
@@ -4968,11 +5122,17 @@ mod takeboth {
         assert_eq!(
             by_block,
             vec![
-                FreeRun { start: 100, len: 2 },
-                FreeRun { start: 105, len: 5 },
+                FreeRun {
+                    start: 100,
+                    len:   2,
+                },
+                FreeRun {
+                    start: 105,
+                    len:   5,
+                },
                 FreeRun {
                     start: 300,
-                    len: 10,
+                    len:   10,
                 }
             ],
             "the run was not split around the blocks that were taken"

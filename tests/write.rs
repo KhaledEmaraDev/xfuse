@@ -97,7 +97,7 @@ fn serialize() -> std::sync::MutexGuard<'static, ()> {
 /// running keeps its mount *and* the test harness's output pipe open, which is
 /// enough to make the whole run look like it has hung.
 struct Mounted {
-    mnt: PathBuf,
+    mnt:     PathBuf,
     process: Child,
 }
 

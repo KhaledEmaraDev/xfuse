@@ -33,7 +33,8 @@ use std::{
 use bincode_next::{
     de::{read::Reader, Decoder},
     error::DecodeError,
-    impl_borrow_decode, Decode,
+    impl_borrow_decode,
+    Decode,
 };
 
 use super::{
@@ -42,7 +43,11 @@ use super::{
     bmbt_rec::Bmx,
     da_btree::{XfsDa3Blkinfo, XfsDa3Intnode, XfsDaBlkinfo},
     definitions::{
-        XfsDablk, XfsFsblock, XFS_ATTR3_LEAF_MAGIC, XFS_ATTR_LEAF_MAGIC, XFS_DA3_NODE_MAGIC,
+        XfsDablk,
+        XfsFsblock,
+        XFS_ATTR3_LEAF_MAGIC,
+        XFS_ATTR_LEAF_MAGIC,
+        XFS_DA3_NODE_MAGIC,
         XFS_DA_NODE_MAGIC,
     },
     sb::Sb,
@@ -84,7 +89,7 @@ pub struct AttrLeafMap {
 
 #[derive(Debug)]
 pub struct AttrLeafHdr {
-    pub forw: u32,
+    pub forw:  u32,
     pub count: u16,
 }
 
@@ -121,8 +126,8 @@ impl_borrow_decode!(AttrLeafHdr);
 pub struct AttrLeafEntry {
     pub hashval: u32,
     pub nameidx: u16,
-    pub flags: u8,
-    _pad2: u8,
+    pub flags:   u8,
+    _pad2:       u8,
 }
 
 #[derive(Debug)]
@@ -183,11 +188,11 @@ impl AttrLeafName {
 
 #[derive(Debug)]
 pub struct AttrLeafblock {
-    pub hdr: AttrLeafHdr,
+    pub hdr:     AttrLeafHdr,
     // TODO: in-memory, combine AttrLeafEntry and AttrLeafName into a struct, so we'll only need a
     // single Vec
     pub entries: Vec<AttrLeafEntry>,
-    pub names: Vec<AttrLeafName>,
+    pub names:   Vec<AttrLeafName>,
 }
 
 impl AttrLeafblock {
@@ -267,9 +272,9 @@ impl<Ctx> Decode<Ctx> for AttrLeafblock {
 pub struct AttrLeafNameRemote {
     pub valueblk: u32,
     pub valuelen: u32,
-    pub namelen: u8,
-    pub name: Vec<u8>,
-    pub value: Vec<u8>,
+    pub namelen:  u8,
+    pub name:     Vec<u8>,
+    pub value:    Vec<u8>,
 }
 
 impl AttrLeafNameRemote {
@@ -332,14 +337,14 @@ impl<Ctx> Decode<Ctx> for AttrLeafNameRemote {
 
 #[derive(Debug, Decode)]
 struct AttrRmtHdr {
-    _rm_magic: u32,
+    _rm_magic:  u32,
     _rm_offset: u32,
-    rm_bytes: u32,
-    _rm_crc: u32,
-    _rm_uuid: utils::Uuid,
-    _rm_owner: u64,
-    _rm_blkno: u64,
-    _rm_lsn: u64,
+    rm_bytes:   u32,
+    _rm_crc:    u32,
+    _rm_uuid:   utils::Uuid,
+    _rm_owner:  u64,
+    _rm_blkno:  u64,
+    _rm_lsn:    u64,
 }
 
 #[enum_dispatch::enum_dispatch]

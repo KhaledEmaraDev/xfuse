@@ -44,15 +44,15 @@ use super::{
 
 #[derive(Debug, Clone, Decode)]
 pub struct AttrSfHdr {
-    _totsize: u16,
+    _totsize:  u16,
     pub count: u8,
-    _padding: u8,
+    _padding:  u8,
 }
 
 #[derive(Debug, Clone)]
 pub struct AttrSfEntry {
     pub namelen: u8,
-    pub flags: u8,
+    pub flags:   u8,
     pub nameval: Vec<u8>,
 }
 

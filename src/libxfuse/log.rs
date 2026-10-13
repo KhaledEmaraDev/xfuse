@@ -139,32 +139,32 @@ impl XlogLsn {
 /// [cycle]: Self::cycle
 pub struct XlogRecHeader {
     /// `h_magicno` — [XLOG_HEADER_MAGIC_NUM].
-    pub magicno: u32,
+    pub magicno:    u32,
     /// `h_cycle` — the write cycle of the log, or [XLOG_HEADER_MAGIC_NUM]'s
     /// invalid-cycle marker.
-    pub cycle: u32,
+    pub cycle:      u32,
     /// `h_version` — `XLOG_VERSION_1` (1) or `XLOG_VERSION_2` (2), the second
     /// naming a later layout with larger IClogs and an explicit log unit.
-    pub version: u32,
+    pub version:    u32,
     /// `h_len` — length of the data region in bytes, 64-bit aligned.
-    pub len: u32,
+    pub len:        u32,
     /// `h_lsn` — this record's LSN.
-    pub lsn: XlogLsn,
+    pub lsn:        XlogLsn,
     /// `h_tail_lsn` — the LSN of the first record with buffers not yet committed,
     /// which is where recovery resumes.
-    pub tail_lsn: XlogLsn,
+    pub tail_lsn:   XlogLsn,
     /// `h_crc` — **little-endian**, unlike everything around it.
-    pub crc: u32,
+    pub crc:        u32,
     /// `h_prev_block` — the block number of the previous log record.
     pub prev_block: u32,
     /// `h_num_logops` — how many operations this record carries.
     pub num_logops: u32,
     /// `h_fmt` — `XLOG_FMT_LINUX_LE` is 1, `XLOG_FMT_LINUX_BE` is 2.
-    pub fmt: u32,
+    pub fmt:        u32,
     /// `h_fs_uuid` — the file system's identifier.
-    pub fs_uuid: [u8; 16],
+    pub fs_uuid:    [u8; 16],
     /// `h_size` — iclog size, present only for log version 2.
-    pub size: u32,
+    pub size:       u32,
 }
 
 impl XlogRecHeader {
@@ -216,20 +216,20 @@ impl XlogRecHeader {
         }
         let be64 = |i: usize| u64::from_be_bytes(block[i..i + 8].try_into().unwrap());
         Ok(Self {
-            magicno: w(0),
-            cycle: w(1),
-            version: w(2),
-            len: w(3),
-            lsn: be64(4).into(),
-            tail_lsn: be64(6).into(),
-            crc: u32::from_le_bytes(block[32..36].try_into().unwrap()),
+            magicno:    w(0),
+            cycle:      w(1),
+            version:    w(2),
+            len:        w(3),
+            lsn:        be64(4).into(),
+            tail_lsn:   be64(6).into(),
+            crc:        u32::from_le_bytes(block[32..36].try_into().unwrap()),
             prev_block: w(9),
             num_logops: w(10),
-            fmt: w(XLOG_HEADER_CYCLE_SIZE / 4),
-            fs_uuid: block[XLOG_HEADER_CYCLE_SIZE / 4 + 4..XLOG_HEADER_CYCLE_SIZE / 4 + 20]
+            fmt:        w(XLOG_HEADER_CYCLE_SIZE / 4),
+            fs_uuid:    block[XLOG_HEADER_CYCLE_SIZE / 4 + 4..XLOG_HEADER_CYCLE_SIZE / 4 + 20]
                 .try_into()
                 .unwrap(),
-            size: w(XLOG_HEADER_CYCLE_SIZE / 4 + 20),
+            size:       w(XLOG_HEADER_CYCLE_SIZE / 4 + 20),
         })
     }
 }
@@ -240,15 +240,15 @@ impl XlogRecHeader {
 /// bytes rather than ten.
 pub struct XlogOpHeader {
     /// `oh_tid` — the transaction this operation belongs to.
-    pub tid: u32,
+    pub tid:      u32,
     /// `oh_len` — bytes of data that follow.
-    pub len: u32,
+    pub len:      u32,
     /// `oh_clientid` — [XFS_TRANSACTION] or [XFS_LOG].
     pub clientid: u8,
     /// `oh_flags` — any of the `XLOG_*_TRANS` flags.
-    pub flags: u8,
+    pub flags:    u8,
     /// `oh_res2` — padding, for alignment.
-    pub res2: u16,
+    pub res2:     u16,
 }
 
 impl XlogOpHeader {
@@ -260,11 +260,11 @@ impl XlogOpHeader {
             return Err(FsError::corrupt("a log operation header is truncated"));
         }
         Ok(Self {
-            tid: u32::from_be_bytes(b[0..4].try_into().unwrap()),
-            len: u32::from_be_bytes(b[4..8].try_into().unwrap()),
+            tid:      u32::from_be_bytes(b[0..4].try_into().unwrap()),
+            len:      u32::from_be_bytes(b[4..8].try_into().unwrap()),
             clientid: b[8],
-            flags: b[9],
-            res2: u16::from_be_bytes(b[10..12].try_into().unwrap()),
+            flags:    b[9],
+            res2:     u16::from_be_bytes(b[10..12].try_into().unwrap()),
         })
     }
 

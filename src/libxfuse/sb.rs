@@ -185,40 +185,40 @@ bitflags! {
 #[derive(Clone, Copy, Debug)]
 pub struct Sb {
     // sb_magicnum: u32,
-    pub sb_blocksize: u32,
-    pub sb_dblocks: XfsRfsblock,
-    pub sb_rblocks: XfsRfsblock,
+    pub sb_blocksize:      u32,
+    pub sb_dblocks:        XfsRfsblock,
+    pub sb_rblocks:        XfsRfsblock,
     // sb_rextents: XfsRtblock,
-    pub sb_uuid: Uuid,
+    pub sb_uuid:           Uuid,
     #[allow(dead_code)] // Read by `log_blocks`, which the log module's tests use.
     pub sb_logstart: XfsFsblock,
-    pub sb_rootino: XfsIno,
+    pub sb_rootino:        XfsIno,
     // sb_rbmino: XfsIno,
     // sb_rsumino: XfsIno,
     // sb_rextsize: XfsAgblock,
-    pub sb_agblocks: XfsAgblock,
-    pub sb_agcount: XfsAgnumber,
+    pub sb_agblocks:       XfsAgblock,
+    pub sb_agcount:        XfsAgnumber,
     // sb_rbmblocks: XfsExtlen,
-    pub sb_logblocks: XfsExtlen,
-    sb_versionnum: u16,
+    pub sb_logblocks:      XfsExtlen,
+    sb_versionnum:         u16,
     // sb_sectsize: u16,
-    pub sb_inodesize: u16,
+    pub sb_inodesize:      u16,
     /// Inodes per file system block, as the format stores it; its log2 is
     /// [`Self::sb_inopblog`], which is what the inode number is decoded with.
     #[allow(dead_code)] // Its log2, `sb_inopblog`, is what the inode number uses.
     pub sb_inopblock: u16,
     // sb_fname: [u8; 12],
-    pub sb_blocklog: u8,
+    pub sb_blocklog:       u8,
     // sb_sectlog: u8,
-    pub sb_inodelog: u8,
-    pub sb_inopblog: u8,
-    pub sb_agblklog: u8,
+    pub sb_inodelog:       u8,
+    pub sb_inopblog:       u8,
+    pub sb_agblklog:       u8,
     // sb_rextslog: u8,
     // sb_inprogress: u8,
     // sb_imax_pct: u8,
-    pub sb_icount: u64,
-    pub sb_ifree: u64,
-    pub sb_fdblocks: u64,
+    pub sb_icount:         u64,
+    pub sb_ifree:          u64,
+    pub sb_fdblocks:       u64,
     // sb_frextents: u64,
     // sb_uquotino: XfsIno,
     // sb_gquotino: XfsIno,
@@ -228,15 +228,15 @@ pub struct Sb {
     // sb_inoalignmt: XfsExtlen,
     // sb_unit: u32,
     // sb_width: u32,
-    pub sb_dirblklog: u8,
+    pub sb_dirblklog:      u8,
     // sb_logsectlog: u8,
     // sb_logsectsize: u16,
     // sb_logsunit: u32,
     /// The basic block size, which is the granularity of the file system's
     /// metadata addressing.  It is the sector size the file system was made
     /// on, and it is not always a whole file system block.
-    sb_sectsize: u16,
-    sb_features2: SbFeatures2,
+    sb_sectsize:           u16,
+    sb_features2:          SbFeatures2,
     // sb_bad_features2: u32,
     // sb_features_compat: u32,
     /// Features that only make sense on a read-only file system, such as
@@ -244,9 +244,9 @@ pub struct Sb {
     sb_features_ro_compat: u32,
     // sb_features_incompat: u32,
     // sb_features_log_incompat: u32,
-    sb_features_incompat: SbFeaturesIncompat,
+    sb_features_incompat:  SbFeaturesIncompat,
     /// File system level flags, such as "this file system is read-only".
-    sb_flags: u8,
+    sb_flags:              u8,
 }
 
 /// Where an inode number says an inode is.
@@ -265,13 +265,13 @@ pub struct Sb {
 #[allow(dead_code)] // The mapping the inode work is built on; nothing reads it yet.
 pub struct InoAddr {
     /// The allocation group that owns the inode.
-    pub agno: u32,
+    pub agno:  u32,
     /// The inode's number within that group.
     pub agino: u32,
     /// The block within the group that holds it.
     pub agbno: u32,
     /// Which of the inodes in that block it is.
-    pub slot: u16,
+    pub slot:  u16,
 }
 
 impl Sb {

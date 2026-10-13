@@ -83,9 +83,9 @@ pub struct FsCapabilities {
     /// The features that make a read-write mount unsafe right now.
     write_blockers: Vec<&'static str>,
     /// True when the image can be mounted read-write.
-    writable: bool,
+    writable:       bool,
     /// True when a real-time device is in use.
-    realtime: bool,
+    realtime:       bool,
 }
 
 impl FsCapabilities {

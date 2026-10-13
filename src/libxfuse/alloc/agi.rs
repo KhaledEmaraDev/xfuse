@@ -92,7 +92,7 @@ const XFS_AGI_MAGIC: u32 = 0x5841_4749; // "XAGI"
 /// One group's inode header.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Agi {
-    bytes: Box<[u8]>,
+    bytes:   Box<[u8]>,
     has_crc: bool,
 }
 

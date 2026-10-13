@@ -40,8 +40,8 @@ mod libxfuse;
 struct App {
     /// Mount options, comma delimited.
     #[clap(short = 'o', long, value_delimiter(','))]
-    options: Vec<String>,
-    device: PathBuf,
+    options:    Vec<String>,
+    device:     PathBuf,
     mountpoint: String,
 
     /// Run in the foreground

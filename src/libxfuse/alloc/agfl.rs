@@ -112,13 +112,13 @@ mod offset {
 /// One allocation group's free list.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Agfl {
-    bytes: Box<[u8]>,
-    has_crc: bool,
+    bytes:      Box<[u8]>,
+    has_crc:    bool,
     has_header: bool,
     /// Where the array of block numbers begins, which is one slot later on a
     /// file system that has a checksum in the header.
-    array_at: usize,
-    entries: u32,
+    array_at:   usize,
+    entries:    u32,
 }
 
 impl Agfl {
@@ -471,7 +471,7 @@ pub struct AgflWindow {
     /// The first live slot.
     pub first: u32,
     /// The last live slot, inclusive.
-    pub last: u32,
+    pub last:  u32,
     /// How many slots are live.
     pub count: u32,
 }
@@ -497,7 +497,7 @@ impl AgflWindow {
     pub const fn empty() -> Self {
         AgflWindow {
             first: 0,
-            last: 0,
+            last:  0,
             count: 0,
         }
     }

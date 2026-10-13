@@ -36,7 +36,8 @@ use std::{
 use bincode_next::{
     de::{read::Reader, Decoder},
     error::DecodeError,
-    impl_borrow_decode, Decode,
+    impl_borrow_decode,
+    Decode,
 };
 use byteorder::{BigEndian, ReadBytesExt};
 
@@ -75,14 +76,14 @@ pub fn hashname(name: &OsStr) -> XfsDahash {
 #[derive(Debug, Decode)]
 pub struct XfsDaBlkinfo {
     pub forw: u32,
-    _back: u32,
-    _magic: u16,
-    _pad: u16,
+    _back:    u32,
+    _magic:   u16,
+    _pad:     u16,
 }
 
 #[derive(Debug)]
 pub struct XfsDa3Blkinfo {
-    pub forw: u32,
+    pub forw:  u32,
     // _back: u32
     pub magic: u16,
     // _pad: u16
@@ -113,7 +114,7 @@ impl_borrow_decode!(XfsDa3Blkinfo);
 
 #[derive(Debug, Decode)]
 struct XfsDaNodeHdr {
-    _info: XfsDaBlkinfo,
+    _info:     XfsDaBlkinfo,
     pub count: u16,
     pub level: u16,
 }
@@ -143,7 +144,7 @@ impl_borrow_decode!(XfsDa3NodeHdr);
 #[derive(Debug, Decode)]
 pub struct XfsDa3NodeEntry {
     pub hashval: XfsDahash,
-    pub before: XfsDablk,
+    pub before:  XfsDablk,
 }
 
 impl XfsDa3NodeEntry {
@@ -160,10 +161,10 @@ impl XfsDa3NodeEntry {
 #[derive(Debug)]
 pub struct XfsDa3Intnode {
     pub magic: u16,
-    level: u16,
+    level:     u16,
     //hdr: XfsDa3NodeHdr,
     pub btree: Vec<XfsDa3NodeEntry>,
-    children: RefCell<BTreeMap<XfsDablk, Self>>,
+    children:  RefCell<BTreeMap<XfsDablk, Self>>,
 }
 
 impl XfsDa3Intnode {

@@ -41,7 +41,12 @@ use super::{
     da_btree::hashname,
     definitions::{XfsDahash, XFS_DIR2_BLOCK_MAGIC, XFS_DIR3_BLOCK_MAGIC, *},
     dir3::{
-        Dir2DataEntry, Dir2DataHdr, Dir2DataUnused, Dir2LeafEntry, Dir3, Dir3DataHdr,
+        Dir2DataEntry,
+        Dir2DataHdr,
+        Dir2DataUnused,
+        Dir2LeafEntry,
+        Dir3,
+        Dir3DataHdr,
         XfsDir2Dataptr,
     },
     sb::Sb,
@@ -61,9 +66,9 @@ impl Dir2BlockTail {
 
 #[derive(Debug)]
 pub struct Dir2BlockDisk {
-    pub leaf: Vec<Dir2LeafEntry>,
-    tail: Dir2BlockTail,
-    raw: Vec<u8>,
+    pub leaf:    Vec<Dir2LeafEntry>,
+    tail:        Dir2BlockTail,
+    raw:         Vec<u8>,
     /// Start of directory entries within the directory block
     data_offset: usize,
 }
@@ -121,12 +126,12 @@ impl Dir2BlockDisk {
 
 #[derive(Debug)]
 pub struct Dir2Block {
-    ents: Vec<Dir2LeafEntry>,
-    raw: Box<[u8]>,
+    ents:        Vec<Dir2LeafEntry>,
+    raw:         Box<[u8]>,
     /// Start of directory entries within the directory block
     data_offset: usize,
     /// Tail of the block directory
-    tail: Dir2BlockTail,
+    tail:        Dir2BlockTail,
 }
 
 impl Dir2Block {
@@ -146,10 +151,10 @@ impl Dir2Block {
         raw.truncate(data_len as usize);
 
         Dir2Block {
-            raw: raw.into(),
-            ents: dir_disk.leaf,
+            raw:         raw.into(),
+            ents:        dir_disk.leaf,
             data_offset: dir_disk.data_offset,
-            tail: dir_disk.tail,
+            tail:        dir_disk.tail,
         }
     }
 
@@ -426,8 +431,8 @@ impl Dir2Block {
         let entry_len = Dir2DataEntry::get_length(sb, &self.raw[offset..]);
         let unused = Dir2DataUnused {
             freetag: 0xffff,
-            length: entry_len as u16,
-            tag: entry.tag,
+            length:  entry_len as u16,
+            tag:     entry.tag,
         };
         let mut buf = Vec::with_capacity(entry_len as usize);
         buf.extend_from_slice(&unused.freetag.to_be_bytes());

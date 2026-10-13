@@ -77,14 +77,14 @@ pub enum DiA {
 #[derive(Debug)]
 pub struct Dinode {
     pub di_core: DinodeCore,
-    pub di_u: DiU,
-    pub di_a: Option<DiA>,
+    pub di_u:    DiU,
+    pub di_a:    Option<DiA>,
     /// Cache of this inode's directory object, if any.
-    directory: Option<Directory>,
+    directory:   Option<Directory>,
     /// Cache of this inode's attribute object, if any
-    attributes: Option<Attributes>,
+    attributes:  Option<Attributes>,
     /// Cache of this inode's extent map, if any
-    file: Option<ExtentMap>,
+    file:        Option<ExtentMap>,
 }
 
 impl Dinode {

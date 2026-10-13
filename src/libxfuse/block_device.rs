@@ -105,12 +105,12 @@ impl Access {
 /// underlying positional I/O does not disturb a shared cursor.
 #[derive(Debug)]
 pub struct BlockDevice {
-    file: File,
+    file:       File,
     /// Size of the image in bytes.  It should not change while mounted.
-    size: u64,
+    size:       u64,
     /// The smallest unit of I/O the device can perform.
     sectorsize: usize,
-    access: Access,
+    access:     Access,
 }
 
 impl BlockDevice {

@@ -87,7 +87,7 @@ impl BlockState {
 #[derive(Debug)]
 struct CachedBlock {
     state: BlockState,
-    data: Vec<u8>,
+    data:  Vec<u8>,
 }
 
 /// A cache of fixed-size file system blocks, keyed by their byte offset in the
@@ -95,13 +95,13 @@ struct CachedBlock {
 #[derive(Debug)]
 pub struct BlockCache {
     blocksize: usize,
-    blocks: HashMap<u64, CachedBlock>,
+    blocks:    HashMap<u64, CachedBlock>,
     /// Insertion order, so that the cache can evict the block that has been
     /// resident the longest.
-    order: VecDeque<u64>,
+    order:     VecDeque<u64>,
     /// The most blocks that may be resident at once.  A dirty block always
     /// counts against this limit.
-    limit: usize,
+    limit:     usize,
 }
 
 impl BlockCache {

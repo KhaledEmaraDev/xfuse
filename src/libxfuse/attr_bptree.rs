@@ -40,7 +40,11 @@ use super::{
     btree::{Btree, BtreeRoot},
     da_btree::{hashname, XfsDa3Intnode},
     definitions::{
-        XfsDablk, XfsFsblock, XFS_ATTR3_LEAF_MAGIC, XFS_ATTR_LEAF_MAGIC, XFS_DA3_NODE_MAGIC,
+        XfsDablk,
+        XfsFsblock,
+        XFS_ATTR3_LEAF_MAGIC,
+        XFS_ATTR_LEAF_MAGIC,
+        XFS_DA3_NODE_MAGIC,
         XFS_DA_NODE_MAGIC,
     },
     sb::Sb,
@@ -100,11 +104,11 @@ impl AttrBtreeBlock0 {
 
 #[derive(Debug)]
 pub struct AttrBtree {
-    btree: BtreeRoot,
+    btree:      BtreeRoot,
     total_size: i64,
-    node: AttrBtreeBlock0,
+    node:       AttrBtreeBlock0,
     /// A cache of leaf blocks, indexed by directory block number
-    leaves: RefCell<BTreeMap<XfsDablk, AttrLeafblock>>,
+    leaves:     RefCell<BTreeMap<XfsDablk, AttrLeafblock>>,
 }
 
 impl AttrBtree {

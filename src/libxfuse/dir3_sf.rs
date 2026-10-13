@@ -64,9 +64,9 @@ use super::{
 
 #[derive(Debug, Clone)]
 pub struct Dir2SfHdr {
-    pub count: u8,
+    pub count:   u8,
     pub i8count: u8,
-    pub parent: XfsIno,
+    pub parent:  XfsIno,
 }
 
 impl<Ctx> Decode<Ctx> for Dir2SfHdr {
@@ -88,9 +88,9 @@ impl<Ctx> Decode<Ctx> for Dir2SfHdr {
 
 #[derive(Debug, Clone)]
 struct Dir2SfEntry32 {
-    offset: u16,
-    name: OsString,
-    ftype: Option<u8>,
+    offset:  u16,
+    name:    OsString,
+    ftype:   Option<u8>,
     inumber: u32,
 }
 
@@ -120,9 +120,9 @@ impl<Ctx> Decode<Ctx> for Dir2SfEntry32 {
 
 #[derive(Debug, Clone)]
 struct Dir2SfEntry64 {
-    offset: u16,
-    name: OsString,
-    ftype: Option<u8>,
+    offset:  u16,
+    name:    OsString,
+    ftype:   Option<u8>,
     inumber: XfsIno,
 }
 
@@ -168,9 +168,9 @@ impl<Ctx> Decode<Ctx> for Dir2SfEntry64 {
 impl From<Dir2SfEntry32> for Dir2SfEntry64 {
     fn from(e32: Dir2SfEntry32) -> Self {
         Self {
-            offset: e32.offset,
-            name: e32.name,
-            ftype: e32.ftype,
+            offset:  e32.offset,
+            name:    e32.name,
+            ftype:   e32.ftype,
             inumber: e32.inumber.into(),
         }
     }
@@ -267,13 +267,13 @@ impl Dir3 for Dir2Sf {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)] // Used as soon as a B+tree or block directory needs on-disk entries.
 pub struct SfEntry {
-    pub name: Vec<u8>,
-    pub ftype: u8,
+    pub name:    Vec<u8>,
+    pub ftype:   u8,
     /// Assigned once when the entry is created and **never rewritten**.  Measured:
     /// removing the first and last entries of a four-entry directory moved the
     /// survivors from byte 15 and 24 to byte 6 and 15, and their offsets stayed 112
     /// and 128.
-    pub offset: u16,
+    pub offset:  u16,
     pub inumber: XfsIno,
 }
 
@@ -305,14 +305,14 @@ pub const SF_OFFSET_STEP: u16 = 16;
 #[allow(dead_code)] // Used as soon as namespace mutation calls it; only its own tests do now.
 pub struct ShortformDirectory {
     /// `di_forkoff`-relative parent, i.e. the inode `..` refers to.
-    pub parent: XfsIno,
+    pub parent:  XfsIno,
     /// Whether inode numbers are 64 bits.  Also `i8count` in the header, which is
     /// how the format records the choice it made, so it is read rather than derived.
     pub i8count: bool,
     /// Whether entries carry the file-type byte.  This is a file-system feature, not
     /// a per-directory one, and getting it wrong adds or removes a byte from every
     /// entry -- which is why `Dir2Sf` assuming `true` is a defect and this is not.
-    pub ftype: bool,
+    pub ftype:   bool,
     /// On-disk entries, in on-disk order.
     pub entries: Vec<SfEntry>,
 }

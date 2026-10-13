@@ -1,5 +1,6 @@
 use std::{
-    fmt, fs,
+    fmt,
+    fs,
     io::Read,
     path::PathBuf,
     process::Command,

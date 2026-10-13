@@ -28,17 +28,16 @@
 
 use bincode_next::{de::Decoder, error::DecodeError, Decode, Encode};
 
-use super::definitions::*;
-use super::inode::EXTENT_REC_SIZE;
+use super::{definitions::*, inode::EXTENT_REC_SIZE};
 
 #[derive(Debug, Clone, Copy)]
 pub struct BmbtRec {
-    pub br_startoff: XfsFileoff,
+    pub br_startoff:   XfsFileoff,
     pub br_startblock: XfsFsblock,
     pub br_blockcount: XfsFilblks,
     /// If set, indicates that the extent has been preallocated but has not yet been written
     /// (unwritten extent)
-    pub br_flag: bool,
+    pub br_flag:       bool,
 }
 
 impl BmbtRec {
@@ -264,22 +263,22 @@ mod tests {
     fn map_dblock() {
         let bmx = Bmx::new(&[
             BmbtRec {
-                br_startoff: 0,
+                br_startoff:   0,
                 br_startblock: 20,
                 br_blockcount: 2,
-                br_flag: false,
+                br_flag:       false,
             },
             BmbtRec {
-                br_startoff: 2,
+                br_startoff:   2,
                 br_startblock: 30,
                 br_blockcount: 3,
-                br_flag: false,
+                br_flag:       false,
             },
             BmbtRec {
-                br_startoff: 5,
+                br_startoff:   5,
                 br_startblock: 40,
                 br_blockcount: 2,
-                br_flag: false,
+                br_flag:       false,
             },
         ]);
 
@@ -296,14 +295,17 @@ mod tests {
     #[test]
     fn round_trip_16_byte_record() {
         let rec = BmbtRec {
-            br_startoff: 0,
+            br_startoff:   0,
             br_startblock: 2272,
             br_blockcount: 8,
-            br_flag: false,
+            br_flag:       false,
         };
         let mut buf = [0u8; EXTENT_REC_SIZE];
         rec.to_bytes(&mut buf);
-        assert_eq!(&buf[..], &[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0x1c, 0, 0, 8]);
+        assert_eq!(
+            &buf[..],
+            &[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0x1c, 0, 0, 8]
+        );
         let decoded = BmbtRec::from_bytes(&buf).unwrap();
         assert_eq!(decoded.br_startoff, 0);
         assert_eq!(decoded.br_startblock, 2272);

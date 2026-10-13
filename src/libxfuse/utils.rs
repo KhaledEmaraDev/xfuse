@@ -28,17 +28,33 @@
 use bincode_next::{
     de::{read::Reader, Decoder},
     error::DecodeError,
-    impl_borrow_decode, Decode,
+    impl_borrow_decode,
+    Decode,
 };
 use fuser::FileType;
 use libc::{
-    c_int, mode_t, ENOENT, S_IFBLK, S_IFCHR, S_IFDIR, S_IFIFO, S_IFLNK, S_IFMT, S_IFREG, S_IFSOCK,
+    c_int,
+    mode_t,
+    ENOENT,
+    S_IFBLK,
+    S_IFCHR,
+    S_IFDIR,
+    S_IFIFO,
+    S_IFLNK,
+    S_IFMT,
+    S_IFREG,
+    S_IFSOCK,
 };
 use tracing::error;
 
 use super::dir3::{
-    XFS_DIR3_FT_BLKDEV, XFS_DIR3_FT_CHRDEV, XFS_DIR3_FT_DIR, XFS_DIR3_FT_FIFO,
-    XFS_DIR3_FT_REG_FILE, XFS_DIR3_FT_SOCK, XFS_DIR3_FT_SYMLINK,
+    XFS_DIR3_FT_BLKDEV,
+    XFS_DIR3_FT_CHRDEV,
+    XFS_DIR3_FT_DIR,
+    XFS_DIR3_FT_FIFO,
+    XFS_DIR3_FT_REG_FILE,
+    XFS_DIR3_FT_SOCK,
+    XFS_DIR3_FT_SYMLINK,
 };
 
 /// xfs-fuse UUID type

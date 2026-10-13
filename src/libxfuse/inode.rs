@@ -198,11 +198,11 @@ const fn literal_area_offset(version: i8) -> usize {
 /// everything that must be consistent with those changes.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RawDinode {
-    bytes: Box<[u8]>,
+    bytes:   Box<[u8]>,
     version: i8,
     /// Set when a field has been changed, so that the checksum and the change
     /// counter are only touched when there is something to protect.
-    dirty: bool,
+    dirty:   bool,
 }
 
 impl RawDinode {
@@ -245,9 +245,9 @@ impl RawDinode {
     /// tree.
     pub fn unused(inode_size: usize) -> Self {
         RawDinode {
-            bytes: vec![0u8; inode_size].into_boxed_slice(),
+            bytes:   vec![0u8; inode_size].into_boxed_slice(),
             version: 0,
-            dirty: true,
+            dirty:   true,
         }
     }
 
@@ -909,10 +909,10 @@ impl RawDinode {
                 extents.insert(
                     at,
                     BmbtRec {
-                        br_startoff: first,
+                        br_startoff:   first,
                         br_startblock: fsb,
                         br_blockcount: u64::from(len),
-                        br_flag: false,
+                        br_flag:       false,
                     },
                 );
             }
@@ -1573,16 +1573,16 @@ mod t {
         let mut inode = RawDinode::from_bytes(bytes.to_vec()).unwrap();
         let extents = [
             BmbtRec {
-                br_startoff: 0,
+                br_startoff:   0,
                 br_startblock: 100,
                 br_blockcount: 4,
-                br_flag: false,
+                br_flag:       false,
             },
             BmbtRec {
-                br_startoff: 4,
+                br_startoff:   4,
                 br_startblock: 200,
                 br_blockcount: 2,
-                br_flag: true,
+                br_flag:       true,
             },
         ];
         inode.set_core_extents(&extents).unwrap();

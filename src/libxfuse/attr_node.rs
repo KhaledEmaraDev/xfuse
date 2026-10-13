@@ -46,11 +46,11 @@ use super::{
 
 #[derive(Debug)]
 pub struct AttrNode {
-    pub bmx: Bmx,
-    pub node: XfsDa3Intnode,
+    pub bmx:        Bmx,
+    pub node:       XfsDa3Intnode,
     pub total_size: i64,
     /// A cache of leaf blocks, indexed by directory block number
-    leaves: RefCell<BTreeMap<XfsDablk, AttrLeafblock>>,
+    leaves:         RefCell<BTreeMap<XfsDablk, AttrLeafblock>>,
 }
 
 impl AttrNode {

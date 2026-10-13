@@ -42,8 +42,8 @@ use super::{
 
 #[derive(Debug)]
 pub struct AttrLeaf {
-    pub bmx: Bmx,
-    pub leaf: AttrLeafblock,
+    pub bmx:        Bmx,
+    pub leaf:       AttrLeafblock,
     pub total_size: i64,
 }
 

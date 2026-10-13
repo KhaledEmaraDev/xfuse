@@ -62,7 +62,7 @@ impl_borrow_decode!(XfsDinodeFmt);
 
 #[derive(Debug, Decode, Default)]
 pub struct XfsTimestamp {
-    pub t_sec: i32,
+    pub t_sec:  i32,
     pub t_nsec: u32,
 }
 
@@ -92,34 +92,34 @@ mod constants {
 #[cfg_attr(test, derive(Default))]
 pub struct DinodeCore {
     //_di_magic: u16,
-    pub di_mode: u16,
+    pub di_mode:    u16,
     pub di_version: i8,
-    pub di_format: XfsDinodeFmt,
+    pub di_format:  XfsDinodeFmt,
     //_di_onlink: u16,
-    pub di_uid: u32,
-    pub di_gid: u32,
+    pub di_uid:     u32,
+    pub di_gid:     u32,
     //_di_nlink:   u32,
-    nlink: u32,
+    nlink:          u32,
     //_di_projid: u16,
     //_di_projid_hi: u16,
     //_di_pad: [u8; 6],
     //_di_flushiter: u16,
-    pub di_atime: XfsTimestamp,
-    pub di_mtime: XfsTimestamp,
-    pub di_ctime: XfsTimestamp,
-    pub di_size: XfsFsize,
+    pub di_atime:   XfsTimestamp,
+    pub di_mtime:   XfsTimestamp,
+    pub di_ctime:   XfsTimestamp,
+    pub di_size:    XfsFsize,
     pub di_nblocks: XfsRfsblock,
     //_di_extsize: XfsExtlen,
     /// Number of extents in the data fork
-    pub nextents: u64,
+    pub nextents:   u64,
     /// Number of extents in the attr fork
-    pub anextents: u32,
+    pub anextents:  u32,
     pub di_forkoff: u8,
     pub di_aformat: XfsDinodeFmt,
     //_di_dmevmask: u32,
     //_di_dmstate: u16,
-    pub di_flags: u16,
-    pub di_gen: u32,
+    pub di_flags:   u16,
+    pub di_gen:     u32,
 
     //_di_next_unlinked: u32,
 
@@ -131,7 +131,7 @@ pub struct DinodeCore {
     //_di_cowextsize: u32,
     //_di_pad2: [u8; 12],
     pub di_crtime: XfsTimestamp,
-    pub di_ino: u64,
+    pub di_ino:    u64,
     //_di_uuid: Uuid,
     /// Device number for Dev-formatted inodes (mknod).  Decoded in
     /// `Dinode::from_bytes`, not by this `Decode` implementation, because
