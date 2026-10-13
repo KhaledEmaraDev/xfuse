@@ -984,10 +984,9 @@ impl BmbtLeafBlock {
     /// Redistribute records with a sibling leaf to maintain minimum occupancy.
     /// Returns true if redistribution was successful.
     #[allow(dead_code)]
-    pub fn redistribute_with(&mut self, other: &mut BmbtLeafBlock) -> bool {
+    pub fn redistribute_with(&mut self, other: &mut BmbtLeafBlock, sb_blocksize: usize, has_crc: bool) -> bool {
         let total = self.records.len() + other.records.len();
-        if total < 2 * Self::min_records(0, false) {
-            // Can't redistribute while maintaining minimum
+        if total < 2 * Self::min_records(sb_blocksize, has_crc) {
             return false;
         }
         // Combine and split evenly
@@ -1517,8 +1516,8 @@ impl BtreeRoot {
         }];
         self.ptrs = vec![leaf_block];
 
-        // Note: The inode itself needs to be updated with the new root
-        // This requires coordination with the inode write path
+        // Persist the new root to the inode
+        self.write_root_to_inode(sb, tx)?;
         Ok(())
     }
 
@@ -1586,30 +1585,30 @@ impl BtreeRoot {
             match leaf.insert_record(record, sb.sb_blocksize as usize, sb.has_crc()) {
                 None => InsertResult::NoSplit,
                 Some((new_leaf, separator_key)) => {
-                    // Write the modified leaf back
-                    let hdr = BtreeLblockHdr {
-                        blkno: child_ptr,
-                        lsn: 0,
-                        leftsib: BMBT_NULL_PTR,
-                        rightsib: BMBT_NULL_PTR,
-                        owner: 0,
-                        uuid: sb.sb_uuid.as_image_bytes(),
-                    };
-                    let leaf_bytes =
-                        leaf.to_bytes_auto(&hdr, sb.sb_blocksize as usize, sb.has_crc());
-                    tx.write_bytes(offset, &leaf_bytes).map_err(|e| e.errno())?;
-
                     // Allocate a new block for the split leaf
                     let agno = (child_ptr >> sb.sb_agblklog) as u32;
                     let run_opt = allocate_in_group(tx, sb, agno, 1).map_err(|e| e.errno())?;
                     let run = run_opt.ok_or(libc::ENOSPC)?;
-                    let new_block = run.start as XfsFsblock;
+                    let new_block = (agno as u64 * sb.sb_agblocks as u64) + run.start as u64;
 
-                    // Write the new leaf
+                    // Write old leaf with rightsib pointing to new leaf
+                    let old_hdr = BtreeLblockHdr {
+                        blkno: child_ptr,
+                        lsn: 0,
+                        leftsib: BMBT_NULL_PTR,
+                        rightsib: new_block,
+                        owner: 0,
+                        uuid: sb.sb_uuid.as_image_bytes(),
+                    };
+                    let old_leaf_bytes =
+                        leaf.to_bytes_auto(&old_hdr, sb.sb_blocksize as usize, sb.has_crc());
+                    tx.write_bytes(offset, &old_leaf_bytes).map_err(|e| e.errno())?;
+
+                    // Write new leaf with leftsib pointing to old leaf
                     let new_hdr = BtreeLblockHdr {
                         blkno: new_block,
                         lsn: 0,
-                        leftsib: BMBT_NULL_PTR,
+                        leftsib: child_ptr,
                         rightsib: BMBT_NULL_PTR,
                         owner: 0,
                         uuid: sb.sb_uuid.as_image_bytes(),
@@ -1618,8 +1617,6 @@ impl BtreeRoot {
                         new_leaf.to_bytes_auto(&new_hdr, sb.sb_blocksize as usize, sb.has_crc());
                     tx.write_bytes(sb.fsb_to_offset(new_block), &new_leaf_bytes)
                         .map_err(|e| e.errno())?;
-
-                    // Update sibling pointers if needed (simplified for now)
 
                     InsertResult::SplitLeaf(new_leaf, separator_key, new_block)
                 }
@@ -1735,7 +1732,7 @@ impl BtreeRoot {
         let right_hdr = BtreeLblockHdr {
             blkno: right_block,
             lsn: 0,
-            leftsib: BMBT_NULL_PTR,
+            leftsib: old_root_block,
             rightsib: BMBT_NULL_PTR,
             owner: 0,
             uuid: sb.sb_uuid.as_image_bytes(),
@@ -1753,9 +1750,25 @@ impl BtreeRoot {
         self.ptrs.push(right_block);
         self.bmdr.bb_numrecs = self.keys.len() as u16;
 
-        // 8. Update left sibling (old root) rightsib pointer
-        // Note: This would require updating the old root block's rightsib
-        // For now, we'll skip this as it's a sibling pointer optimization
+        // 8. Update old root block's rightsib pointer to point to right sibling
+        let old_root_hdr = BtreeLblockHdr {
+            blkno: old_root_block,
+            lsn: 0,
+            leftsib: BMBT_NULL_PTR,
+            rightsib: right_block,
+            owner: 0,
+            uuid: sb.sb_uuid.as_image_bytes(),
+        };
+        let old_root_bytes = old_root_intermediate.to_bytes_auto(
+            &old_root_hdr,
+            sb.sb_blocksize as usize,
+            sb.has_crc(),
+        );
+        tx.write_bytes(sb.fsb_to_offset(old_root_block), &old_root_bytes)
+            .map_err(|e| e.errno())?;
+
+        // 9. Persist the new root to the inode
+        self.write_root_to_inode(sb, tx)?;
 
         Ok(())
     }
@@ -1799,30 +1812,30 @@ impl BtreeRoot {
             match leaf.insert_record(record, sb.sb_blocksize as usize, sb.has_crc()) {
                 None => InsertResult::NoSplit,
                 Some((new_leaf, separator_key)) => {
-                    // Write the modified leaf back
-                    let hdr = BtreeLblockHdr {
-                        blkno: child_ptr,
-                        lsn: 0,
-                        leftsib: BMBT_NULL_PTR,
-                        rightsib: BMBT_NULL_PTR,
-                        owner: 0,
-                        uuid: sb.sb_uuid.as_image_bytes(),
-                    };
-                    let leaf_bytes =
-                        leaf.to_bytes_auto(&hdr, sb.sb_blocksize as usize, sb.has_crc());
-                    tx.write_bytes(offset, &leaf_bytes).map_err(|e| e.errno())?;
-
                     // Allocate a new block for the split leaf
                     let agno = (child_ptr >> sb.sb_agblklog) as u32;
                     let run_opt = allocate_in_group(tx, sb, agno, 1).map_err(|e| e.errno())?;
                     let run = run_opt.ok_or(libc::ENOSPC)?;
-                    let new_block = run.start as XfsFsblock;
+                    let new_block = (agno as u64 * sb.sb_agblocks as u64) + run.start as u64;
 
-                    // Write the new leaf
+                    // Write old leaf with rightsib pointing to new leaf
+                    let old_hdr = BtreeLblockHdr {
+                        blkno: child_ptr,
+                        lsn: 0,
+                        leftsib: BMBT_NULL_PTR,
+                        rightsib: new_block,
+                        owner: 0,
+                        uuid: sb.sb_uuid.as_image_bytes(),
+                    };
+                    let old_leaf_bytes =
+                        leaf.to_bytes_auto(&old_hdr, sb.sb_blocksize as usize, sb.has_crc());
+                    tx.write_bytes(offset, &old_leaf_bytes).map_err(|e| e.errno())?;
+
+                    // Write new leaf with leftsib pointing to old leaf
                     let new_hdr = BtreeLblockHdr {
                         blkno: new_block,
                         lsn: 0,
-                        leftsib: BMBT_NULL_PTR,
+                        leftsib: child_ptr,
                         rightsib: BMBT_NULL_PTR,
                         owner: 0,
                         uuid: sb.sb_uuid.as_image_bytes(),
@@ -1898,29 +1911,30 @@ impl BtreeRoot {
                     intermediate.ptrs = all_ptrs;
 
                     // Allocate block for new intermediate node
-                    let agno = (offset >> sb.sb_agblklog) as u32;
+                    let agno = (child_ptr >> sb.sb_agblklog) as u32;
                     let run_opt = allocate_in_group(tx, sb, agno, 1).map_err(|e| e.errno())?;
                     let run = run_opt.ok_or(libc::ENOSPC)?;
-                    let new_block = run.start as XfsFsblock;
+                    let new_block = (agno as u64 * sb.sb_agblocks as u64) + run.start as u64;
 
-                    // Write the modified intermediate node
+                    // Write the modified intermediate node with sibling pointers
                     let hdr = BtreeLblockHdr {
-                        blkno: offset,
+                        blkno: child_ptr,
                         lsn: 0,
                         leftsib: BMBT_NULL_PTR,
-                        rightsib: BMBT_NULL_PTR,
+                        rightsib: new_block,
                         owner: 0,
                         uuid: sb.sb_uuid.as_image_bytes(),
                     };
                     let node_bytes =
                         intermediate.to_bytes_auto(&hdr, sb.sb_blocksize as usize, sb.has_crc());
-                    tx.write_bytes(offset, &node_bytes).map_err(|e| e.errno())?;
+                    tx.write_bytes(sb.fsb_to_offset(child_ptr), &node_bytes)
+                        .map_err(|e| e.errno())?;
 
                     // Write the new intermediate node
                     let new_hdr = BtreeLblockHdr {
                         blkno: new_block,
                         lsn: 0,
-                        leftsib: BMBT_NULL_PTR,
+                        leftsib: child_ptr,
                         rightsib: BMBT_NULL_PTR,
                         owner: 0,
                         uuid: sb.sb_uuid.as_image_bytes(),
@@ -2266,6 +2280,9 @@ impl BtreeRoot {
                             br_startoff: intermediate.keys[0].br_startoff,
                         }];
                         self.ptrs = vec![child_ptr];
+
+                        // Persist the collapsed root to the inode
+                        self.write_root_to_inode(sb, tx)?;
                     }
                 }
             }
@@ -2316,6 +2333,9 @@ impl BtreeRoot {
                     self.bmdr.bb_numrecs = 0;
                     self.keys.clear();
                     self.ptrs.clear();
+
+                    // Persist the collapsed root (level 0 = extents) to the inode
+                    self.write_extents_to_inode(&extents, sb, tx)?;
                 }
             }
         }
@@ -2355,7 +2375,7 @@ impl BtreeRoot {
 
             // Try redistribute
             let mut leaf_mut = leaf.clone();
-            if leaf_mut.redistribute_with(&mut right_leaf) {
+            if leaf_mut.redistribute_with(&mut right_leaf, sb.sb_blocksize as usize, sb.has_crc()) {
                 // Write both leaves back
                 let left_hdr = BtreeLblockHdr {
                     blkno: child_ptr,
@@ -2449,7 +2469,7 @@ impl BtreeRoot {
             // Try redistribute
             let mut left_leaf_mut = left_leaf.clone();
             let mut leaf_mut = leaf.clone();
-            if left_leaf_mut.redistribute_with(&mut leaf_mut) {
+            if left_leaf_mut.redistribute_with(&mut leaf_mut, sb.sb_blocksize as usize, sb.has_crc()) {
                 // Write both leaves back
                 let left_hdr = BtreeLblockHdr {
                     blkno: left_ptr,
@@ -2561,7 +2581,7 @@ impl BtreeRoot {
 
             // Try redistribute
             let mut intermediate_mut = intermediate.clone();
-            if intermediate_mut.redistribute_with(&mut right_intermediate) {
+            if intermediate_mut.redistribute_with(&mut right_intermediate, sb.sb_blocksize as usize, sb.has_crc()) {
                 // Write both intermediates back
                 let left_hdr = BtreeLblockHdr {
                     blkno: child_ptr,
@@ -2663,7 +2683,7 @@ impl BtreeRoot {
             // Try redistribute
             let mut left_intermediate_mut = left_intermediate.clone();
             let mut intermediate_mut = intermediate.clone();
-            if left_intermediate_mut.redistribute_with(&mut intermediate_mut) {
+            if left_intermediate_mut.redistribute_with(&mut intermediate_mut, sb.sb_blocksize as usize, sb.has_crc()) {
                 // Write both intermediates back
                 let left_hdr = BtreeLblockHdr {
                     blkno: left_ptr,
@@ -2985,6 +3005,31 @@ impl BtreeRoot {
     pub fn set_owner(&mut self, owner: XfsIno) {
         self.owner = Some(owner);
     }
+
+    /// Persist this B-tree root back into the inode's literal area.
+    /// Must be called after operations that modify the root (level, keys, ptrs).
+    pub fn write_root_to_inode(
+        &self,
+        sb: &Sb,
+        tx: &mut Transaction<'_>,
+    ) -> Result<(), i32> {
+        let ino = self.owner.ok_or(libc::ENOTSUP)?;
+        let inode_offset = sb.inode_offset(ino);
+        let inode_size = sb.inode_size();
+
+        let inode_bytes = tx
+            .read_bytes(inode_offset, inode_size)
+            .map_err(|e| e.errno())?;
+        let mut raw_inode =
+            RawDinode::from_bytes(inode_bytes).map_err(|_| crate::libxfuse::EUCLEAN)?;
+
+        raw_inode.set_data_btree_root(self).map_err(|e| e.errno())?;
+        raw_inode.finalise();
+
+        tx.write_bytes(inode_offset, raw_inode.as_bytes())
+            .map_err(|e| e.errno())?;
+        Ok(())
+    }
 }
 
 impl BtreePriv for BtreeRoot {
@@ -3194,9 +3239,9 @@ impl BtreeIntermediate {
 
     /// Redistribute key-pointer pairs with a sibling to maintain minimum occupancy.
     #[allow(dead_code)]
-    pub fn redistribute_with(&mut self, other: &mut BtreeIntermediate) -> bool {
+    pub fn redistribute_with(&mut self, other: &mut BtreeIntermediate, sb_blocksize: usize, has_crc: bool) -> bool {
         let total = self.keys.len() + other.keys.len();
-        if total < 2 * BmbtInteriorBlock::min_children(0, false) {
+        if total < 2 * BmbtInteriorBlock::min_children(sb_blocksize, has_crc) {
             // Can't redistribute while maintaining minimum
             return false;
         }
