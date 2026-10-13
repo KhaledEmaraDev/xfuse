@@ -1859,7 +1859,7 @@ mod local_fork_tests {
         // `repair_complaints` hands back `Some` whenever it could run the tool at
         // all, so an **empty** string is repair being happy; only a non-empty one is
         // a complaint.
-        match crate::libfuse::alloc::allocator::t::repair_complaints(copy.path()) {
+        match crate::libxfuse::alloc::allocator::t::repair_complaints(copy.path()) {
             Some(ref c) if !c.is_empty() => {
                 panic!("xfs_repair rejected a written local data fork:\n{c}")
             }

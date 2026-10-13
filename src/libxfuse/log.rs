@@ -388,21 +388,22 @@ mod locate {
         let sb = crate::libxfuse::sb::Sb::from(&mut reader);
         let bs = sb.sb_blocksize as usize;
         let whole = std::fs::read(&path).expect("reading the image");
-        let ls = sb.sb_logstart;
+        let _ls = sb.sb_logstart;
         let magic_at = |off: usize| -> bool {
             off + 4 <= whole.len()
                 && u32::from_be_bytes(whole[off..off + 4].try_into().unwrap())
                     == XLOG_HEADER_MAGIC_NUM
         };
 
-        let mut first = None;
-        let mut last = 0usize;
-        let mut n = 0usize;
+        let _ = magic_at;
+        let mut _first = None;
+        let mut _last = 0usize;
+        let mut _n = 0usize;
         for blk in 0..whole.len() / bs {
             if magic_at(blk * bs) {
-                first.get_or_insert(blk);
-                last = blk;
-                n += 1;
+                _first.get_or_insert(blk);
+                _last = blk;
+                _n += 1;
             }
         }
     }
